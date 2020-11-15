@@ -7,7 +7,7 @@ def main():
     title = "Helical indexing using layer lines"
     st.title(title)
 
-    col1, col2, col3, col4 = st.beta_columns((1.5, 0.5, 0.2, 3.5))
+    col1, col2, col3, col4 = st.beta_columns((1.5, 0.5, 0.25, 3.5))
 
     with col1:
         with st.beta_expander(label="README", expanded=False):
