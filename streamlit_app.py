@@ -7,12 +7,11 @@ def main():
     title = "Helical indexing using layer lines"
     st.title(title)
 
-    col1, col2, col3, col4 = st.beta_columns((1.5, 0.5, 0.25, 3.5))
+    col1, col2, col3, col4 = st.beta_columns((1.5, 0.75, 0.25, 3.5))
 
     with col1:
         with st.beta_expander(label="README", expanded=False):
-            st.write("This Web app considers a biological helical structure as the product of a continous helix and a set of parallel planes, and based on the covolution theory, the Fourier Transform (FT) of a helical structure would be the convolution of the FT of the continous helix and the FT of the planes. The FT of the continous helix consists of equally spaced layer planes (3D) or layer lines (2D projection) that can be described by Bessel functions of increasing orders (0, +/-1, +/-2, ...) from the Fourier origin (i.e. equator). The spacing between the layer planes/lines is determined by the helical pitch (i.e. the shift along the helical axis for a 360 degree turn of the helix). If the structure has additional cyclic symmetry (for example, C6) around the helical axis, only the layer plane/line orders of integer multiplier of the symmetry (e.g. 0, +/-6, +/-12, ...) are visible. The overall shape of the FT is similar to a X symbol. The FT of the parallel planes consists of equally spaced points along the helical axis (i.e. meridian) with the spacing being determined by the helical rise.\nThe convolution of these two components (X-shaped layer lines and points along the meridian) generates the layer line patterns seen in the power spectra of the projection images of helical structures. The helical indexing task is thus to identify the helical rise, pitch (or twist), and cyclic symmetry that would predict a lay line pattern to explain the observed the layer lines in the power spectra. This Web app allows you to interactively change the helical parameters and superimpose the predicted layer liines on the power spectra to complete the helical indexing task.")
-            st.write("PS: power spectra; X: the X pattern; LL: layer lines; m: indices of the X-patterns along the meridian")
+            st.write("This Web app considers a biological helical structure as the product of a continous helix and a set of parallel planes, and based on the covolution theory, the Fourier Transform (FT) of a helical structure would be the convolution of the FT of the continous helix and the FT of the planes.  \nThe FT of a continous helix consists of equally spaced layer planes (3D) or layer lines (2D projection) that can be described by Bessel functions of increasing orders (0, +/-1, +/-2, ...) from the Fourier origin (i.e. equator). The spacing between the layer planes/lines is determined by the helical pitch (i.e. the shift along the helical axis for a 360 degree turn of the helix). If the structure has additional cyclic symmetry (for example, C6) around the helical axis, only the layer plane/line orders of integer multiplier of the symmetry (e.g. 0, +/-6, +/-12, ...) are visible. The overall shape of the FT is similar to a X symbol.  \nThe FT of the parallel planes consists of equally spaced points along the helical axis (i.e. meridian) with the spacing being determined by the helical rise.  \nThe convolution of these two components (X-shaped layer lines and points along the meridian) generates the layer line patterns seen in the power spectra of the projection images of helical structures. The helical indexing task is thus to identify the helical rise, pitch (or twist), and cyclic symmetry that would predict a lay line pattern to explain the observed the layer lines in the power spectra. This Web app allows you to interactively change the helical parameters and superimpose the predicted layer liines on the power spectra to complete the helical indexing task.  \n  \nPS: power spectra; YP: Y-axis power spectra profile; X: the X pattern; LL: layer lines; m: indices of the X-patterns along the meridian")
         
         label = "Input a url of 2D projection image(s) or an EMDB 3D map:"
         image_url = st.text_input(label=label, value=data_example.url)
@@ -78,6 +77,7 @@ def main():
     with col3:
         st.subheader("Display:")
         show_pwr = st.checkbox(label="PS", value=True)
+        show_yprofile = st.checkbox(label="YP", value=True)
         show_X = st.checkbox(label="X", value=True)
         show_LL = st.checkbox(label="LL", value=True)
         st.subheader("m=")
@@ -91,27 +91,35 @@ def main():
         ny, nx = pwr.shape
         dsy = 1/(ny//2*cutoff_res)
         dsx = 1/(nx//2*cutoff_res)
-        x = np.arange(-nx//2, nx//2)*dsx
-        y = np.arange(-ny//2, ny//2)*dsy
-        tools = 'box_zoom,crosshair,pan,reset,save,wheel_zoom'
-        fig = figure(title_location="below", frame_width=nx, frame_height=ny, 
-            x_axis_label=None, y_axis_label=None, 
-            x_range=(x[0], x[-1]), y_range=(y[0], y[-1]), 
-            tools=tools)
-        fig.grid.visible = False
 
         if show_pwr:
             from bokeh.models import LinearColorMapper
-            color_mapper = LinearColorMapper(palette='Greys256')    # Greys256, Viridis256
-            image = fig.image(image=[pwr], 
-                x=x[0], y=y[0], dw=x[-1]-x[0], dh=y[-1]-y[0], 
-                color_mapper=color_mapper)
-            from bokeh.models.tools import HoverTool
-            image_hover = HoverTool(renderers=[image])
-            fig.add_tools(image_hover)
+            tools = 'box_zoom,crosshair,pan,reset,save,wheel_zoom'
+            fig = figure(title_location="below", frame_width=nx, frame_height=ny, 
+                x_axis_label=None, y_axis_label=None, 
+                x_range=(-nx//2*dsx, nx//2*dsx), y_range=(-ny//2*dsy, ny//2*dsy), 
+                tools=tools)
+            fig.grid.visible = False
             fig.title.text = f"Power Spectra"
             fig.title.align = "center"
             fig.title.text_font_size = "20px"
+
+            sy, sx = np.meshgrid(np.arange(-ny//2, ny//2)*dsy, np.arange(-nx//2, nx//2)*dsx, indexing='ij', copy=False)
+            resx = np.abs(1./sx)
+            resy = np.abs(1./sy)
+            res  = 1./np.hypot(sx, sy)
+
+            source_data = dict(image=[pwr], x=[-nx//2*dsx], y=[-ny//2*dsy], dw=[nx*dsx], dh=[ny*dsy], resx=[resx], resy=[resy], res=[res])
+            from bokeh.models import LinearColorMapper
+            color_mapper = LinearColorMapper(palette='Greys256')    # Greys256, Viridis256
+            image = fig.image(source=source_data, image='image', color_mapper=color_mapper,
+                        x='x', y='y', dw='dw', dh='dh'
+                    )
+            # add hover tool only for the image
+            from bokeh.models.tools import HoverTool
+            tooltips = [("Res", "@resÅ"), ('Res x', '@resxÅ'), ('Res y', '@resyÅ'), ('PS', '@image')]
+            image_hover = HoverTool(renderers=[image], tooltips=tooltips)
+            fig.add_tools(image_hover)
 
         from bokeh.palettes import viridis 
         colors = viridis(ng*2)[::-1]
@@ -135,7 +143,28 @@ def main():
                 color = colors[mi]
                 fig.multi_line(x, y, line_width=4, line_color=color, line_dash="dashed")
 
-        st.bokeh_chart(fig, use_container_width=True)
+        if show_yprofile:
+            y=np.arange(-ny//2, ny//2)*dsy
+            ll_profile = np.max(pwr, axis=1)             # entire layerline
+            m_profile = np.max(pwr[:, nx//2-1:nx//2+2], axis=1)  # meridan only
+
+            from bokeh.layouts import gridplot
+            tools = 'box_zoom,crosshair,hover,pan,reset,save,wheel_zoom'
+            tooltips = [('Res y', '@resyÅ'), ('PS', '$x')]
+            fig_y = figure(frame_width=nx//2, frame_height=ny, y_range=fig.y_range, title=None, tools=tools, tooltips=tooltips)
+            source_data = dict(ll=ll_profile, m=m_profile, y=y, resy=np.abs(1./y))
+            fig_y.line(source=source_data, x='ll', y='y', line_width=2, color='blue')
+            #fig_y.line(source=source_data, x='m',  y='y', line_width=2, color='red')
+
+            # link the crosshair tool
+            from bokeh.models import CrosshairTool
+            crosshair = CrosshairTool(dimensions="both")
+            fig.add_tools(crosshair)
+            fig_y.add_tools(crosshair)
+
+            fig = gridplot([[fig, fig_y]], toolbar_location='right')
+        
+        st.bokeh_chart(fig, use_container_width=False)
 
         return
 
@@ -214,7 +243,7 @@ def compute_power_spectra(data, apix, cutoff_res=0, high_pass_fraction=0):
         ny, nx = pwr.shape
         sfi = int(round(scale_factor))
         pwr = pwr[ny//2-ny0//2:ny//2+ny0//2+sfi, nx//2-nx0//2:nx//2+nx0//2+sfi] 
-    pwr = normalize(pwr, percentile=(5, 95))
+    pwr = normalize(pwr, percentile=(0, 100))
     return pwr
 
 @st.cache(persist=True, show_spinner=False)
@@ -236,7 +265,7 @@ def rotate_image(data, angle=0):
     return data
 
 @st.cache(persist=True, show_spinner=False)
-def normalize(data, percentile=(5, 95)):
+def normalize(data, percentile=(0, 100)):
     p0, p1 = percentile
     vmin, vmax = sorted(np.percentile(data, (p0, p1)))
     data2 = (data-vmin)/(vmax-vmin)
@@ -255,7 +284,7 @@ def get_3d_map_projections(url):
     projs = np.zeros((2, nz, nx))
     for ai, axis in enumerate([1, 2]):
         proj = data.mean(axis=axis)
-        proj = normalize(proj, percentile=(5, 95))
+        proj = normalize(proj, percentile=(0, 100))
         projs[ai] = proj
     return projs, apix
 
@@ -276,6 +305,10 @@ def get_2d_image(url):
         data, apix = get_2d_stack(url)
     elif (url.find("emd_")!=-1 and url.endswith(".map.gz")) or url.endswith(".map") or url.endswith(".mrc"):
         data, apix = get_3d_map_projections(url)
+    elif url.lower().startswith("emd-"):
+        emd_id = url.lower().split("emd-")[-1]
+        url2 = f"ftp://ftp.ebi.ac.uk/pub/databases/emdb/structures/EMD-{emd_id}/map/emd_{emd_id}.map.gz"
+        data, apix = get_3d_map_projections(url2)
     else:
         from skimage.io import imread
         data = imread(url)
