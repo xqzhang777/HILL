@@ -70,7 +70,7 @@ def main():
         st.bokeh_chart(p, use_container_width=True)
 
     data_padded = pad_2d_image(data, pnx, pny)
-    pwr = compute_power_spectra(data_padded, apix=apix, cutoff_res=cutoff_res, high_pass_fraction=0)
+    pwr = compute_power_spectra(data_padded, apix=apix, cutoff_res=cutoff_res, high_pass_fraction=0.004)
     m_groups = compute_layer_line_positions(twist=twist, rise=rise, csym=csym, radius=radius, cutoff_res=cutoff_res)
     ng = len(m_groups)
 
@@ -78,6 +78,7 @@ def main():
         st.subheader("Display:")
         show_pwr = st.checkbox(label="PS", value=True)
         show_yprofile = st.checkbox(label="YP", value=True)
+        show_pseudocolor = st.checkbox(label="Color", value=True)
         show_X = st.checkbox(label="X", value=True)
         show_LL = st.checkbox(label="LL", value=True)
         st.subheader("m=")
@@ -111,7 +112,8 @@ def main():
 
             source_data = dict(image=[pwr], x=[-nx//2*dsx], y=[-ny//2*dsy], dw=[nx*dsx], dh=[ny*dsy], resx=[resx], resy=[resy], res=[res])
             from bokeh.models import LinearColorMapper
-            color_mapper = LinearColorMapper(palette='Greys256')    # Greys256, Viridis256
+            palette = 'Viridis256' if show_pseudocolor else 'Greys256'
+            color_mapper = LinearColorMapper(palette=palette)    # Greys256, Viridis256
             image = fig.image(source=source_data, image='image', color_mapper=color_mapper,
                         x='x', y='y', dw='dw', dh='dh'
                     )
@@ -121,8 +123,11 @@ def main():
             image_hover = HoverTool(renderers=[image], tooltips=tooltips)
             fig.add_tools(image_hover)
 
-        from bokeh.palettes import viridis 
-        colors = viridis(ng*2)[::-1]
+        from bokeh.palettes import viridis, gray
+        if show_pseudocolor:
+            ll_colors = gray(ng*2)[::-1]
+        else:
+            ll_colors = viridis(ng*2)[::-1]
 
         if show_LL:
             x, y = m_groups[0]["LL"]
@@ -133,28 +138,26 @@ def main():
             for mi, m in enumerate(m_groups.keys()):
                 if not show_choices[m]: continue
                 x, y = m_groups[m]["LL"]
-                color = colors[mi]
+                color = ll_colors[mi]
                 fig.ellipse(x, y, width=width, height=height, line_width=4, line_color=color, fill_alpha=0)
 
         if show_X:
             for mi, m in enumerate(m_groups.keys()):
                 if not show_choices[m]: continue
                 x, y = m_groups[m]["X"]
-                color = colors[mi]
+                color = ll_colors[mi]
                 fig.multi_line(x, y, line_width=4, line_color=color, line_dash="dashed")
 
         if show_yprofile:
             y=np.arange(-ny//2, ny//2)*dsy
-            ll_profile = np.max(pwr, axis=1)             # entire layerline
-            m_profile = np.max(pwr[:, nx//2-1:nx//2+2], axis=1)  # meridan only
+            ll_profile = np.mean(pwr, axis=1)             # entire layerline
 
             from bokeh.layouts import gridplot
             tools = 'box_zoom,crosshair,hover,pan,reset,save,wheel_zoom'
             tooltips = [('Res y', '@resyÅ'), ('PS', '$x')]
             fig_y = figure(frame_width=nx//2, frame_height=ny, y_range=fig.y_range, title=None, tools=tools, tooltips=tooltips)
-            source_data = dict(ll=ll_profile, m=m_profile, y=y, resy=np.abs(1./y))
+            source_data = dict(ll=ll_profile, y=y, resy=np.abs(1./y))
             fig_y.line(source=source_data, x='ll', y='y', line_width=2, color='blue')
-            #fig_y.line(source=source_data, x='m',  y='y', line_width=2, color='red')
 
             # link the crosshair tool
             from bokeh.models import CrosshairTool
