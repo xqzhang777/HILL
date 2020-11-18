@@ -40,28 +40,16 @@ def main():
 
     with col2:
         apix = st.number_input('Pixel size (Å/pixel)', value=apix, min_value=0.1, max_value=10., step=0.01, format="%.4f")
-        twist = st.number_input('Twist (°)', value=data_example.twist, min_value=-180.0, max_value=180.0, step=1.0, format="%.2f")
+        pitch_or_twist = st.beta_container()
         rise = st.number_input('Rise (Å)', value=data_example.rise, min_value=-180.0, max_value=180.0, step=1.0, format="%.2f")
         csym = st.number_input('Csym', value=data_example.csym, min_value=1, max_value=16, step=1)
         radius = st.number_input('Radius (Å)', value=data_example.diameter/2., min_value=10.0, max_value=1000.0, step=10., format="%.1f")
         pnx = st.number_input('X-dim padding (pixels)', value=max(nx, 512), min_value=nx, step=2)
         pny = st.number_input('Y-dim padding (pixels)', value=max(ny, 1024), min_value=ny, step=2)
         cutoff_res = st.number_input('Limit FFT to resolution (Å)', value=max(float(round(rise*0.3)), 2*apix), min_value=2*apix, step=1.0)
-        with st.beta_expander(label="Simulate the helix with Gaussians", expanded=False):
-            ball_radius = st.number_input('Gaussian radius (Å)', value=0.0, min_value=0.0, max_value=radius, step=5.0, format="%.1f")
-            az = st.number_input('Azimuthal angle (°)', value=0, min_value=0, max_value=360, step=1, format="%.1f")
-
-    if ball_radius>0:
-        proj = simulate_helix(twist, rise, csym, helical_radius=radius, ball_radius=ball_radius*0.8, ny=data.shape[0], nx=data.shape[1], apix=apix, angle0=az)
-        proj = tapering(proj, fraction=0.3)
-        if angle:
-            image_container = rotated_image
-            image_label = "Rotated image"
-        else:
-            image_container = original_image
-            image_label = "Original image"
-        with image_container:
-            st.image([data, proj], width=data.shape[1], caption=[image_label, "Simulated"], clamp=True)
+        st.subheader("Simulate the helix with Gaussians")
+        ball_radius = st.number_input('Gaussian radius (Å)', value=0.0, min_value=0.0, max_value=radius, step=5.0, format="%.1f")
+        az = st.number_input('Azimuthal angle (°)', value=0, min_value=0, max_value=360, step=1, format="%.1f")
 
     with ploty:
         y = np.arange(-ny//2, ny//2)*apix
@@ -88,23 +76,43 @@ def main():
         p.legend.location = "top_right"
         st.bokeh_chart(p, use_container_width=True)
 
-    m_groups = compute_layer_line_positions(twist=twist, rise=rise, csym=csym, radius=radius, cutoff_res=cutoff_res)
-    ng = len(m_groups)
-
     with col3:
         st.subheader("Display:")
+        show_pitch = st.checkbox(label="Pitch", value=True)
+        with pitch_or_twist:
+            if show_pitch:
+                pitch = st.number_input('Pitch (Å)', value=360./data_example.twist*rise, min_value=-pny*apix/2, max_value=pny*apix/2, step=1.0, format="%.2f")
+                twist = 360./(pitch/rise)
+                st.markdown(f"*(twist = {twist:.2f} Å)*")
+            else:
+                twist = st.number_input('Twist (°)', value=data_example.twist, min_value=-180.0, max_value=180.0, step=1.0, format="%.2f")
         show_pwr = st.checkbox(label="PS", value=True)
         show_yprofile = st.checkbox(label="YP", value=True)
         show_pseudocolor = st.checkbox(label="Color", value=True)
         show_X = st.checkbox(label="X", value=True)
         show_LL = st.checkbox(label="LL", value=True)
-        st.subheader("m=")
-        show_choices = {}
-        lgs = sorted(m_groups.keys())[::-1]
-        for lgi, lg in enumerate(lgs):
-            value = True if lg in [0, 1] else False
-            show_choices[lg] = st.checkbox(label=str(lg), value=value)
+        if show_X or show_LL:
+            m_groups = compute_layer_line_positions(twist=twist, rise=rise, csym=csym, radius=radius, cutoff_res=cutoff_res)
+            ng = len(m_groups)
+            st.subheader("m=")
+            show_choices = {}
+            lgs = sorted(m_groups.keys())[::-1]
+            for lgi, lg in enumerate(lgs):
+                value = True if lg in [0, 1] else False
+                show_choices[lg] = st.checkbox(label=str(lg), value=value)
     
+    if ball_radius>0:
+        proj = simulate_helix(twist, rise, csym, helical_radius=radius, ball_radius=ball_radius*0.8, ny=data.shape[0], nx=data.shape[1], apix=apix, angle0=az)
+        proj = tapering(proj, fraction=0.3)
+        if angle:
+            image_container = rotated_image
+            image_label = "Rotated image"
+        else:
+            image_container = original_image
+            image_label = "Original image"
+        with image_container:
+            st.image([data, proj], width=data.shape[1], caption=[image_label, "Simulated"], clamp=True)
+
     with col4:
         if not show_pwr:
             return
@@ -157,7 +165,7 @@ def main():
 
             fig_proj = figure(title_location="below", frame_width=nx, frame_height=ny, 
                 x_axis_label=None, y_axis_label=None, 
-                x_range=fig.x_range, y_range=fig.y_range, 
+                x_range=fig.x_range, y_range=fig.y_range, y_axis_location = "right",
                 tools=tools)
             fig_proj.grid.visible = False
             fig_proj.title.text = f"Simulated Power Spectra"
@@ -181,18 +189,21 @@ def main():
 
             tools = 'box_zoom,hover,pan,reset,save,wheel_zoom'
             tooltips = [('Res y', '@resyÅ'), ('PS', '$x')]
-            fig_y = figure(frame_width=nx//2, frame_height=ny, y_range=fig.y_range, title=None, tools=tools, tooltips=tooltips)
+            fig_y = figure(frame_width=nx//2, frame_height=ny, y_range=fig.y_range, y_axis_location = "right", title=None, tools=tools, tooltips=tooltips)
             source_data = dict(ll=ll_profile, y=y, resy=np.abs(1./y))
             fig_y.line(source=source_data, x='ll', y='y', line_width=2, color='blue')
             fig_y.add_tools(crosshair)
+            if ball_radius:
+                fig_y.yaxis.visible = False
         else:
             fig_y = None
 
-        from bokeh.palettes import viridis, gray
-        if show_pseudocolor:
-            ll_colors = gray(ng*2)[::-1]
-        else:
-            ll_colors = viridis(ng*2)[::-1]
+        if show_LL or show_X:
+            from bokeh.palettes import viridis, gray
+            if show_pseudocolor:
+                ll_colors = gray(ng*2)[::-1]
+            else:
+                ll_colors = viridis(ng*2)[::-1]
 
         if show_LL:
             x, y = m_groups[0]["LL"]
