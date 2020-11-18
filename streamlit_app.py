@@ -118,7 +118,7 @@ def main():
         dsx = 1/(nx//2*cutoff_res)
 
         from bokeh.models import LinearColorMapper
-        tools = 'box_zoom,crosshair,pan,reset,save,wheel_zoom'
+        tools = 'box_zoom,pan,reset,save,wheel_zoom'
         fig = figure(title_location="below", frame_width=nx, frame_height=ny, 
             x_axis_label=None, y_axis_label=None, 
             x_range=(-nx//2*dsx, nx//2*dsx), y_range=(-ny//2*dsy, ny//2*dsy), 
@@ -146,13 +146,18 @@ def main():
         image_hover = HoverTool(renderers=[image], tooltips=tooltips)
         fig.add_tools(image_hover)
 
+        # create a linked crosshair tool among the figures
+        from bokeh.models import CrosshairTool
+        crosshair = CrosshairTool(dimensions="both")
+        fig.add_tools(crosshair)
+
         if ball_radius>0:
             proj_padded = pad_2d_image(proj, pnx, pny)
             proj_pwr = compute_power_spectra(proj_padded, apix=apix, cutoff_res=cutoff_res, high_pass_fraction=0.004)
 
             fig_proj = figure(title_location="below", frame_width=nx, frame_height=ny, 
                 x_axis_label=None, y_axis_label=None, 
-                x_range=(-nx//2*dsx, nx//2*dsx), y_range=(-ny//2*dsy, ny//2*dsy), 
+                x_range=fig.x_range, y_range=fig.y_range, 
                 tools=tools)
             fig_proj.grid.visible = False
             fig_proj.title.text = f"Simulated Power Spectra"
@@ -166,11 +171,6 @@ def main():
             # add hover tool only for the image
             image_hover = HoverTool(renderers=[proj_image], tooltips=tooltips)
             fig_proj.add_tools(image_hover)
-
-            # link the crosshair tool
-            from bokeh.models import CrosshairTool
-            crosshair = CrosshairTool(dimensions="both")
-            fig.add_tools(crosshair)
             fig_proj.add_tools(crosshair)
         else:
             fig_proj = None
@@ -179,16 +179,11 @@ def main():
             y=np.arange(-ny//2, ny//2)*dsy
             ll_profile = np.mean(pwr, axis=1)             # entire layerline
 
-            tools = 'box_zoom,crosshair,hover,pan,reset,save,wheel_zoom'
+            tools = 'box_zoom,hover,pan,reset,save,wheel_zoom'
             tooltips = [('Res y', '@resyÅ'), ('PS', '$x')]
             fig_y = figure(frame_width=nx//2, frame_height=ny, y_range=fig.y_range, title=None, tools=tools, tooltips=tooltips)
             source_data = dict(ll=ll_profile, y=y, resy=np.abs(1./y))
             fig_y.line(source=source_data, x='ll', y='y', line_width=2, color='blue')
-
-            # link the crosshair tool
-            from bokeh.models import CrosshairTool
-            crosshair = CrosshairTool(dimensions="both")
-            fig.add_tools(crosshair)
             fig_y.add_tools(crosshair)
         else:
             fig_y = None
