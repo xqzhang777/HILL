@@ -44,7 +44,7 @@ def main():
         rise = st.number_input('Rise (Å)', value=data_example.rise, min_value=-180.0, max_value=180.0, step=1.0, format="%.2f")
         csym = st.number_input('Csym', value=data_example.csym, min_value=1, max_value=16, step=1)
         radius = st.number_input('Radius (Å)', value=data_example.diameter/2., min_value=10.0, max_value=1000.0, step=10., format="%.1f")
-        tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-30.0, max_value=30.0, step=1.0)
+        tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-90.0, max_value=90.0, step=1.0)
         pnx = st.number_input('X-dim padding (pixels)', value=max(nx, 512), min_value=nx, step=2)
         pny = st.number_input('Y-dim padding (pixels)', value=max(ny, 1024), min_value=ny, step=2)
         cutoff_res = st.number_input('Limit FFT to resolution (Å)', value=max(float(round(rise*0.3)), 2*apix), min_value=2*apix, step=1.0)
@@ -159,6 +159,7 @@ def main():
         # create a linked crosshair tool among the figures
         from bokeh.models import CrosshairTool
         crosshair = CrosshairTool(dimensions="both")
+        crosshair.line_color = 'red'
         fig.add_tools(crosshair)
 
         if ball_radius>0:
@@ -187,13 +188,21 @@ def main():
 
         if show_yprofile:
             y=np.arange(-ny//2, ny//2)*dsy
-            ll_profile = np.mean(pwr, axis=1)             # entire layerline
+            ll_profile = np.mean(pwr, axis=1)
+            ll_profile /= ll_profile.max()
+            source_data = dict(ll=ll_profile, y=y, resy=np.abs(1./y))
+            if fig_proj:
+                ll_profile_proj = np.mean(proj_pwr, axis=1)
+                ll_profile_proj /= ll_profile_proj.max()
+                source_data["ll_proj"] = ll_profile_proj           
 
             tools = 'box_zoom,hover,pan,reset,save,wheel_zoom'
             tooltips = [('Res y', '@resyÅ'), ('PS', '$x')]
-            fig_y = figure(frame_width=nx//2, frame_height=ny, y_range=fig.y_range, y_axis_location = "right", title=None, tools=tools, tooltips=tooltips)
-            source_data = dict(ll=ll_profile, y=y, resy=np.abs(1./y))
+            fig_y = figure(frame_width=nx//2, frame_height=ny, y_range=fig.y_range, y_axis_location = "right", 
+                title=None, tools=tools, tooltips=tooltips)
             fig_y.line(source=source_data, x='ll', y='y', line_width=2, color='blue')
+            if fig_proj:
+                fig_y.line(source=source_data, x='ll_proj', y='y', line_width=2, color='red')
             fig_y.add_tools(crosshair)
             if ball_radius:
                 fig_y.yaxis.visible = False
@@ -262,7 +271,7 @@ def simulate_helix(twist, rise, csym, helical_radius, ball_radius, ny, nx, apix,
         for i in range(i0, i1+1):
             z = rise*i
             for si in range(csym):
-                angle = np.deg2rad(twist*i + si*360./csym + az0)
+                angle = np.deg2rad(twist*i + si*360./csym + az0 + 90)   # start from +y axis
                 x = np.cos(angle) * radius
                 y = np.sin(angle) * radius
                 centers[i*csym+si, 0] = x
@@ -294,6 +303,7 @@ def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m=
         if tilt:
             tf2 = np.power(np.tan(np.deg2rad(tilt)), 2)
             sx = np.sqrt(sx*sx - sy*sy*tf2)
+            if np.isnan(sx): sx = 1e-6
             sy = sy / np.cos(np.deg2rad(tilt))
         slope = sy/sx # slope for the line from bottom/left to top/right
         return slope
