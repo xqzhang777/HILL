@@ -44,6 +44,7 @@ def main():
         rise = st.number_input('Rise (Å)', value=data_example.rise, min_value=-180.0, max_value=180.0, step=1.0, format="%.2f")
         csym = st.number_input('Csym', value=data_example.csym, min_value=1, max_value=16, step=1)
         radius = st.number_input('Radius (Å)', value=data_example.diameter/2., min_value=10.0, max_value=1000.0, step=10., format="%.1f")
+        tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-30.0, max_value=30.0, step=1.0)
         pnx = st.number_input('X-dim padding (pixels)', value=max(nx, 512), min_value=nx, step=2)
         pny = st.number_input('Y-dim padding (pixels)', value=max(ny, 1024), min_value=ny, step=2)
         cutoff_res = st.number_input('Limit FFT to resolution (Å)', value=max(float(round(rise*0.3)), 2*apix), min_value=2*apix, step=1.0)
@@ -92,7 +93,7 @@ def main():
         show_X = st.checkbox(label="X", value=True)
         show_LL = st.checkbox(label="LL", value=True)
         if show_X or show_LL:
-            m_groups = compute_layer_line_positions(twist=twist, rise=rise, csym=csym, radius=radius, cutoff_res=cutoff_res)
+            m_groups = compute_layer_line_positions(twist=twist, rise=rise, csym=csym, radius=radius, tilt=tilt, cutoff_res=cutoff_res)
             ng = len(m_groups)
             st.subheader("m=")
             show_choices = {}
@@ -102,7 +103,8 @@ def main():
                 show_choices[lg] = st.checkbox(label=str(lg), value=value)
     
     if ball_radius>0:
-        proj = simulate_helix(twist, rise, csym, helical_radius=radius, ball_radius=ball_radius*0.8, ny=data.shape[0], nx=data.shape[1], apix=apix, angle0=az)
+        proj = simulate_helix(twist, rise, csym, helical_radius=radius, ball_radius=ball_radius*0.8, 
+                ny=data.shape[0], nx=data.shape[1], apix=apix, tilt=tilt, az0=az)
         proj = tapering(proj, fraction=0.3)
         if angle:
             image_container = rotated_image
@@ -238,7 +240,7 @@ def main():
         return
 
 @st.cache(persist=True, show_spinner=False)
-def simulate_helix(twist, rise, csym, helical_radius, ball_radius, ny, nx, apix, angle0=None):
+def simulate_helix(twist, rise, csym, helical_radius, ball_radius, ny, nx, apix, tilt=0, az0=None):
     def simulate_projection(centers, sigma, ny, nx, apix):
         sigma2 = sigma*sigma
         d = np.zeros((ny, nx))
@@ -251,37 +253,48 @@ def simulate_helix(twist, rise, csym, helical_radius, ball_radius, ny, nx, apix,
             y = Y-yc
             d += np.exp(-(x*x+y*y)/sigma2)
         return d
-    def helical_unit_positions(twist, rise, csym, radius, height, angle0=0):
+    def helical_unit_positions(twist, rise, csym, radius, height, tilt=0, az0=0):
         imax = int(height/rise)
         i0 = -imax
         i1 = imax
         
-        centers = np.zeros(((2*imax+1)*csym, 2), dtype=np.float)
+        centers = np.zeros(((2*imax+1)*csym, 3), dtype=np.float)
         for i in range(i0, i1+1):
-            y = rise*i
+            z = rise*i
             for si in range(csym):
-                angle = np.deg2rad(twist*i + si*360./csym + angle0)
-                x = np.sin(angle) * radius
-                centers[i*csym+si, 0] = y
-                centers[i*csym+si, 1] = x
+                angle = np.deg2rad(twist*i + si*360./csym + az0)
+                x = np.cos(angle) * radius
+                y = np.sin(angle) * radius
+                centers[i*csym+si, 0] = x
+                centers[i*csym+si, 1] = y
+                centers[i*csym+si, 2] = z
+        if tilt:
+            from scipy.spatial.transform import Rotation as R
+            rot = R.from_euler('x', tilt, degrees=True)
+            centers = rot.apply(centers)
+        centers = centers[:, [2, 0]]    # project along y
         return centers
-    if angle0 is None: angle0 = np.random.uniform(0, 360)
-    centers = helical_unit_positions(twist, rise, csym, helical_radius, height=ny*apix, angle0=angle0)
+    if az0 is None: az0 = np.random.uniform(0, 360)
+    centers = helical_unit_positions(twist, rise, csym, helical_radius, height=ny*apix, tilt=tilt, az0=az0)
     projection = simulate_projection(centers, ball_radius, ny, nx, apix)
     return projection
 
 @st.cache(persist=True, show_spinner=False)
-def compute_layer_line_positions(twist, rise, csym, radius, cutoff_res, m=[]):
+def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m=[]):
     def pitch(twist, rise):
         p = np.abs(rise * 360./twist)   # pitch in Å
         return p
 
-    def X_line_slope(twist, rise, csym, radius):
+    def X_line_slope(twist, rise, csym, radius, tilt):
         from scipy.special import jnp_zeros
         peak1 = jnp_zeros(csym, 1)[0] # first peak of first visible layerline (n=csym)
         sx = peak1/(2*np.pi*radius)
         p = pitch(twist, rise)
         sy = 1/p * csym
+        if tilt:
+            tf2 = np.power(np.tan(np.deg2rad(tilt)), 2)
+            sx = np.sqrt(sx*sx - sy*sy*tf2)
+            sy = sy / np.cos(np.deg2rad(tilt))
         slope = sy/sx # slope for the line from bottom/left to top/right
         return slope
     
@@ -294,9 +307,10 @@ def compute_layer_line_positions(twist, rise, csym, radius, cutoff_res, m=[]):
         m = list(range(-m_max, m_max+1))
         m.sort(key=lambda x: (abs(x), x))   # 0, -1, 1, -2, 2, ...
     
-    slope = X_line_slope(twist, rise, csym, radius)
+    slope = X_line_slope(twist, rise, csym, radius, tilt)
     smax = 1./cutoff_res
 
+    tf = 1./np.cos(np.deg2rad(tilt))
     m_groups = {} # one group per m order
     for mi in range(len(m)):
         d = {}
@@ -304,6 +318,8 @@ def compute_layer_line_positions(twist, rise, csym, radius, cutoff_res, m=[]):
 
         # X pattern
         sy = [-smax, smax]
+        if tilt:
+            sy = list(np.array(sy) * tf)
         sx = sx_at_sy(sy, slope=slope, intercept=sy0)
         x  = [sx, -sx]
         y  = [sy, sy]
@@ -316,6 +332,8 @@ def compute_layer_line_positions(twist, rise, csym, radius, cutoff_res, m=[]):
         ll_i_bottom = -int(np.abs(-smax - sy0)/ds_p)
         ll_i = np.array([i for i in range(ll_i_bottom, ll_i_top+1) if not i%csym])
         sy = sy0 + ll_i * ds_p
+        if tilt:
+            sy = list(np.array(sy) * tf)
         sx = sx_at_sy(sy, slope=slope, intercept=sy0)
         px  = list(sx) + list(-sx)
         py  = list(sy) + list(sy)
