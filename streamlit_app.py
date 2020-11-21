@@ -21,7 +21,6 @@ def main():
             if fileobj is not None:
                 data_all, apix = get_2d_image_from_uploaded_file(fileobj)
             else:
-                st.warning("File upload has failed")
                 return
         else:
             if input_mode == "url":
@@ -63,9 +62,10 @@ def main():
         csym = st.number_input('Csym', value=data_example.csym, min_value=1, max_value=16, step=1)
         radius = st.number_input('Radius (Å)', value=data_example.diameter/2., min_value=10.0, max_value=1000.0, step=10., format="%.1f")
         tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-90.0, max_value=90.0, step=1.0)
-        pnx = st.number_input('X-dim padding (pixels)', value=max(nx, 512), min_value=nx, step=2)
-        pny = st.number_input('Y-dim padding (pixels)', value=max(ny, 1024), min_value=ny, step=2)
-        cutoff_res = st.number_input('Limit FFT to resolution (Å)', value=max(float(round(rise*0.3)), 2*apix), min_value=2*apix, step=1.0)
+        cutoff_res_x = st.number_input('Limit FFT X-dim to resolution (Å)', value=max(float(round(rise*0.3)), 2*apix), min_value=2*apix, step=1.0)
+        cutoff_res_y = st.number_input('Limit FFT Y-dim to resolution (Å)', value=max(float(round(rise*0.3)), 2*apix), min_value=2*apix, step=1.0)
+        pnx = st.number_input('FFT X-dim size (pixels)', value=max(nx, 512), min_value=min(nx, 128), step=2)
+        pny = st.number_input('FFT Y-dim size (pixels)', value=max(ny, 1024), min_value=min(ny, 512), step=2)
         st.subheader("Simulate the helix with Gaussians")
         ball_radius = st.number_input('Gaussian radius (Å)', value=0.0, min_value=0.0, max_value=radius, step=5.0, format="%.1f")
         az = st.number_input('Azimuthal angle (°)', value=0, min_value=0, max_value=360, step=1, format="%.1f")
@@ -111,7 +111,7 @@ def main():
         show_X = st.checkbox(label="X", value=True)
         show_LL = st.checkbox(label="LL", value=True)
         if show_X or show_LL:
-            m_groups = compute_layer_line_positions(twist=twist, rise=rise, csym=csym, radius=radius, tilt=tilt, cutoff_res=cutoff_res)
+            m_groups = compute_layer_line_positions(twist=twist, rise=rise, csym=csym, radius=radius, tilt=tilt, cutoff_res=cutoff_res_y)
             ng = len(m_groups)
             st.subheader("m=")
             show_choices = {}
@@ -121,7 +121,7 @@ def main():
                 show_choices[lg] = st.checkbox(label=str(lg), value=value)
     
     if ball_radius>0:
-        proj = simulate_helix(twist, rise, csym, helical_radius=radius, ball_radius=ball_radius*0.8, 
+        proj = simulate_helix(twist, rise, csym, helical_radius=radius, ball_radius=ball_radius, 
                 ny=data.shape[0], nx=data.shape[1], apix=apix, tilt=tilt, az0=az)
         proj = tapering(proj, fraction=0.3)
         if angle:
@@ -138,12 +138,12 @@ def main():
             return
 
         data = tapering(data, fraction=0.1)
-        data_padded = pad_2d_image(data, pnx, pny)
-        pwr = compute_power_spectra(data_padded, apix=apix, cutoff_res=cutoff_res, high_pass_fraction=0.004)
+        pwr = compute_power_spectra(data, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
+                output_size=(pny, pnx), low_pass_fraction=0.2, high_pass_fraction=0.004)
 
         ny, nx = pwr.shape
-        dsy = 1/(ny//2*cutoff_res)
-        dsx = 1/(nx//2*cutoff_res)
+        dsy = 1/(ny//2*cutoff_res_y)
+        dsx = 1/(nx//2*cutoff_res_x)
 
         from bokeh.models import LinearColorMapper
         tools = 'box_zoom,pan,reset,save,wheel_zoom'
@@ -181,8 +181,8 @@ def main():
         fig.add_tools(crosshair)
 
         if ball_radius>0:
-            proj_padded = pad_2d_image(proj, pnx, pny)
-            proj_pwr = compute_power_spectra(proj_padded, apix=apix, cutoff_res=cutoff_res, high_pass_fraction=0.004)
+            proj_pwr = compute_power_spectra(proj, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
+                    output_size=(pny, pnx), low_pass_fraction=0.2, high_pass_fraction=0.004)
 
             fig_proj = figure(title_location="below", frame_width=nx, frame_height=ny, 
                 x_axis_label=None, y_axis_label=None, 
@@ -371,39 +371,48 @@ def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m=
     return m_groups
 
 @st.cache(persist=True, show_spinner=False)
-def compute_power_spectra(data, apix, cutoff_res=0, high_pass_fraction=0):
-    pwr = np.log(np.abs(np.fft.fftshift(np.fft.fft2(data))))
-    if 0<high_pass_fraction<=1:
+def compute_power_spectra(data, apix, cutoff_res=None, output_size=None, low_pass_fraction=0, high_pass_fraction=0):
+    fft = fft_rescale(data, apix=apix, cutoff_res=cutoff_res, output_size=output_size)
+    pwr = np.log(np.abs(np.fft.fftshift(fft)))
+    if 0<low_pass_fraction<1 or 0<high_pass_fraction<1:
         fft = np.fft.fft2(pwr)
         ny, nx = fft.shape
-        Y, X = np.meshgrid(np.arange(-ny//2, ny//2, dtype=np.float), np.arange(-nx//2, nx//2, dtype=np.float), indexing='ij')
+        Y, X = np.meshgrid(np.arange(ny, dtype=np.float)-ny//2, np.arange(nx, dtype=np.float)-nx//2, indexing='ij')
         Y /= ny//2
         X /= nx//2
-        f2 = np.log(2)/(high_pass_fraction**2)
-        filter = 1.0 - np.exp(- f2 * Y**2) # Y-direction only
-        fft *= np.fft.fftshift(filter)
+        if 0<low_pass_fraction<1:
+            f2 = np.log(2)/(low_pass_fraction**2)
+            filter_lp = np.exp(- f2 * (X**2+Y**2))
+            fft *= np.fft.fftshift(filter_lp)
+        if 0<high_pass_fraction<1:
+            f2 = np.log(2)/(high_pass_fraction**2)
+            filter_hp = 1.0 - np.exp(- f2 * (X**2+Y**2))
+            fft *= np.fft.fftshift(filter_hp)
         pwr = np.abs(np.fft.ifft2(fft))
-    if cutoff_res>=2*apix:
-        ny0, nx0 = pwr.shape
-        scale_factor = cutoff_res/(2*apix)
-        from skimage.transform import rescale
-        pwr = rescale(pwr, scale_factor, order=3)
-        ny, nx = pwr.shape
-        sfi = int(round(scale_factor))
-        pwr = pwr[ny//2-ny0//2:ny//2+ny0//2+sfi, nx//2-nx0//2:nx//2+nx0//2+sfi] 
     pwr = normalize(pwr, percentile=(0, 100))
     return pwr
 
 @st.cache(persist=True, show_spinner=False)
-def pad_2d_image(data, nx, ny):
-    ny0, nx0 = data.shape
-    px = max(0, (nx-nx0)//2)
-    py = max(0, (ny-ny0)//2)
-    pvx = data[:, [0,-1]].mean()
-    pvy = data[[0,-1], :].mean()
-    constant_values = (pvx+pvy)/2
-    data2 = np.pad(data, pad_width=((py,py), (px,px)), mode='constant', constant_values=constant_values)    
-    return data2
+def fft_rescale(image, apix=1.0, cutoff_res=None, output_size=None):
+    if cutoff_res:
+        cutoff_res_y, cutoff_res_x = cutoff_res
+    else:
+        cutoff_res_y, cutoff_res_x = 2*apix, 2*apix
+    if output_size:
+        ony, onx = output_size
+    else:
+        ony, onx = image.shape
+    freq_y = np.fft.fftfreq(ony) * 2*apix/cutoff_res_y
+    freq_x = np.fft.fftfreq(onx) * 2*apix/cutoff_res_x
+    Y, X = np.meshgrid(freq_y, freq_x, indexing='ij')
+    Y = (2*np.pi * Y).flatten(order='C')
+    X = (2*np.pi * X).flatten(order='C')
+
+    from finufft import nufft2d2
+    fft = nufft2d2(x=Y, y=X, f=image, eps=1e-6)
+    fft = fft.reshape((ony, onx))
+
+    return fft
 
 @st.cache(persist=True, show_spinner=False)
 def tapering(data, fraction=0):
