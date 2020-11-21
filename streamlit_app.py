@@ -13,10 +13,28 @@ def main():
         with st.beta_expander(label="README", expanded=False):
             st.write("This Web app considers a biological helical structure as the product of a continous helix and a set of parallel planes, and based on the covolution theory, the Fourier Transform (FT) of a helical structure would be the convolution of the FT of the continous helix and the FT of the planes.  \nThe FT of a continous helix consists of equally spaced layer planes (3D) or layer lines (2D projection) that can be described by Bessel functions of increasing orders (0, +/-1, +/-2, ...) from the Fourier origin (i.e. equator). The spacing between the layer planes/lines is determined by the helical pitch (i.e. the shift along the helical axis for a 360 ° turn of the helix). If the structure has additional cyclic symmetry (for example, C6) around the helical axis, only the layer plane/line orders of integer multiplier of the symmetry (e.g. 0, +/-6, +/-12, ...) are visible. The overall shape of the FT is similar to a X symbol.  \nThe FT of the parallel planes consists of equally spaced points along the helical axis (i.e. meridian) with the spacing being determined by the helical rise.  \nThe convolution of these two components (X-shaped layer lines and points along the meridian) generates the layer line patterns seen in the power spectra of the projection images of helical structures. The helical indexing task is thus to identify the helical rise, pitch (or twist), and cyclic symmetry that would predict a lay line pattern to explain the observed the layer lines in the power spectra. This Web app allows you to interactively change the helical parameters and superimpose the predicted layer liines on the power spectra to complete the helical indexing task.  \n  \nPS: power spectra; YP: Y-axis power spectra profile; X: the X pattern; LL: layer lines; m: indices of the X-patterns along the meridian")
         
-        label = "Input a url of 2D projection image(s) or an EMDB 3D map:"
-        image_url = st.text_input(label=label, value=data_example.url)
-        image_url = image_url.strip()
-        data_all, apix = get_2d_image(image_url)
+        # make radio display horizontal
+        st.write('<style>div.Widget.row-widget.stRadio > div{flex-direction:row;}</style>', unsafe_allow_html=True)
+        input_mode = st.radio(label="How to obtain the input image/map:", options=["upload a mrc/mrcs file", "url", "emd-xxxx"], index=1)
+        if input_mode == "upload a mrc/mrcs file":
+            fileobj = st.file_uploader("Upload a mrc or mrcs file", type=['mrc', 'mrcs', 'map', 'map.gz'])
+            if fileobj is not None:
+                data_all, apix = get_2d_image_from_uploaded_file(fileobj)
+            else:
+                st.warning("File upload has failed")
+                return
+        else:
+            if input_mode == "url":
+                label = "Input a url of 2D projection image(s) or a 3D map:"
+                value = data_example.url
+                image_url = st.text_input(label=label, value=value)
+                data_all, apix = get_2d_image_from_url(image_url.strip())
+            elif input_mode == "emd-xxxx":
+                label = "Input an EMDB ID (emd-xxxx):"
+                value = "emd-2699"
+                emdid = st.text_input(label=label, value=value)
+                data_all, apix = get_emdb_map_projections(emdid.strip())
+
         nz, ny, nx = data_all.shape
         if nz>1:
             image_index = st.slider(label=f"Choose an image (out of {nz}):", min_value=1, max_value=nz, value=1, step=1)
@@ -82,7 +100,7 @@ def main():
         show_pitch = st.checkbox(label="Pitch", value=True)
         with pitch_or_twist:
             if show_pitch:
-                pitch = st.number_input('Pitch (Å)', value=360./data_example.twist*rise, min_value=-pny*apix/2, max_value=pny*apix/2, step=1.0, format="%.2f")
+                pitch = st.number_input('Pitch (Å)', value=360./data_example.twist*rise, min_value=-pny*apix, max_value=pny*apix, step=1.0, format="%.2f")
                 twist = 360./(pitch/rise)
                 st.markdown(f"*(twist = {twist:.2f} Å)*")
             else:
@@ -415,43 +433,22 @@ def normalize(data, percentile=(0, 100)):
     return data2
 
 @st.cache(persist=True, show_spinner=False)
-def get_3d_map_projections(url):
-    ds = np.DataSource(None)
-    fp=ds.open(url)
-    import mrcfile
-    with mrcfile.open(fp.name) as mrc:
-        data = mrc.data
-        apix = mrc.voxel_size.x.item()
-    nz, ny, nx = data.shape
-    assert( nx==ny )
-    projs = np.zeros((2, nz, nx))
-    for ai, axis in enumerate([1, 2]):
-        proj = data.mean(axis=axis)
-        proj = normalize(proj, percentile=(0, 100))
-        projs[ai] = proj
-    return projs, apix
-
-@st.cache(persist=True, show_spinner=False)
-def get_2d_stack(url):
-    ds = np.DataSource(None)
-    fp=ds.open(url)
-    import mrcfile
-    with mrcfile.open(fp.name) as mrc:
-        data = mrc.data*1.0
-        apix = mrc.voxel_size.x.item()
+def get_2d_image_from_uploaded_file(fileobj):
+    import os, tempfile
+    orignal_filename = fileobj.name
+    suffix = os.path.splitext(orignal_filename)[-1]
+    with tempfile.NamedTemporaryFile(suffix=suffix) as temp:
+        temp.write(fileobj.read())
+        data, apix = get_2d_image_from_file(temp.name)
     return data, apix
 
 @st.cache(persist=True, show_spinner=False)
-def get_2d_image(url):
+def get_2d_image_from_url(url):
     known_urls = [ example.url for example in data_examples]
-    if url in known_urls or url.endswith(".class_averages.blob") or url.endswith(".templates_selected.blob"):
-        data, apix = get_2d_stack(url)
+    if url in known_urls or url.endswith(".class_averages.blob") or url.endswith(".templates_selected.blob"): # cryosparc 2D class averages
+        data, apix = get_2d_image_from_url(url)
     elif (url.find("emd_")!=-1 and url.endswith(".map.gz")) or url.endswith(".map") or url.endswith(".mrc"):
-        data, apix = get_3d_map_projections(url)
-    elif url.lower().startswith("emd-"):
-        emd_id = url.lower().split("emd-")[-1]
-        url2 = f"ftp://ftp.ebi.ac.uk/pub/databases/emdb/structures/EMD-{emd_id}/map/emd_{emd_id}.map.gz"
-        data, apix = get_3d_map_projections(url2)
+        data, apix = get_2d_image_from_url(url)
     else:
         from skimage.io import imread
         data = imread(url)
@@ -459,6 +456,37 @@ def get_2d_image(url):
         apix = 1.0
     return data, apix
 
+@st.cache(persist=True, show_spinner=False)
+def get_emdb_map_projections(emdid):
+    emdid_number = emdid.lower().split("emd-")[-1]
+    url = f"ftp://ftp.ebi.ac.uk/pub/databases/emdb/structures/EMD-{emdid_number}/map/emd_{emdid_number}.map.gz"
+    return get_2d_image_from_url(url)
+
+@st.cache(persist=True, show_spinner=False)
+def get_2d_image_from_url(url):
+    ds = np.DataSource(None)
+    fp=ds.open(url)
+    return get_2d_image_from_file(fp.name)
+
+@st.cache(persist=True, show_spinner=False)
+def get_2d_image_from_file(filename):
+    import mrcfile
+    with mrcfile.open(filename) as mrc:
+        data = mrc.data * 1.0
+        apix = mrc.voxel_size.x.item()
+        is2d = mrc.is_image_stack() or mrc.is_single_image()
+    nz, ny, nx = data.shape
+    assert( nx==ny )
+
+    if is2d:
+        return data, apix
+    else:
+        projs = np.zeros((2, nz, nx))
+        for ai, axis in enumerate([1, 2]):
+            proj = data.mean(axis=axis)
+            proj = normalize(proj, percentile=(0, 100))
+            projs[ai] = proj
+        return projs, apix
 class Data(object):
     def __init__(self, twist, rise, csym, diameter, apix, url=None):
         self.twist = twist
