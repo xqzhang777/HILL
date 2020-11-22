@@ -11,7 +11,7 @@ def main():
 
     with col1:
         with st.beta_expander(label="README", expanded=False):
-            st.write("This Web app considers a biological helical structure as the product of a continous helix and a set of parallel planes, and based on the covolution theory, the Fourier Transform (FT) of a helical structure would be the convolution of the FT of the continous helix and the FT of the planes.  \nThe FT of a continous helix consists of equally spaced layer planes (3D) or layer lines (2D projection) that can be described by Bessel functions of increasing orders (0, +/-1, +/-2, ...) from the Fourier origin (i.e. equator). The spacing between the layer planes/lines is determined by the helical pitch (i.e. the shift along the helical axis for a 360 ° turn of the helix). If the structure has additional cyclic symmetry (for example, C6) around the helical axis, only the layer plane/line orders of integer multiplier of the symmetry (e.g. 0, +/-6, +/-12, ...) are visible. The overall shape of the FT is similar to a X symbol.  \nThe FT of the parallel planes consists of equally spaced points along the helical axis (i.e. meridian) with the spacing being determined by the helical rise.  \nThe convolution of these two components (X-shaped layer lines and points along the meridian) generates the layer line patterns seen in the power spectra of the projection images of helical structures. The helical indexing task is thus to identify the helical rise, pitch (or twist), and cyclic symmetry that would predict a lay line pattern to explain the observed the layer lines in the power spectra. This Web app allows you to interactively change the helical parameters and superimpose the predicted layer liines on the power spectra to complete the helical indexing task.  \n  \nPS: power spectra; YP: Y-axis power spectra profile; X: the X pattern; LL: layer lines; m: indices of the X-patterns along the meridian")
+            st.write("This Web app considers a biological helical structure as the product of a continous helix and a set of parallel planes, and based on the covolution theory, the Fourier Transform (FT) of a helical structure would be the convolution of the FT of the continous helix and the FT of the planes.  \nThe FT of a continous helix consists of equally spaced layer planes (3D) or layerlines (2D projection) that can be described by Bessel functions of increasing orders (0, +/-1, +/-2, ...) from the Fourier origin (i.e. equator). The spacing between the layer planes/lines is determined by the helical pitch (i.e. the shift along the helical axis for a 360 ° turn of the helix). If the structure has additional cyclic symmetry (for example, C6) around the helical axis, only the layer plane/line orders of integer multiplier of the symmetry (e.g. 0, +/-6, +/-12, ...) are visible. The primary peaks of the layer lines in the power spectra form a pattern similar to a X symbol.  \nThe FT of the parallel planes consists of equally spaced points along the helical axis (i.e. meridian) with the spacing being determined by the helical rise.  \nThe convolution of these two components (X-shaped pattern of layer lines and points along the meridian) generates the layer line patterns seen in the power spectra of the projection images of helical structures. The helical indexing task is thus to identify the helical rise, pitch (or twist), and cyclic symmetry that would predict a layer line pattern to explain the observed the layer lines in the power spectra. This Web app allows you to interactively change the helical parameters and superimpose the predicted layer liines on the power spectra to complete the helical indexing task.  \n  \nPS: power spectra; YP: Y-axis power spectra profile; LL: layer lines; m: indices of the X-patterns along the meridian")
         
         # make radio display horizontal
         st.write('<style>div.Widget.row-widget.stRadio > div{flex-direction:row;}</style>', unsafe_allow_html=True)
@@ -108,9 +108,8 @@ def main():
         show_pwr = st.checkbox(label="PS", value=True)
         show_yprofile = st.checkbox(label="YP", value=True)
         show_pseudocolor = st.checkbox(label="Color", value=True)
-        show_X = st.checkbox(label="X", value=True)
         show_LL = st.checkbox(label="LL", value=True)
-        if show_X or show_LL:
+        if show_LL:
             m_groups = compute_layer_line_positions(twist=twist, rise=rise, csym=csym, radius=radius, tilt=tilt, cutoff_res=cutoff_res_y)
             ng = len(m_groups)
             st.subheader("m=")
@@ -227,14 +226,12 @@ def main():
         else:
             fig_y = None
 
-        if show_LL or show_X:
+        if show_LL:
             from bokeh.palettes import viridis, gray
             if show_pseudocolor:
                 ll_colors = gray(ng*2)[::-1]
             else:
                 ll_colors = viridis(ng*2)[::-1]
-
-        if show_LL:
             x, y = m_groups[0]["LL"]
             tmp_x = np.sort(np.unique(x))
             width = np.mean(tmp_x[1:]-tmp_x[:-1])
@@ -247,15 +244,6 @@ def main():
                 fig.ellipse(x, y, width=width, height=height, line_width=4, line_color=color, fill_alpha=0)
                 if fig_proj:
                     fig_proj.ellipse(x, y, width=width, height=height, line_width=4, line_color=color, fill_alpha=0)
-
-        if show_X:
-            for mi, m in enumerate(m_groups.keys()):
-                if not show_choices[m]: continue
-                x, y = m_groups[m]["X"]
-                color = ll_colors[mi]
-                fig.multi_line(x, y, line_width=4, line_color=color, line_dash="dashed")
-                if fig_proj:
-                    fig_proj.multi_line(x, y, line_width=4, line_color=color, line_dash="dashed")
 
         if fig_proj or fig_y:
             figs = [f for f in [fig, fig_y, fig_proj] if f]
@@ -311,23 +299,16 @@ def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m=
     def pitch(twist, rise):
         p = np.abs(rise * 360./twist)   # pitch in Å
         return p
-
-    def X_line_slope(twist, rise, csym, radius, tilt):
-        from scipy.special import jnp_zeros
-        peak1 = jnp_zeros(csym, 1)[0] # first peak of first visible layerline (n=csym)
-        sx = peak1/(2*np.pi*radius)
-        p = pitch(twist, rise)
-        sy = 1/p * csym
-        if tilt:
-            tf2 = np.power(np.tan(np.deg2rad(tilt)), 2)
-            sx = np.sqrt(sx*sx - sy*sy*tf2)
-            if np.isnan(sx): sx = 1e-6
-            sy = sy / np.cos(np.deg2rad(tilt))
-        slope = sy/sx # slope for the line from bottom/left to top/right
-        return slope
     
-    def sx_at_sy(sy, slope, intercept):
-        sx = (np.array(sy)-intercept) / slope
+    def peak_sx(bessel_order, radius):
+        from scipy.special import jnp_zeros
+        sx = np.zeros(len(bessel_order))
+        for bi in range(len(bessel_order)):
+            if bessel_order[bi]==0:
+                sx[bi]=0
+                continue
+            peak1 = jnp_zeros(bessel_order[bi], 1)[0] # first peak of first visible layerline (n=csym)
+            sx[bi] = peak1/(2*np.pi*radius)
         return sx
 
     if not m:
@@ -335,23 +316,14 @@ def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m=
         m = list(range(-m_max, m_max+1))
         m.sort(key=lambda x: (abs(x), x))   # 0, -1, 1, -2, 2, ...
     
-    slope = X_line_slope(twist, rise, csym, radius, tilt)
     smax = 1./cutoff_res
 
     tf = 1./np.cos(np.deg2rad(tilt))
+    tf2 = np.sin(np.deg2rad(tilt))
     m_groups = {} # one group per m order
     for mi in range(len(m)):
         d = {}
         sy0 = m[mi] / rise
-
-        # X pattern
-        sy = [-smax, smax]
-        if tilt:
-            sy = list(np.array(sy) * tf)
-        sx = sx_at_sy(sy, slope=slope, intercept=sy0)
-        x  = [sx, -sx]
-        y  = [sy, sy]
-        d["X"] = (x, y)
 
         # first peak positions of each layer line
         p = pitch(twist, rise)
@@ -360,9 +332,11 @@ def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m=
         ll_i_bottom = -int(np.abs(-smax - sy0)/ds_p)
         ll_i = np.array([i for i in range(ll_i_bottom, ll_i_top+1) if not i%csym])
         sy = sy0 + ll_i * ds_p
+        sx = peak_sx(bessel_order=ll_i, radius=radius)
         if tilt:
-            sy = list(np.array(sy) * tf)
-        sx = sx_at_sy(sy, slope=slope, intercept=sy0)
+            sy = np.array(sy) * tf
+            sx = np.sqrt(np.power(np.array(sx), 2) - np.power(sy*tf2, 2))
+            sx[np.isnan(sx)] = 1e-6
         px  = list(sx) + list(-sx)
         py  = list(sy) + list(sy)
         d["LL"] = (px, py)
@@ -409,7 +383,7 @@ def fft_rescale(image, apix=1.0, cutoff_res=None, output_size=None):
     X = (2*np.pi * X).flatten(order='C')
 
     from finufft import nufft2d2
-    fft = nufft2d2(x=Y, y=X, f=image, eps=1e-6)
+    fft = nufft2d2(x=Y, y=X, f=image.astype(np.complex), eps=1e-6)
     fft = fft.reshape((ony, onx))
 
     return fft
