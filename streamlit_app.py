@@ -166,7 +166,7 @@ def main():
         resx = np.abs(1./sx)
         resy = np.abs(1./sy)
         res  = 1./np.hypot(sx, sy)
-        bessel = bessel_n_image(ny, nx, cutoff_res_x, radius)
+        bessel = bessel_n_image(ny, nx, cutoff_res_x, cutoff_res_y, radius, tilt)
 
         source_data = dict(image=[pwr], x=[-nx//2*dsx], y=[-ny//2*dsy], dw=[nx*dsx], dh=[ny*dsy], resx=[resx], resy=[resy], res=[res], bessel=[bessel])
         from bokeh.models import LinearColorMapper
@@ -263,26 +263,38 @@ def main():
         return
 
 @st.cache(persist=True, show_spinner=False)
-def bessel_n_image(ny, nx, nyquist_res_x, radius):
-    import numpy as np
-    ds = 1./(nyquist_res_x*nx//2)
-    x = 2*np.pi * np.abs(np.arange(nx)-nx//2)*ds * radius
+def bessel_n_image(ny, nx, nyquist_res_x, nyquist_res_y, radius, tilt):
+    def build_bessel_order_table(xmax):
+        from scipy.special import jnp_zeros
+        table = [0]
+        n = 1
+        while 1:
+            peak_x = jnp_zeros(n, 1)[0] # first peak
+            if peak_x<xmax: table.append(peak_x)
+            else: break
+            n += 1
+        return np.asarray(table)
 
-    from scipy.special import jnp_zeros
-    xmax = x.max()
-    table = [0]
-    n = 1
-    while True:
-        peak_x = jnp_zeros(n, 1)[0] # first peak
-        if peak_x<xmax: table.append(peak_x)
-        else: break
-        n += 1
-    table = np.asarray(table)
-    
-    x = np.expand_dims(x, axis=-1) 
-    indices = np.abs(table - x).argmin(axis=-1)
-    ret = np.tile(indices, (ny, 1))
-    return ret
+    import numpy as np
+    if tilt:
+        dsx = 1./(nyquist_res_x*nx//2)
+        dsy = 1./(nyquist_res_x*ny//2)
+        Y, X = np.meshgrid(np.arange(ny)-ny//2, np.arange(nx)-nx//2, indexing='ij')
+        Y = 2*np.pi * np.abs(Y)*dsy * radius
+        X = 2*np.pi * np.abs(X)*dsx * radius
+        Y /= np.cos(np.deg2rad(tilt))
+        X = np.hypot(X, Y*np.sin(np.deg2rad(tilt)))
+        table = build_bessel_order_table(X.max())        
+        X = np.expand_dims(X.flatten(), axis=-1)
+        indices = np.abs(table - X).argmin(axis=-1)
+        return np.reshape(indices, (ny, nx))
+    else:
+        ds = 1./(nyquist_res_x*nx//2)
+        xs = 2*np.pi * np.abs(np.arange(nx)-nx//2)*ds * radius
+        table = build_bessel_order_table(xs.max())        
+        xs = np.expand_dims(xs, axis=-1) 
+        indices = np.abs(table - xs).argmin(axis=-1)
+        return np.tile(indices, (ny, 1))
 
 @st.cache(persist=True, show_spinner=False)
 def simulate_helix(twist, rise, csym, helical_radius, ball_radius, ny, nx, apix, tilt=0, az0=None):
