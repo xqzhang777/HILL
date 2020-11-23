@@ -11,7 +11,7 @@ def main():
 
     with col1:
         with st.beta_expander(label="README", expanded=False):
-            st.write("This Web app considers a biological helical structure as the product of a continous helix and a set of parallel planes, and based on the covolution theory, the Fourier Transform (FT) of a helical structure would be the convolution of the FT of the continous helix and the FT of the planes.  \nThe FT of a continous helix consists of equally spaced layer planes (3D) or layerlines (2D projection) that can be described by Bessel functions of increasing orders (0, +/-1, +/-2, ...) from the Fourier origin (i.e. equator). The spacing between the layer planes/lines is determined by the helical pitch (i.e. the shift along the helical axis for a 360 ° turn of the helix). If the structure has additional cyclic symmetry (for example, C6) around the helical axis, only the layer plane/line orders of integer multiplier of the symmetry (e.g. 0, +/-6, +/-12, ...) are visible. The primary peaks of the layer lines in the power spectra form a pattern similar to a X symbol.  \nThe FT of the parallel planes consists of equally spaced points along the helical axis (i.e. meridian) with the spacing being determined by the helical rise.  \nThe convolution of these two components (X-shaped pattern of layer lines and points along the meridian) generates the layer line patterns seen in the power spectra of the projection images of helical structures. The helical indexing task is thus to identify the helical rise, pitch (or twist), and cyclic symmetry that would predict a layer line pattern to explain the observed the layer lines in the power spectra. This Web app allows you to interactively change the helical parameters and superimpose the predicted layer liines on the power spectra to complete the helical indexing task.  \n  \nPS: power spectra; YP: Y-axis power spectra profile; LL: layer lines; m: indices of the X-patterns along the meridian")
+            st.write("This Web app considers a biological helical structure as the product of a continous helix and a set of parallel planes, and based on the covolution theory, the Fourier Transform (FT) of a helical structure would be the convolution of the FT of the continous helix and the FT of the planes.  \nThe FT of a continous helix consists of equally spaced layer planes (3D) or layerlines (2D projection) that can be described by Bessel functions of increasing orders (0, +/-1, +/-2, ...) from the Fourier origin (i.e. equator). The spacing between the layer planes/lines is determined by the helical pitch (i.e. the shift along the helical axis for a 360 ° turn of the helix). If the structure has additional cyclic symmetry (for example, C6) around the helical axis, only the layer plane/line orders of integer multiplier of the symmetry (e.g. 0, +/-6, +/-12, ...) are visible. The primary peaks of the layer lines in the power spectra form a pattern similar to a X symbol.  \nThe FT of the parallel planes consists of equally spaced points along the helical axis (i.e. meridian) with the spacing being determined by the helical rise.  \nThe convolution of these two components (X-shaped pattern of layer lines and points along the meridian) generates the layer line patterns seen in the power spectra of the projection images of helical structures. The helical indexing task is thus to identify the helical rise, pitch (or twist), and cyclic symmetry that would predict a layer line pattern to explain the observed the layer lines in the power spectra. This Web app allows you to interactively change the helical parameters and superimpose the predicted layer liines on the power spectra to complete the helical indexing task.  \n  \nPS: power spectra; YP: Y-axis power spectra profile; LL: layer lines; m: indices of the X-patterns along the meridian; Jn: Bessel order")
         
         # make radio display horizontal
         st.write('<style>div.Widget.row-widget.stRadio > div{flex-direction:row;}</style>', unsafe_allow_html=True)
@@ -166,8 +166,9 @@ def main():
         resx = np.abs(1./sx)
         resy = np.abs(1./sy)
         res  = 1./np.hypot(sx, sy)
+        bessel = bessel_n_image(ny, nx, cutoff_res_x, radius)
 
-        source_data = dict(image=[pwr], x=[-nx//2*dsx], y=[-ny//2*dsy], dw=[nx*dsx], dh=[ny*dsy], resx=[resx], resy=[resy], res=[res])
+        source_data = dict(image=[pwr], x=[-nx//2*dsx], y=[-ny//2*dsy], dw=[nx*dsx], dh=[ny*dsy], resx=[resx], resy=[resy], res=[res], bessel=[bessel])
         from bokeh.models import LinearColorMapper
         palette = 'Viridis256' if show_pseudocolor else 'Greys256'
         color_mapper = LinearColorMapper(palette=palette)    # Greys256, Viridis256
@@ -176,7 +177,7 @@ def main():
                 )
         # add hover tool only for the image
         from bokeh.models.tools import HoverTool
-        tooltips = [("Res", "@resÅ"), ('Res x', '@resxÅ'), ('Res y', '@resyÅ'), ('PS', '@image')]
+        tooltips = [("Res", "@resÅ"), ('Res x', '@resxÅ'), ('Res y', '@resyÅ'), ('Jn', '@bessel'), ('PS', '@image')]
         image_hover = HoverTool(renderers=[image], tooltips=tooltips)
         fig.add_tools(image_hover)
 
@@ -260,6 +261,28 @@ def main():
         st.bokeh_chart(fig, use_container_width=False)
 
         return
+
+@st.cache(persist=True, show_spinner=False)
+def bessel_n_image(ny, nx, nyquist_res_x, radius):
+    import numpy as np
+    ds = 1./(nyquist_res_x*nx//2)
+    x = 2*np.pi * np.abs(np.arange(nx)-nx//2)*ds * radius
+
+    from scipy.special import jnp_zeros
+    xmax = x.max()
+    table = [0]
+    n = 1
+    while True:
+        peak_x = jnp_zeros(n, 1)[0] # first peak
+        if peak_x<xmax: table.append(peak_x)
+        else: break
+        n += 1
+    table = np.asarray(table)
+    
+    x = np.expand_dims(x, axis=-1) 
+    indices = np.abs(table - x).argmin(axis=-1)
+    ret = np.tile(indices, (ny, 1))
+    return ret
 
 @st.cache(persist=True, show_spinner=False)
 def simulate_helix(twist, rise, csym, helical_radius, ball_radius, ny, nx, apix, tilt=0, az0=None):
