@@ -45,10 +45,12 @@ def main():
         original_image = st.empty()
         with original_image:
             st.image(data, width=nx, caption=f"Orignal image ({nx}x{ny})", clamp=True)
-        angle = st.number_input('Rotate (°)', value=0.0, min_value=-180., max_value=180., step=1.0)
+        with st.beta_expander(label="Rotate/shift the image", expanded=True):
+            angle = st.number_input('Rotate (°)', value=0.0, min_value=-180., max_value=180., step=1.0)
+            dx = st.number_input('Shift along X-dim (Å)', value=0.0, min_value=-nx*apix, max_value=nx*apix, step=1.0)
         rotated_image = st.empty()
-        if angle!=0:
-            data = rotate_image(data, angle)
+        if angle or dx:
+            data = rotate_shift_image(data, angle, dx/apix)
             with rotated_image:
                 st.image(data, width=nx, caption="Rotated image", clamp=True)
         plotx = st.empty()
@@ -62,8 +64,8 @@ def main():
         csym = st.number_input('Csym', value=data_example.csym, min_value=1, max_value=16, step=1)
         radius = st.number_input('Radius (Å)', value=data_example.diameter/2., min_value=10.0, max_value=1000.0, step=10., format="%.1f")
         tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-90.0, max_value=90.0, step=1.0)
-        cutoff_res_x = st.number_input('Limit FFT X-dim to resolution (Å)', value=max(float(round(rise*0.3)), 2*apix), min_value=2*apix, step=1.0)
-        cutoff_res_y = st.number_input('Limit FFT Y-dim to resolution (Å)', value=max(float(round(rise*0.3)), 2*apix), min_value=2*apix, step=1.0)
+        cutoff_res_x = st.number_input('Limit FFT X-dim to resolution (Å)', value=round(3*apix, 0), min_value=2*apix, step=1.0)
+        cutoff_res_y = st.number_input('Limit FFT Y-dim to resolution (Å)', value=round(3*apix, 0), min_value=2*apix, step=1.0)
         pnx = st.number_input('FFT X-dim size (pixels)', value=max(nx, 512), min_value=min(nx, 128), step=2)
         pny = st.number_input('FFT Y-dim size (pixels)', value=max(ny, 1024), min_value=min(ny, 512), step=2)
         st.subheader("Simulate the helix with Gaussians")
@@ -123,7 +125,7 @@ def main():
         proj = simulate_helix(twist, rise, csym, helical_radius=radius, ball_radius=ball_radius, 
                 ny=data.shape[0], nx=data.shape[1], apix=apix, tilt=tilt, az0=az)
         proj = tapering(proj, fraction=0.3)
-        if angle:
+        if angle or dx:
             image_container = rotated_image
             image_label = "Rotated image"
         else:
@@ -205,7 +207,7 @@ def main():
 
         if show_yprofile:
             y=np.arange(-ny//2, ny//2)*dsy
-            ll_profile = np.mean(pwr, axis=1)
+            ll_profile = np.max(pwr, axis=1)
             ll_profile /= ll_profile.max()
             source_data = dict(ll=ll_profile, y=y, resy=np.abs(1./y))
             if fig_proj:
@@ -402,11 +404,16 @@ def tapering(data, fraction=0):
     return data2
 
 @st.cache(persist=True, show_spinner=False)
-def rotate_image(data, angle=0):
-    if angle==0: return data
-    from skimage.transform import rotate
-    data = rotate(data, angle)  
-    return data
+def rotate_shift_image(data, angle=0, dx=0, dy=0):
+    if angle==0 and dx==0 and dy==0: return data
+    ny, nx = data.shape
+    center = np.array((ny//2, nx//2), dtype=np.float)
+    ang = np.deg2rad(angle)
+    m = np.array([[np.cos(ang), np.sin(ang)], [-np.sin(ang), np.cos(ang)]])
+    offset = center.T - np.dot(m, center.T) - np.array([-dy, dx]).T
+    from scipy.ndimage import affine_transform
+    ret = affine_transform(data, matrix=m, offset=offset, mode='nearest')
+    return ret
 
 @st.cache(persist=True, show_spinner=False)
 def normalize(data, percentile=(0, 100)):
