@@ -102,11 +102,16 @@ def main():
         show_pitch = st.checkbox(label="Pitch", value=True)
         with pitch_or_twist:
             if show_pitch:
-                pitch = st.number_input('Pitch (Å)', value=360./data_example.twist*rise, min_value=-pny*apix, max_value=pny*apix, step=1.0, format="%.2f")
+                pitch = st.number_input('Pitch (Å)', value=data_example.pitch, min_value=1.0, max_value=pny//2*apix, step=1.0, format="%.2f")
+                if pitch < cutoff_res_y:
+                    st.warning(f"pitch is too small. it should be > {cutoff_res_y} (Limit FFT X-dim to resolution (Å))")
+                    return
                 twist = 360./(pitch/rise)
                 st.markdown(f"*(twist = {twist:.2f} Å)*")
             else:
                 twist = st.number_input('Twist (°)', value=data_example.twist, min_value=-180.0, max_value=180.0, step=1.0, format="%.2f")
+                pitch = (360./twist)*rise
+                st.markdown(f"*(pitch = {pitch:.2f} Å)*")
         show_pwr = st.checkbox(label="PS", value=True)
         show_yprofile = st.checkbox(label="YP", value=True)
         show_pseudocolor = st.checkbox(label="Color", value=True)
@@ -481,6 +486,7 @@ class Data(object):
     def __init__(self, twist, rise, csym, diameter, apix, url=None):
         self.twist = twist
         self.rise = rise
+        self.pitch = (360./twist)*rise
         self.csym = csym
         self.diameter = diameter
         self.apix = apix
