@@ -45,12 +45,14 @@ def main():
         original_image = st.empty()
         with original_image:
             st.image(data, width=nx, caption=f"Orignal image ({nx}x{ny})", clamp=True)
-        with st.beta_expander(label="Rotate/shift the image", expanded=True):
-            angle = st.number_input('Rotate (°)', value=0.0, min_value=-180., max_value=180., step=1.0)
-            dx = st.number_input('Shift along X-dim (Å)', value=0.0, min_value=-nx*apix, max_value=nx*apix, step=1.0)
+
+        with st.beta_expander(label="Rotate/shift the image", expanded=False):
+            angle_auto, dy_auto, dx_auto = auto_vertical_center(data)
+            angle = st.number_input('Rotate (°)', value=-angle_auto, min_value=-180., max_value=180., step=1.0)
+            dx = st.number_input('Shift along X-dim (Å)', value=dx_auto*apix, min_value=-nx*apix, max_value=nx*apix, step=1.0)
         rotated_image = st.empty()
         if angle or dx:
-            data = rotate_shift_image(data, angle, dx/apix)
+            data = rotate_shift_image(data, angle=-angle, post_shift=(0, dx/apix), order=3)
             with rotated_image:
                 st.image(data, width=nx, caption="Rotated image", clamp=True)
         plotx = st.empty()
@@ -79,7 +81,8 @@ def main():
 
         from bokeh.plotting import figure
         tools = 'box_zoom,crosshair,hover,pan,reset,save,wheel_zoom'
-        p = figure(x_axis_label="pixel value", y_axis_label="y (Å)", frame_height=ny, tools=tools)
+        tooltips = [("Y", "@y{0.0}Å")]
+        p = figure(x_axis_label="pixel value", y_axis_label="y (Å)", frame_height=ny, tools=tools, tooltips=tooltips)
         p.line(xmax, y, line_width=2, color='red')
         p.line(xmean, y, line_width=2, color='blue')
         st.bokeh_chart(p, use_container_width=True)
@@ -91,7 +94,8 @@ def main():
 
         from bokeh.plotting import figure
         tools = 'box_zoom,crosshair,hover,pan,reset,save,wheel_zoom'
-        p = figure(x_axis_label="x (Å)", y_axis_label="pixel value", frame_height=ny, tools=tools)
+        tooltips = [("X", "@x{0.0}Å")]
+        p = figure(x_axis_label="x (Å)", y_axis_label="pixel value", frame_height=ny, tools=tools, tooltips=tooltips)
         p.line(x, ymax, line_width=2, color='red', legend_label="max")
         p.line(x, ymean, line_width=2, color='blue', legend_label="mean")
         p.legend.location = "top_right"
@@ -444,15 +448,44 @@ def tapering(data, fraction=0):
     return data2
 
 @st.cache(persist=True, show_spinner=False)
-def rotate_shift_image(data, angle=0, dx=0, dy=0):
-    if angle==0 and dx==0 and dy==0: return data
+def auto_vertical_center(image):
+    ny, nx = image.shape
+    def score_rotation(angle):
+        tmp = rotate_shift_image(data=image, angle=angle)
+        y_proj = tmp.sum(axis=0)
+        percentiles = (100, 95, 90, 85, 80) # more robust than max alone
+        y_values = np.percentile(y_proj, percentiles)
+        err = -np.sum(y_values)
+        return err
+    from scipy.optimize import minimize_scalar
+    res = minimize_scalar(score_rotation, bounds=(-90, 90), method='bounded')
+    angle = res.x
+    tmp = rotate_shift_image(data=image, angle=angle)
+    thresh = tmp.max()*0.2
+    tmp[tmp<thresh]=0
+    from scipy.ndimage.measurements import center_of_mass
+    cy, cx = center_of_mass(tmp)
+    dy = ny//2 - cy
+    dx = nx//2 - cx
+    return angle, dy, dx
+
+def rotate_shift_image(data, angle=0, pre_shift=(0, 0), post_shift=(0, 0), rotation_center=None, order=1):
+    # pre_shift/rotation_center/post_shift: [y, x]
+    if angle==0 and pre_shift==[0,0] and post_shift==[0,0]: return data*1.0
     ny, nx = data.shape
-    center = np.array((ny//2, nx//2), dtype=np.float)
+    if rotation_center is None:
+        rotation_center = np.array((ny//2, nx//2), dtype=np.float)
     ang = np.deg2rad(angle)
-    m = np.array([[np.cos(ang), np.sin(ang)], [-np.sin(ang), np.cos(ang)]])
-    offset = center.T - np.dot(m, center.T) - np.array([-dy, dx]).T
+    m = np.array([[np.cos(ang), -np.sin(ang)], [np.sin(ang), np.cos(ang)]])
+    pre_dy, pre_dx = pre_shift    
+    post_dy, post_dx = post_shift
+
+    offset = -np.dot(m, np.array([post_dy, post_dx]).T) # post_rotation shift
+    offset += np.array(rotation_center).T - np.dot(m, np.array(rotation_center).T)  # rotation around the specified center
+    offset += -np.array([pre_dy, pre_dx]).T     # pre-rotation shift
+
     from scipy.ndimage import affine_transform
-    ret = affine_transform(data, matrix=m, offset=offset, mode='nearest')
+    ret = affine_transform(data, matrix=m, offset=offset, order=order, mode='constant')
     return ret
 
 @st.cache(persist=True, show_spinner=False)
