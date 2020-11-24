@@ -83,8 +83,21 @@ def main():
         tools = 'box_zoom,crosshair,hover,pan,reset,save,wheel_zoom'
         tooltips = [("Y", "@y{0.0}Å")]
         p = figure(x_axis_label="pixel value", y_axis_label="y (Å)", frame_height=ny, tools=tools, tooltips=tooltips)
-        p.line(xmax, y, line_width=2, color='red')
-        p.line(xmean, y, line_width=2, color='blue')
+        p.line(xmax, y, line_width=2, color='red', legend_label="max")
+        p.line(xmean, y, line_width=2, color='blue', legend_label="mean")
+        p.legend.location = "top_right"
+        p.legend.click_policy="hide"
+        from bokeh import events
+        from bokeh.models import CustomJS
+        toggle_legend_js_y = CustomJS(args=dict(leg=p.legend[0]), code="""
+            if (leg.visible) {
+                leg.visible = false
+                }
+            else {
+                leg.visible = true
+            }
+         """)
+        p.js_on_event(events.DoubleTap, toggle_legend_js_y)
         st.bokeh_chart(p, use_container_width=True)
 
     with plotx:
@@ -99,6 +112,16 @@ def main():
         p.line(x, ymax, line_width=2, color='red', legend_label="max")
         p.line(x, ymean, line_width=2, color='blue', legend_label="mean")
         p.legend.location = "top_right"
+        p.legend.click_policy="hide"
+        toggle_legend_js_x = CustomJS(args=dict(leg=p.legend[0]), code="""
+            if (leg.visible) {
+                leg.visible = false
+                }
+            else {
+                leg.visible = true
+            }
+         """)
+        p.js_on_event(events.DoubleTap, toggle_legend_js_x)
         st.bokeh_chart(p, use_container_width=True)
 
     with col3:
