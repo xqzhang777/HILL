@@ -47,8 +47,9 @@ def main():
         with original_image:
             st.image(data, width=min(600, nx), caption=f"Orignal image ({nx}x{ny})", clamp=True)
 
-        with st.beta_expander(label="Transpose/Rotate/shift the image", expanded=False):
-            transpose = st.checkbox('Transpose the image', value=False)
+        with st.beta_expander(label="Transpose/Rotate/Shift the image", expanded=False):
+            is_pwr = st.checkbox(label="Input image is power spectra", value=False)
+            transpose = st.checkbox(label='Transpose the image', value=False)
             if transpose:
                 data = data.T
                 ny, nx = data.shape
@@ -59,8 +60,7 @@ def main():
         if angle or dx:
             data = rotate_shift_image(data, angle=-angle, post_shift=(0, dx/apix), order=3)
             with rotated_image:
-                st.image(data, width=min(600, nx), caption="Rotated image", clamp=True)
-        is_pwr = st.checkbox(label="Input image is power spectra", value=False)
+                st.image(data, width=min(600, nx), caption="Transformed image", clamp=True)
         plotx = st.empty()
         ploty = st.empty()
         st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to Wen Jiang (jiang12 at purdue.edu)*")
@@ -271,23 +271,27 @@ def main():
             fig_y = None
 
         if show_LL:
-            from bokeh.palettes import viridis, gray
-            if show_pseudocolor:
-                ll_colors = gray(ng*2)[::-1]
+            if max(m_groups[0]["LL"][0])>0:
+                from bokeh.palettes import viridis, gray
+                if show_pseudocolor:
+                    ll_colors = gray(ng*2)[::-1]
+                else:
+                    ll_colors = viridis(ng*2)[::-1]
+                x, y = m_groups[0]["LL"]
+                tmp_x = np.sort(np.unique(x))
+                width = np.mean(tmp_x[1:]-tmp_x[:-1])
+                tmp_y = np.sort(np.unique(y))
+                height = np.mean(tmp_y[1:]-tmp_y[:-1])/3
+                for mi, m in enumerate(m_groups.keys()):
+                    if not show_choices[m]: continue
+                    x, y = m_groups[m]["LL"]
+                    color = ll_colors[mi]
+                    print(mi, m, x, y)
+                    fig.ellipse(x, y, width=width, height=height, line_width=4, line_color=color, fill_alpha=0)
+                    if fig_proj:
+                        fig_proj.ellipse(x, y, width=width, height=height, line_width=4, line_color=color, fill_alpha=0)
             else:
-                ll_colors = viridis(ng*2)[::-1]
-            x, y = m_groups[0]["LL"]
-            tmp_x = np.sort(np.unique(x))
-            width = np.mean(tmp_x[1:]-tmp_x[:-1])
-            tmp_y = np.sort(np.unique(y))
-            height = np.mean(tmp_y[1:]-tmp_y[:-1])/3
-            for mi, m in enumerate(m_groups.keys()):
-                if not show_choices[m]: continue
-                x, y = m_groups[m]["LL"]
-                color = ll_colors[mi]
-                fig.ellipse(x, y, width=width, height=height, line_width=4, line_color=color, fill_alpha=0)
-                if fig_proj:
-                    fig_proj.ellipse(x, y, width=width, height=height, line_width=4, line_color=color, fill_alpha=0)
+                st.warning(f"No off-equator layer lines to draw for Pitch={pitch:.2f} Csym={csym} combinations. Consider increasing Pitch or reducing Csym")
 
         if fig_proj or fig_y:
             figs = [f for f in [fig, fig_y, fig_proj] if f]
@@ -559,48 +563,33 @@ def get_2d_image_from_uploaded_file(fileobj):
     return data, apix
 
 @st.cache(persist=True, show_spinner=False)
-def get_2d_image_from_url(url):
-    known_urls = [ example.url for example in data_examples]
-    if url in known_urls or url.endswith(".class_averages.blob") or url.endswith(".templates_selected.blob"): # cryosparc 2D class averages
-        data, apix = get_2d_image_from_url(url)
-    elif (url.find("emd_")!=-1 and url.endswith(".map.gz")) or url.endswith(".map") or url.endswith(".mrc"):
-        data, apix = get_2d_image_from_url(url)
-    else:
-        from skimage.io import imread
-        data = imread(url)
-        data = np.expand_dims(data, axis=0)
-        apix = 1.0
-    return data, apix
-
-@st.cache(persist=True, show_spinner=False)
 def get_emdb_map_projections(emdid):
     emdid_number = emdid.lower().split("emd-")[-1]
     url = f"ftp://ftp.ebi.ac.uk/pub/databases/emdb/structures/EMD-{emdid_number}/map/emd_{emdid_number}.map.gz"
-    return get_2d_image_from_url(url)
+    return get_2d_image_from_url(url, as_3d=True)
 
 @st.cache(persist=True, show_spinner=False)
-def get_2d_image_from_url(url):
+def get_2d_image_from_url(url, as_3d=False):
     ds = np.DataSource(None)
     fp=ds.open(url)
-    return get_2d_image_from_file(fp.name)
+    return get_2d_image_from_file(fp.name, as_3d=as_3d)
 
 @st.cache(persist=True, show_spinner=False)
-def get_2d_image_from_file(filename):
+def get_2d_image_from_file(filename, as_3d=False):
     import mrcfile
     with mrcfile.open(filename) as mrc:
         data = mrc.data * 1.0
         apix = mrc.voxel_size.x.item()
-        is2d = mrc.is_image_stack() or mrc.is_single_image()
     nz, ny, nx = data.shape
-    if is2d:
-        return data, apix
-    else:
+    if nz>1 and as_3d:
         projs = np.zeros((2, nz, nx))
         for ai, axis in enumerate([1, 2]):
             proj = data.mean(axis=axis)
             proj = normalize(proj, percentile=(0, 100))
             projs[ai] = proj
         return projs, apix
+    else:
+        return data, apix
 class Data(object):
     def __init__(self, twist, rise, csym, diameter, apix, url=None):
         self.twist = twist
