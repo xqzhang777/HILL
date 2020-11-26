@@ -1,3 +1,4 @@
+from bokeh.plotting import figure
 import streamlit as st
 import numpy as np
 
@@ -44,9 +45,13 @@ def main():
         ny, nx = data.shape
         original_image = st.empty()
         with original_image:
-            st.image(data, width=nx, caption=f"Orignal image ({nx}x{ny})", clamp=True)
+            st.image(data, width=min(600, nx), caption=f"Orignal image ({nx}x{ny})", clamp=True)
 
-        with st.beta_expander(label="Rotate/shift the image", expanded=False):
+        with st.beta_expander(label="Transpose/Rotate/shift the image", expanded=False):
+            transpose = st.checkbox('Transpose the image', value=False)
+            if transpose:
+                data = data.T
+                ny, nx = data.shape
             angle_auto, dy_auto, dx_auto = auto_vertical_center(data)
             angle = st.number_input('Rotate (°)', value=-angle_auto, min_value=-180., max_value=180., step=1.0)
             dx = st.number_input('Shift along X-dim (Å)', value=dx_auto*apix, min_value=-nx*apix, max_value=nx*apix, step=1.0)
@@ -54,7 +59,8 @@ def main():
         if angle or dx:
             data = rotate_shift_image(data, angle=-angle, post_shift=(0, dx/apix), order=3)
             with rotated_image:
-                st.image(data, width=nx, caption="Rotated image", clamp=True)
+                st.image(data, width=min(600, nx), caption="Rotated image", clamp=True)
+        is_pwr = st.checkbox(label="Input image is power spectra", value=False)
         plotx = st.empty()
         ploty = st.empty()
         st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to Wen Jiang (jiang12 at purdue.edu)*")
@@ -62,74 +68,73 @@ def main():
     with col2:
         apix = st.number_input('Pixel size (Å/pixel)', value=apix, min_value=0.1, max_value=10., step=0.01, format="%.4f")
         pitch_or_twist = st.beta_container()
-        rise = st.number_input('Rise (Å)', value=data_example.rise, min_value=-180.0, max_value=180.0, step=1.0, format="%.2f")
+        rise = st.number_input('Rise (Å)', value=data_example.rise, min_value=-180.0, max_value=180.0, step=1.0, format="%.3f")
         csym = st.number_input('Csym', value=data_example.csym, min_value=1, max_value=16, step=1)
         radius = st.number_input('Radius (Å)', value=data_example.diameter/2., min_value=10.0, max_value=1000.0, step=10., format="%.1f")
         tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-90.0, max_value=90.0, step=1.0)
         cutoff_res_x = st.number_input('Limit FFT X-dim to resolution (Å)', value=round(3*apix, 0), min_value=2*apix, step=1.0)
         cutoff_res_y = st.number_input('Limit FFT Y-dim to resolution (Å)', value=round(3*apix, 0), min_value=2*apix, step=1.0)
-        pnx = st.number_input('FFT X-dim size (pixels)', value=max(nx, 512), min_value=min(nx, 128), step=2)
-        pny = st.number_input('FFT Y-dim size (pixels)', value=max(ny, 1024), min_value=min(ny, 512), step=2)
+        pnx = st.number_input('FFT X-dim size (pixels)', value=max(min(nx,ny), 512), min_value=min(nx, 128), step=2)
+        pny = st.number_input('FFT Y-dim size (pixels)', value=max(max(nx,ny), 1024), min_value=min(ny, 512), step=2)
         st.subheader("Simulate the helix with Gaussians")
         ball_radius = st.number_input('Gaussian radius (Å)', value=0.0, min_value=0.0, max_value=radius, step=5.0, format="%.1f")
         az = st.number_input('Azimuthal angle (°)', value=0, min_value=0, max_value=360, step=1, format="%.1f")
 
-    with ploty:
-        y = np.arange(-ny//2, ny//2)*apix
-        xmax = np.max(data, axis=1)
-        xmean = np.mean(data, axis=1)
+    if not is_pwr:
+        with ploty:
+            y = np.arange(-ny//2, ny//2)*apix
+            xmax = np.max(data, axis=1)
+            xmean = np.mean(data, axis=1)
 
-        from bokeh.plotting import figure
-        tools = 'box_zoom,crosshair,hover,pan,reset,save,wheel_zoom'
-        tooltips = [("Y", "@y{0.0}Å")]
-        p = figure(x_axis_label="pixel value", y_axis_label="y (Å)", frame_height=ny, tools=tools, tooltips=tooltips)
-        p.line(xmax, y, line_width=2, color='red', legend_label="max")
-        p.line(xmean, y, line_width=2, color='blue', legend_label="mean")
-        p.legend.location = "top_right"
-        p.legend.click_policy="hide"
-        from bokeh import events
-        from bokeh.models import CustomJS
-        toggle_legend_js_y = CustomJS(args=dict(leg=p.legend[0]), code="""
-            if (leg.visible) {
-                leg.visible = false
+            tools = 'box_zoom,crosshair,hover,pan,reset,save,wheel_zoom'
+            tooltips = [("Y", "@y{0.0}Å")]
+            p = figure(x_axis_label="pixel value", y_axis_label="y (Å)", frame_height=ny, tools=tools, tooltips=tooltips)
+            p.line(xmax, y, line_width=2, color='red', legend_label="max")
+            p.line(xmean, y, line_width=2, color='blue', legend_label="mean")
+            p.legend.location = "top_right"
+            p.legend.click_policy="hide"
+            from bokeh import events
+            from bokeh.models import CustomJS
+            toggle_legend_js_y = CustomJS(args=dict(leg=p.legend[0]), code="""
+                if (leg.visible) {
+                    leg.visible = false
+                    }
+                else {
+                    leg.visible = true
                 }
-            else {
-                leg.visible = true
-            }
-         """)
-        p.js_on_event(events.DoubleTap, toggle_legend_js_y)
-        st.bokeh_chart(p, use_container_width=True)
+            """)
+            p.js_on_event(events.DoubleTap, toggle_legend_js_y)
+            st.bokeh_chart(p, use_container_width=True)
 
-    with plotx:
-        x = np.arange(-nx//2, nx//2)*apix
-        ymax = np.max(data, axis=0)
-        ymean = np.mean(data, axis=0)
+        with plotx:
+            x = np.arange(-nx//2, nx//2)*apix
+            ymax = np.max(data, axis=0)
+            ymean = np.mean(data, axis=0)
 
-        from bokeh.plotting import figure
-        tools = 'box_zoom,crosshair,hover,pan,reset,save,wheel_zoom'
-        tooltips = [("X", "@x{0.0}Å")]
-        p = figure(x_axis_label="x (Å)", y_axis_label="pixel value", frame_height=ny, tools=tools, tooltips=tooltips)
-        p.line(x, ymax, line_width=2, color='red', legend_label="max")
-        p.line(x, ymean, line_width=2, color='blue', legend_label="mean")
-        p.legend.location = "top_right"
-        p.legend.click_policy="hide"
-        toggle_legend_js_x = CustomJS(args=dict(leg=p.legend[0]), code="""
-            if (leg.visible) {
-                leg.visible = false
+            tools = 'box_zoom,crosshair,hover,pan,reset,save,wheel_zoom'
+            tooltips = [("X", "@x{0.0}Å")]
+            p = figure(x_axis_label="x (Å)", y_axis_label="pixel value", frame_height=ny, tools=tools, tooltips=tooltips)
+            p.line(x, ymax, line_width=2, color='red', legend_label="max")
+            p.line(x, ymean, line_width=2, color='blue', legend_label="mean")
+            p.legend.location = "top_right"
+            p.legend.click_policy="hide"
+            toggle_legend_js_x = CustomJS(args=dict(leg=p.legend[0]), code="""
+                if (leg.visible) {
+                    leg.visible = false
+                    }
+                else {
+                    leg.visible = true
                 }
-            else {
-                leg.visible = true
-            }
-         """)
-        p.js_on_event(events.DoubleTap, toggle_legend_js_x)
-        st.bokeh_chart(p, use_container_width=True)
+            """)
+            p.js_on_event(events.DoubleTap, toggle_legend_js_x)
+            st.bokeh_chart(p, use_container_width=True)
 
     with col3:
         st.subheader("Display:")
         show_pitch = st.checkbox(label="Pitch", value=True)
         with pitch_or_twist:
             if show_pitch:
-                pitch = st.number_input('Pitch (Å)', value=data_example.pitch, min_value=1.0, max_value=pny//2*apix, step=1.0, format="%.2f")
+                pitch = st.number_input('Pitch (Å)', value=data_example.pitch, min_value=1.0, max_value=max(pny,pnx)*apix, step=1.0, format="%.2f")
                 if pitch < cutoff_res_y:
                     st.warning(f"pitch is too small. it should be > {cutoff_res_y} (Limit FFT X-dim to resolution (Å))")
                     return
@@ -170,9 +175,13 @@ def main():
         if not show_pwr:
             return
 
-        data = tapering(data, fraction=0.1)
-        pwr = compute_power_spectra(data, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
-                output_size=(pny, pnx), low_pass_fraction=0.2, high_pass_fraction=0.004)
+        if is_pwr:
+            pwr = resize_rescale_power_spectra(data, nyquist_res=2*apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
+                    output_size=(pny, pnx), low_pass_fraction=0.2, high_pass_fraction=0.004)
+        else:
+            data = tapering(data, fraction=0.1)
+            pwr = compute_power_spectra(data, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
+                    output_size=(pny, pnx), low_pass_fraction=0.2, high_pass_fraction=0.004)
 
         ny, nx = pwr.shape
         dsy = 1/(ny//2*cutoff_res_y)
@@ -381,7 +390,7 @@ def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m=
         return sx
 
     if not m:
-        m_max = int(np.floor(np.abs(rise/cutoff_res)))
+        m_max = int(np.floor(np.abs(rise/cutoff_res)))+2
         m = list(range(-m_max, m_max+1))
         m.sort(key=lambda x: (abs(x), x))   # 0, -1, 1, -2, 2, ...
     
@@ -414,24 +423,27 @@ def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m=
     return m_groups
 
 @st.cache(persist=True, show_spinner=False)
+def resize_rescale_power_spectra(data, nyquist_res, cutoff_res=None, output_size=None, low_pass_fraction=0, high_pass_fraction=0):
+    from scipy.ndimage.interpolation import map_coordinates
+    ny, nx = data.shape
+    ony, onx = output_size
+    res_y, res_x = cutoff_res
+    Y, X = np.meshgrid(np.arange(ony, dtype=np.float)-ony//2, np.arange(onx, dtype=np.float)-onx//2, indexing='ij')
+    Y = Y/(ony//2) * nyquist_res/res_y * ny//2 + ny//2
+    X = X/(onx//2) * nyquist_res/res_x * nx//2 + nx//2
+    pwr = map_coordinates(data, (Y.flatten(), X.flatten()), order=3, mode='constant').reshape(Y.shape)
+    pwr = np.log(np.abs(pwr))
+    if 0<low_pass_fraction<1 or 0<high_pass_fraction<1:
+        pwr = low_high_pass_filter(pwr, low_pass_fraction=low_pass_fraction, high_pass_fraction=high_pass_fraction)
+    pwr = normalize(pwr, percentile=(0, 100))
+    return pwr
+
+@st.cache(persist=True, show_spinner=False)
 def compute_power_spectra(data, apix, cutoff_res=None, output_size=None, low_pass_fraction=0, high_pass_fraction=0):
     fft = fft_rescale(data, apix=apix, cutoff_res=cutoff_res, output_size=output_size)
     pwr = np.log(np.abs(np.fft.fftshift(fft)))
     if 0<low_pass_fraction<1 or 0<high_pass_fraction<1:
-        fft = np.fft.fft2(pwr)
-        ny, nx = fft.shape
-        Y, X = np.meshgrid(np.arange(ny, dtype=np.float)-ny//2, np.arange(nx, dtype=np.float)-nx//2, indexing='ij')
-        Y /= ny//2
-        X /= nx//2
-        if 0<low_pass_fraction<1:
-            f2 = np.log(2)/(low_pass_fraction**2)
-            filter_lp = np.exp(- f2 * (X**2+Y**2))
-            fft *= np.fft.fftshift(filter_lp)
-        if 0<high_pass_fraction<1:
-            f2 = np.log(2)/(high_pass_fraction**2)
-            filter_hp = 1.0 - np.exp(- f2 * (X**2+Y**2))
-            fft *= np.fft.fftshift(filter_hp)
-        pwr = np.abs(np.fft.ifft2(fft))
+        pwr = low_high_pass_filter(pwr, low_pass_fraction=low_pass_fraction, high_pass_fraction=high_pass_fraction)
     pwr = normalize(pwr, percentile=(0, 100))
     return pwr
 
@@ -456,6 +468,24 @@ def fft_rescale(image, apix=1.0, cutoff_res=None, output_size=None):
     fft = fft.reshape((ony, onx))
 
     return fft
+
+@st.cache(persist=True, show_spinner=False)
+def low_high_pass_filter(data, low_pass_fraction=0, high_pass_fraction=0):
+    fft = np.fft.fft2(data)
+    ny, nx = fft.shape
+    Y, X = np.meshgrid(np.arange(ny, dtype=np.float)-ny//2, np.arange(nx, dtype=np.float)-nx//2, indexing='ij')
+    Y /= ny//2
+    X /= nx//2
+    if 0<low_pass_fraction<1:
+        f2 = np.log(2)/(low_pass_fraction**2)
+        filter_lp = np.exp(- f2 * (X**2+Y**2))
+        fft *= np.fft.fftshift(filter_lp)
+    if 0<high_pass_fraction<1:
+        f2 = np.log(2)/(high_pass_fraction**2)
+        filter_hp = 1.0 - np.exp(- f2 * (X**2+Y**2))
+        fft *= np.fft.fftshift(filter_hp)
+    ret = np.abs(np.fft.ifft2(fft))
+    return ret
 
 @st.cache(persist=True, show_spinner=False)
 def tapering(data, fraction=0):
@@ -562,8 +592,6 @@ def get_2d_image_from_file(filename):
         apix = mrc.voxel_size.x.item()
         is2d = mrc.is_image_stack() or mrc.is_single_image()
     nz, ny, nx = data.shape
-    assert( nx==ny )
-
     if is2d:
         return data, apix
     else:
