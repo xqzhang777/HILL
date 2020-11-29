@@ -53,15 +53,26 @@ def main():
             if transpose:
                 data = data.T
                 ny, nx = data.shape
-            angle_auto, dy_auto, dx_auto = auto_vertical_center(data)
+            angle_auto, dx_auto = auto_vertical_center(data)
             angle = st.number_input('Rotate (°)', value=-angle_auto, min_value=-180., max_value=180., step=1.0)
             dx = st.number_input('Shift along X-dim (Å)', value=dx_auto*apix, min_value=-nx*apix, max_value=nx*apix, step=1.0)
+        
         rotated_image = st.empty()
         if angle or dx:
             data = rotate_shift_image(data, angle=-angle, post_shift=(0, dx/apix), order=3)
             with rotated_image:
                 st.image(data, width=min(600, nx), caption="Transformed image", clamp=True)
+
+        radius_auto, mask_radius_auto = estimate_radial_range(data, thresh_ratio=0.1)
+
         plotx = st.empty()
+        mask_radius = st.number_input('Mask radius (Å)', value=mask_radius_auto*apix, min_value=1.0, max_value=nx/2*apix, step=1.0, format="%.1f")
+
+        fraction_x = mask_radius/(nx//2*apix)
+        data = tapering(data, fraction_start=[0.9, fraction_x], fraction_slope=0.1)
+        with rotated_image:
+            st.image(data, width=min(600, nx), caption="Transformed image", clamp=True)
+
         ploty = st.empty()
         st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to Wen Jiang (jiang12 at purdue.edu)*")
 
@@ -70,7 +81,9 @@ def main():
         pitch_or_twist = st.beta_container()
         rise = st.number_input('Rise (Å)', value=data_example.rise, min_value=-180.0, max_value=180.0, step=1.0, format="%.3f")
         csym = st.number_input('Csym', value=data_example.csym, min_value=1, max_value=16, step=1)
-        radius = st.number_input('Radius (Å)', value=data_example.diameter/2., min_value=10.0, max_value=1000.0, step=10., format="%.1f")
+
+        radius = st.number_input('Radius (Å)', value=radius_auto*apix, min_value=10.0, max_value=1000.0, step=10., format="%.1f")
+        
         tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-90.0, max_value=90.0, step=1.0)
         cutoff_res_x = st.number_input('Limit FFT X-dim to resolution (Å)', value=round(3*apix, 0), min_value=2*apix, step=1.0)
         cutoff_res_y = st.number_input('Limit FFT Y-dim to resolution (Å)', value=round(3*apix, 0), min_value=2*apix, step=1.0)
@@ -115,7 +128,14 @@ def main():
             tooltips = [("X", "@x{0.0}Å")]
             p = figure(x_axis_label="x (Å)", y_axis_label="pixel value", frame_height=ny, tools=tools, tooltips=tooltips)
             p.line(x, ymax, line_width=2, color='red', legend_label="max")
+            p.line(-x, ymax, line_width=2, color='red', line_dash="dashed", legend_label="max flipped")
             p.line(x, ymean, line_width=2, color='blue', legend_label="mean")
+            p.line(-x, ymean, line_width=2, color='blue', line_dash="dashed", legend_label="mean flipped")
+            from bokeh.models import Span
+            rmin_span = Span(location=-mask_radius, dimension='height', line_color='green', line_dash='dashed', line_width=3)
+            rmax_span = Span(location=mask_radius, dimension='height', line_color='green', line_dash='dashed', line_width=3)
+            p.add_layout(rmin_span)
+            p.add_layout(rmax_span)
             p.legend.location = "top_right"
             p.legend.click_policy="hide"
             toggle_legend_js_x = CustomJS(args=dict(leg=p.legend[0]), code="""
@@ -161,7 +181,7 @@ def main():
     if ball_radius>0:
         proj = simulate_helix(twist, rise, csym, helical_radius=radius, ball_radius=ball_radius, 
                 ny=data.shape[0], nx=data.shape[1], apix=apix, tilt=tilt, az0=az)
-        proj = tapering(proj, fraction=0.3)
+        proj = tapering(proj, fraction_start=[0.7, 0], fraction_slope=0.1)
         if angle or dx:
             image_container = rotated_image
             image_label = "Rotated image"
@@ -179,8 +199,7 @@ def main():
             pwr = resize_rescale_power_spectra(data, nyquist_res=2*apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
                     output_size=(pny, pnx), low_pass_fraction=0.2, high_pass_fraction=0.004)
         else:
-            data = tapering(data, fraction=0.1)
-            pwr = compute_power_spectra(data, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
+            pwr, _ = compute_power_spectra(data, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
                     output_size=(pny, pnx), low_pass_fraction=0.2, high_pass_fraction=0.004)
 
         ny, nx = pwr.shape
@@ -199,21 +218,21 @@ def main():
         fig.title.text_font_size = "20px"
 
         sy, sx = np.meshgrid(np.arange(-ny//2, ny//2)*dsy, np.arange(-nx//2, nx//2)*dsx, indexing='ij', copy=False)
-        resx = np.abs(1./sx)
-        resy = np.abs(1./sy)
-        res  = 1./np.hypot(sx, sy)
+        sy = sy.astype(np.float32)
+        sx = sx.astype(np.float32)
+        resx = np.abs(1./sx).astype(np.float32)
+        resy = np.abs(1./sy).astype(np.float32)
+        res  = 1./np.hypot(sx, sy).astype(np.float32)
         bessel = bessel_n_image(ny, nx, cutoff_res_x, cutoff_res_y, radius, tilt)
 
-        source_data = dict(image=[pwr], x=[-nx//2*dsx], y=[-ny//2*dsy], dw=[nx*dsx], dh=[ny*dsy], resx=[resx], resy=[resy], res=[res], bessel=[bessel])
+        source_data = dict(image=[pwr.astype(np.float32)], x=[-nx//2*dsx], y=[-ny//2*dsy], dw=[nx*dsx], dh=[ny*dsy], resx=[resx], resy=[resy], res=[res], bessel=[bessel])
         from bokeh.models import LinearColorMapper
         palette = 'Viridis256' if show_pseudocolor else 'Greys256'
         color_mapper = LinearColorMapper(palette=palette)    # Greys256, Viridis256
-        image = fig.image(source=source_data, image='image', color_mapper=color_mapper,
-                    x='x', y='y', dw='dw', dh='dh'
-                )
+        image = fig.image(source=source_data, image='image', color_mapper=color_mapper, x='x', y='y', dw='dw', dh='dh')
         # add hover tool only for the image
         from bokeh.models.tools import HoverTool
-        tooltips = [("Res", "@resÅ"), ('Res x', '@resxÅ'), ('Res y', '@resyÅ'), ('Jn', '@bessel'), ('PS', '@image')]
+        tooltips = [("Res", "@resÅ"), ('Res y', '@resyÅ'), ('Res x', '@resxÅ'), ('Jn', '@bessel'), ('PS', '@image')]
         image_hover = HoverTool(renderers=[image], tooltips=tooltips)
         fig.add_tools(image_hover)
 
@@ -224,7 +243,7 @@ def main():
         fig.add_tools(crosshair)
 
         if ball_radius>0:
-            proj_pwr = compute_power_spectra(proj, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
+            proj_pwr, _ = compute_power_spectra(proj, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
                     output_size=(pny, pnx), low_pass_fraction=0.2, high_pass_fraction=0.004)
 
             fig_proj = figure(title_location="below", frame_width=nx, frame_height=ny, 
@@ -236,7 +255,7 @@ def main():
             fig_proj.title.align = "center"
             fig_proj.title.text_font_size = "20px"
 
-            source_data["image"] = [proj_pwr]
+            source_data["image"] = [proj_pwr.astype(np.float32)]
             proj_image = fig_proj.image(source=source_data, image='image', color_mapper=color_mapper,
                         x='x', y='y', dw='dw', dh='dh'
                     )
@@ -286,7 +305,6 @@ def main():
                     if not show_choices[m]: continue
                     x, y = m_groups[m]["LL"]
                     color = ll_colors[mi]
-                    print(mi, m, x, y)
                     fig.ellipse(x, y, width=width, height=height, line_width=4, line_color=color, fill_alpha=0)
                     if fig_proj:
                         fig_proj.ellipse(x, y, width=width, height=height, line_width=4, line_color=color, fill_alpha=0)
@@ -296,7 +314,7 @@ def main():
         if fig_proj or fig_y:
             figs = [f for f in [fig, fig_y, fig_proj] if f]
             from bokeh.layouts import gridplot
-            fig = gridplot([figs], toolbar_location='right')
+            fig = gridplot(children=[figs], toolbar_location='right')
         
         st.bokeh_chart(fig, use_container_width=False)
 
@@ -319,7 +337,7 @@ def bessel_n_image(ny, nx, nyquist_res_x, nyquist_res_y, radius, tilt):
     if tilt:
         dsx = 1./(nyquist_res_x*nx//2)
         dsy = 1./(nyquist_res_x*ny//2)
-        Y, X = np.meshgrid(np.arange(ny)-ny//2, np.arange(nx)-nx//2, indexing='ij')
+        Y, X = np.meshgrid(np.arange(ny, dtype=np.float32)-ny//2, np.arange(nx, dtype=np.float32)-nx//2, indexing='ij')
         Y = 2*np.pi * np.abs(Y)*dsy * radius
         X = 2*np.pi * np.abs(X)*dsx * radius
         Y /= np.cos(np.deg2rad(tilt))
@@ -327,21 +345,21 @@ def bessel_n_image(ny, nx, nyquist_res_x, nyquist_res_y, radius, tilt):
         table = build_bessel_order_table(X.max())        
         X = np.expand_dims(X.flatten(), axis=-1)
         indices = np.abs(table - X).argmin(axis=-1)
-        return np.reshape(indices, (ny, nx))
+        return np.reshape(indices, (ny, nx)).astype(np.int16)
     else:
         ds = 1./(nyquist_res_x*nx//2)
         xs = 2*np.pi * np.abs(np.arange(nx)-nx//2)*ds * radius
         table = build_bessel_order_table(xs.max())        
         xs = np.expand_dims(xs, axis=-1) 
         indices = np.abs(table - xs).argmin(axis=-1)
-        return np.tile(indices, (ny, 1))
+        return np.tile(indices, (ny, 1)).astype(np.int16)
 
 @st.cache(persist=True, show_spinner=False)
 def simulate_helix(twist, rise, csym, helical_radius, ball_radius, ny, nx, apix, tilt=0, az0=None):
     def simulate_projection(centers, sigma, ny, nx, apix):
         sigma2 = sigma*sigma
         d = np.zeros((ny, nx))
-        Y, X = np.meshgrid(np.arange(0, ny, dtype=np.float)-ny//2, np.arange(0, nx, dtype=np.float)-nx//2, indexing='ij')
+        Y, X = np.meshgrid(np.arange(0, ny, dtype=np.float32)-ny//2, np.arange(0, nx, dtype=np.float32)-nx//2, indexing='ij')
         X *= apix
         Y *= apix
         for ci in range(len(centers)):
@@ -355,7 +373,7 @@ def simulate_helix(twist, rise, csym, helical_radius, ball_radius, ny, nx, apix,
         i0 = -imax
         i1 = imax
         
-        centers = np.zeros(((2*imax+1)*csym, 3), dtype=np.float)
+        centers = np.zeros(((2*imax+1)*csym, 3), dtype=np.float32)
         for i in range(i0, i1+1):
             z = rise*i
             for si in range(csym):
@@ -412,12 +430,12 @@ def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m=
         ds_p = 1/p
         ll_i_top = int((smax - sy0)/ds_p)
         ll_i_bottom = -int(np.abs(-smax - sy0)/ds_p)
-        ll_i = np.array([i for i in range(ll_i_bottom, ll_i_top+1) if not i%csym])
+        ll_i = np.array([i for i in range(ll_i_bottom, ll_i_top+1) if not i%csym], dtype=np.float32)
         sy = sy0 + ll_i * ds_p
         sx = peak_sx(bessel_order=ll_i, radius=radius)
         if tilt:
-            sy = np.array(sy) * tf
-            sx = np.sqrt(np.power(np.array(sx), 2) - np.power(sy*tf2, 2))
+            sy = np.array(sy, dtype=np.float32) * tf
+            sx = np.sqrt(np.power(np.array(sx, dtype=np.float32), 2) - np.power(sy*tf2, 2))
             sx[np.isnan(sx)] = 1e-6
         px  = list(sx) + list(-sx)
         py  = list(sy) + list(sy)
@@ -432,7 +450,7 @@ def resize_rescale_power_spectra(data, nyquist_res, cutoff_res=None, output_size
     ny, nx = data.shape
     ony, onx = output_size
     res_y, res_x = cutoff_res
-    Y, X = np.meshgrid(np.arange(ony, dtype=np.float)-ony//2, np.arange(onx, dtype=np.float)-onx//2, indexing='ij')
+    Y, X = np.meshgrid(np.arange(ony, dtype=np.float32)-ony//2, np.arange(onx, dtype=np.float32)-onx//2, indexing='ij')
     Y = Y/(ony//2) * nyquist_res/res_y * ny//2 + ny//2
     X = X/(onx//2) * nyquist_res/res_x * nx//2 + nx//2
     pwr = map_coordinates(data, (Y.flatten(), X.flatten()), order=3, mode='constant').reshape(Y.shape)
@@ -445,11 +463,15 @@ def resize_rescale_power_spectra(data, nyquist_res, cutoff_res=None, output_size
 @st.cache(persist=True, show_spinner=False)
 def compute_power_spectra(data, apix, cutoff_res=None, output_size=None, low_pass_fraction=0, high_pass_fraction=0):
     fft = fft_rescale(data, apix=apix, cutoff_res=cutoff_res, output_size=output_size)
-    pwr = np.log(np.abs(np.fft.fftshift(fft)))
+    fft = np.fft.fftshift(fft)  # shift fourier origin from corner to center
+
+    pwr = np.log(np.abs(fft))
     if 0<low_pass_fraction<1 or 0<high_pass_fraction<1:
         pwr = low_high_pass_filter(pwr, low_pass_fraction=low_pass_fraction, high_pass_fraction=high_pass_fraction)
     pwr = normalize(pwr, percentile=(0, 100))
-    return pwr
+
+    phase = np.angle(fft, deg=False)
+    return pwr, phase
 
 @st.cache(persist=True, show_spinner=False)
 def fft_rescale(image, apix=1.0, cutoff_res=None, output_size=None):
@@ -471,13 +493,19 @@ def fft_rescale(image, apix=1.0, cutoff_res=None, output_size=None):
     fft = nufft2d2(x=Y, y=X, f=image.astype(np.complex), eps=1e-6)
     fft = fft.reshape((ony, onx))
 
+    # phase shifts for real-space shifts by half of the image box in both directions
+    phase_shift = np.ones(fft.shape)
+    phase_shift[1::2, :] *= -1
+    phase_shift[:, 1::2] *= -1
+    fft *= phase_shift
+    # now fft has the same layout and phase origin (i.e. np.fft.ifft2(fft) would obtain original image)
     return fft
 
 @st.cache(persist=True, show_spinner=False)
 def low_high_pass_filter(data, low_pass_fraction=0, high_pass_fraction=0):
     fft = np.fft.fft2(data)
     ny, nx = fft.shape
-    Y, X = np.meshgrid(np.arange(ny, dtype=np.float)-ny//2, np.arange(nx, dtype=np.float)-nx//2, indexing='ij')
+    Y, X = np.meshgrid(np.arange(ny, dtype=np.float32)-ny//2, np.arange(nx, dtype=np.float32)-nx//2, indexing='ij')
     Y /= ny//2
     X /= nx//2
     if 0<low_pass_fraction<1:
@@ -492,23 +520,56 @@ def low_high_pass_filter(data, low_pass_fraction=0, high_pass_fraction=0):
     return ret
 
 @st.cache(persist=True, show_spinner=False)
-def tapering(data, fraction=0):
-    if not (0<fraction<1): return data
+def tapering(data, fraction_start=[0, 0], fraction_slope=0.1):
+    fy, fx = fraction_start
+    if not (0<fy<1 and 0<fx<1): return data
     ny, nx = data.shape
-    Y, _ = np.meshgrid(np.arange(0, ny, dtype=np.float)-ny//2, np.arange(0, nx, dtype=np.float)-nx//2, indexing='ij')
-    Y = np.abs(Y / (ny//2))
-    Y = (Y-(1-fraction))/fraction
-    inner = Y<0
-    Y = (1. + np.cos(Y*np.pi))/2.0
-    Y[inner]=1
-    data2 = data * Y
+    Y, X = np.meshgrid(np.arange(0, ny, dtype=np.float32)-ny//2, np.arange(0, nx, dtype=np.float32)-nx//2, indexing='ij')
+    filter = np.ones_like(Y)
+    if 0<fy<1:
+        Y = np.abs(Y / (ny//2))
+        inner = Y<fy
+        outer = Y>fy+fraction_slope
+        Y = (Y-fy)/fraction_slope
+        Y = (1. + np.cos(Y*np.pi))/2.0
+        Y[inner]=1
+        Y[outer]=0
+        filter *= Y
+    if 0<fx<1:
+        X = np.abs(X / (nx//2))
+        inner = X<fx
+        outer = X>fx+fraction_slope
+        X = (X-fx)/fraction_slope
+        X = (1. + np.cos(X*np.pi))/2.0
+        X[inner]=1
+        X[outer]=0
+        filter *= X
+    data2 = data * filter
     return data2
 
 @st.cache(persist=True, show_spinner=False)
+def estimate_radial_range(data, thresh_ratio=0.1):
+    proj_y = np.sum(data, axis=0)
+    n = len(proj_y)
+    radius = np.mean([n//2-np.argmax(proj_y[:n//2+1]), np.argmax(proj_y[n//2:])])
+    background = np.mean(proj_y[[0,1,2,-3,-3,-1]])
+    thresh = (proj_y.max() - background) * thresh_ratio + background
+    indices = np.nonzero(proj_y>thresh)
+    xmin = np.min(indices)
+    xmax = np.max(indices)
+    mask_radius = max(abs(n//2-xmin), abs(xmax-n//2))
+    return float(radius), float(mask_radius)    # pixel
+
+@st.cache(persist=True, show_spinner=False)
 def auto_vertical_center(image):
-    ny, nx = image.shape
+    background = np.mean(image[[0,1,2,-3,-2,-1],[0,1,2,-3,-2,-1]])
+    thresh = (image.max()-background) * 0.2 + background
+    image_work = 1.0 * image
+    image_work[image<thresh] = 0
+
+    # rough estimate of rotation
     def score_rotation(angle):
-        tmp = rotate_shift_image(data=image, angle=angle)
+        tmp = rotate_shift_image(data=image_work, angle=angle)
         y_proj = tmp.sum(axis=0)
         percentiles = (100, 95, 90, 85, 80) # more robust than max alone
         y_values = np.percentile(y_proj, percentiles)
@@ -517,29 +578,59 @@ def auto_vertical_center(image):
     from scipy.optimize import minimize_scalar
     res = minimize_scalar(score_rotation, bounds=(-90, 90), method='bounded')
     angle = res.x
-    tmp = rotate_shift_image(data=image, angle=angle)
-    thresh = tmp.max()*0.2
-    tmp[tmp<thresh]=0
+
+    # further refine rotation
+    def score_rotation_shift(x):
+        angle, dy, dx = x
+        tmp1 = rotate_shift_image(data=image_work, angle=angle, pre_shift=(dy, dx))
+        tmp2 = rotate_shift_image(data=image_work, angle=angle+180, pre_shift=(dy, dx))
+        tmps = [tmp1, tmp2, tmp1[::-1,:], tmp2[::-1,:], tmp1[:,::-1], tmp2[:,::-1]]
+        tmp_mean = np.zeros_like(image_work)
+        for tmp in tmps: tmp_mean += tmp
+        tmp_mean /= len(tmps)
+        err = 0
+        for tmp in tmps:
+            err += np.sum(np.abs(tmp - tmp_mean))
+        err /= len(tmps) * image_work.size
+        return err
+    from scipy.optimize import fmin
+    res = fmin(score_rotation_shift, x0=(angle, 0, 0), xtol=1e-2)
+    angle = res[0]  # dy, dx are not robust enough
+
+    # refine dx 
+    image_work = rotate_shift_image(data=image_work, angle=angle)
+    y = np.sum(image_work, axis=0)
+    n = len(y)
     from scipy.ndimage.measurements import center_of_mass
-    cy, cx = center_of_mass(tmp)
-    dy = ny//2 - cy
-    dx = nx//2 - cx
-    return angle, dy, dx
+    cx = int(round(center_of_mass(y)[0]))
+    max_shift = abs((cx-n//2)*2)+3
+
+    from scipy import interpolate
+    x = np.arange(3*n)
+    f = interpolate.interp1d(x, np.tile(y, 3), kind='cubic')    # avoid out-of-bound errors
+    def score_shift(dx):
+        x_tmp = x[n:2*n]-dx
+        tmp = f(x_tmp)
+        err = np.sum(np.abs(tmp-tmp[::-1]))
+        return err
+    res = minimize_scalar(score_shift, bounds=(-max_shift, max_shift), method='bounded')
+    dx = res.x + (0.0 if n%2 else 0.5)
+    return angle, dx
 
 def rotate_shift_image(data, angle=0, pre_shift=(0, 0), post_shift=(0, 0), rotation_center=None, order=1):
     # pre_shift/rotation_center/post_shift: [y, x]
     if angle==0 and pre_shift==[0,0] and post_shift==[0,0]: return data*1.0
     ny, nx = data.shape
     if rotation_center is None:
-        rotation_center = np.array((ny//2, nx//2), dtype=np.float)
+        rotation_center = np.array((ny//2, nx//2), dtype=np.float32)
     ang = np.deg2rad(angle)
-    m = np.array([[np.cos(ang), -np.sin(ang)], [np.sin(ang), np.cos(ang)]])
+    m = np.array([[np.cos(ang), -np.sin(ang)], [np.sin(ang), np.cos(ang)]], dtype=np.float32)
     pre_dy, pre_dx = pre_shift    
     post_dy, post_dx = post_shift
 
-    offset = -np.dot(m, np.array([post_dy, post_dx]).T) # post_rotation shift
-    offset += np.array(rotation_center).T - np.dot(m, np.array(rotation_center).T)  # rotation around the specified center
-    offset += -np.array([pre_dy, pre_dx]).T     # pre-rotation shift
+    offset = -np.dot(m, np.array([post_dy, post_dx], dtype=np.float32).T) # post_rotation shift
+    offset += np.array(rotation_center, dtype=np.float32).T - np.dot(m, np.array(rotation_center, dtype=np.float32).T)  # rotation around the specified center
+    offset += -np.array([pre_dy, pre_dx], dtype=np.float32).T     # pre-rotation shift
 
     from scipy.ndimage import affine_transform
     ret = affine_transform(data, matrix=m, offset=offset, order=order, mode='constant')
