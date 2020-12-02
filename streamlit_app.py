@@ -12,7 +12,7 @@ def main():
 
     with col1:
         with st.beta_expander(label="README", expanded=False):
-            st.write("This Web app considers a biological helical structure as the product of a continous helix and a set of parallel planes, and based on the covolution theory, the Fourier Transform (FT) of a helical structure would be the convolution of the FT of the continous helix and the FT of the planes.  \nThe FT of a continous helix consists of equally spaced layer planes (3D) or layerlines (2D projection) that can be described by Bessel functions of increasing orders (0, +/-1, +/-2, ...) from the Fourier origin (i.e. equator). The spacing between the layer planes/lines is determined by the helical pitch (i.e. the shift along the helical axis for a 360 ° turn of the helix). If the structure has additional cyclic symmetry (for example, C6) around the helical axis, only the layer plane/line orders of integer multiplier of the symmetry (e.g. 0, +/-6, +/-12, ...) are visible. The primary peaks of the layer lines in the power spectra form a pattern similar to a X symbol.  \nThe FT of the parallel planes consists of equally spaced points along the helical axis (i.e. meridian) with the spacing being determined by the helical rise.  \nThe convolution of these two components (X-shaped pattern of layer lines and points along the meridian) generates the layer line patterns seen in the power spectra of the projection images of helical structures. The helical indexing task is thus to identify the helical rise, pitch (or twist), and cyclic symmetry that would predict a layer line pattern to explain the observed the layer lines in the power spectra. This Web app allows you to interactively change the helical parameters and superimpose the predicted layer liines on the power spectra to complete the helical indexing task.  \n  \nPS: power spectra; YP: Y-axis power spectra profile; LL: layer lines; m: indices of the X-patterns along the meridian; Jn: Bessel order")
+            st.write("This Web app considers a biological helical structure as the product of a continous helix and a set of parallel planes, and based on the covolution theory, the Fourier Transform (FT) of a helical structure would be the convolution of the FT of the continous helix and the FT of the planes.  \nThe FT of a continous helix consists of equally spaced layer planes (3D) or layerlines (2D projection) that can be described by Bessel functions of increasing orders (0, +/-1, +/-2, ...) from the Fourier origin (i.e. equator). The spacing between the layer planes/lines is determined by the helical pitch (i.e. the shift along the helical axis for a 360 ° turn of the helix). If the structure has additional cyclic symmetry (for example, C6) around the helical axis, only the layer plane/line orders of integer multiplier of the symmetry (e.g. 0, +/-6, +/-12, ...) are visible. The primary peaks of the layer lines in the power spectra form a pattern similar to a X symbol.  \nThe FT of the parallel planes consists of equally spaced points along the helical axis (i.e. meridian) with the spacing being determined by the helical rise.  \nThe convolution of these two components (X-shaped pattern of layer lines and points along the meridian) generates the layer line patterns seen in the power spectra of the projection images of helical structures. The helical indexing task is thus to identify the helical rise, pitch (or twist), and cyclic symmetry that would predict a layer line pattern to explain the observed the layer lines in the power spectra. This Web app allows you to interactively change the helical parameters and superimpose the predicted layer liines on the power spectra to complete the helical indexing task.  \n  \nPS: power spectra; PD: phase difference between the two sides of meridian; YP: Y-axis power spectra profile; LL: layer lines; m: indices of the X-patterns along the meridian; Jn: Bessel order")
         
         # make radio display horizontal
         st.write('<style>div.Widget.row-widget.stRadio > div{flex-direction:row;}</style>', unsafe_allow_html=True)
@@ -87,11 +87,12 @@ def main():
         tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-90.0, max_value=90.0, step=1.0)
         cutoff_res_x = st.number_input('Limit FFT X-dim to resolution (Å)', value=round(3*apix, 0), min_value=2*apix, step=1.0)
         cutoff_res_y = st.number_input('Limit FFT Y-dim to resolution (Å)', value=round(3*apix, 0), min_value=2*apix, step=1.0)
-        pnx = st.number_input('FFT X-dim size (pixels)', value=max(min(nx,ny), 512), min_value=min(nx, 128), step=2)
-        pny = st.number_input('FFT Y-dim size (pixels)', value=max(max(nx,ny), 1024), min_value=min(ny, 512), step=2)
+        pnx = st.number_input('FFT X-dim size (pixels)', value=max(min(nx,ny), 256), min_value=min(nx, 128), step=2)
+        pny = st.number_input('FFT Y-dim size (pixels)', value=max(max(nx,ny), 800), min_value=min(ny, 512), step=2)
         st.subheader("Simulate the helix with Gaussians")
         ball_radius = st.number_input('Gaussian radius (Å)', value=0.0, min_value=0.0, max_value=radius, step=5.0, format="%.1f")
         az = st.number_input('Azimuthal angle (°)', value=0, min_value=0, max_value=360, step=1, format="%.1f")
+        show_simu = True if ball_radius > 0 else False
 
     if not is_pwr:
         with ploty:
@@ -165,20 +166,25 @@ def main():
                 pitch = (360./twist)*rise
                 st.markdown(f"*(pitch = {pitch:.2f} Å)*")
         show_pwr = st.checkbox(label="PS", value=True)
-        show_yprofile = st.checkbox(label="YP", value=True)
-        show_pseudocolor = st.checkbox(label="Color", value=True)
-        show_LL = st.checkbox(label="LL", value=True)
-        if show_LL:
-            m_groups = compute_layer_line_positions(twist=twist, rise=rise, csym=csym, radius=radius, tilt=tilt, cutoff_res=cutoff_res_y)
-            ng = len(m_groups)
-            st.subheader("m=")
-            show_choices = {}
-            lgs = sorted(m_groups.keys())[::-1]
-            for lgi, lg in enumerate(lgs):
-                value = True if lg in [0, 1] else False
-                show_choices[lg] = st.checkbox(label=str(lg), value=value)
-    
-    if ball_radius>0:
+        if show_pwr:
+            if is_pwr:
+                show_phase_diff = False
+            else:
+                show_phase_diff = st.checkbox(label="PD", value=True)
+            show_yprofile = st.checkbox(label="YP", value=False)
+            show_pseudocolor = st.checkbox(label="Color", value=True)
+            show_LL = st.checkbox(label="LL", value=True)
+            if show_LL:
+                m_groups = compute_layer_line_positions(twist=twist, rise=rise, csym=csym, radius=radius, tilt=tilt, cutoff_res=cutoff_res_y)
+                ng = len(m_groups)
+                st.subheader("m=")
+                show_choices = {}
+                lgs = sorted(m_groups.keys())[::-1]
+                for lgi, lg in enumerate(lgs):
+                    value = True if lg in [0, 1] else False
+                    show_choices[lg] = st.checkbox(label=str(lg), value=value)
+
+    if show_simu:
         proj = simulate_helix(twist, rise, csym, helical_radius=radius, ball_radius=ball_radius, 
                 ny=data.shape[0], nx=data.shape[1], apix=apix, tilt=tilt, az0=az)
         proj = tapering(proj, fraction_start=[0.7, 0], fraction_slope=0.1)
@@ -192,47 +198,55 @@ def main():
             st.image([data, proj], width=data.shape[1], caption=[image_label, "Simulated"], clamp=True)
 
     with col4:
-        if not show_pwr:
-            return
+        if not show_pwr: return
+
+        fig = None
+        fig_phase = None
+        fig_y = None
+        fig_proj = None
+        fig_proj_phase = None
 
         if is_pwr:
             pwr = resize_rescale_power_spectra(data, nyquist_res=2*apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
                     output_size=(pny, pnx), low_pass_fraction=0.2, high_pass_fraction=0.004)
+            phase = None
         else:
-            pwr, _ = compute_power_spectra(data, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
+            pwr, phase = compute_power_spectra(data, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
                     output_size=(pny, pnx), low_pass_fraction=0.2, high_pass_fraction=0.004)
 
         ny, nx = pwr.shape
         dsy = 1/(ny//2*cutoff_res_y)
         dsx = 1/(nx//2*cutoff_res_x)
+        x_range = (-nx//2*dsx, nx//2*dsx)
+        y_range = (-ny//2*dsy, ny//2*dsy)
+
+        sy, sx = np.meshgrid(np.arange(-ny//2, ny//2)*dsy, np.arange(-nx//2, nx//2)*dsx, indexing='ij', copy=False)
+        sy = sy.astype(np.float16)
+        sx = sx.astype(np.float16)
+        resx = np.abs(1./sx).astype(np.float16)
+        resy = np.abs(1./sy).astype(np.float16)
+        res  = 1./np.hypot(sx, sy).astype(np.float16)
+        bessel = bessel_n_image(ny, nx, cutoff_res_x, cutoff_res_y, radius, tilt).astype(np.float16)
 
         from bokeh.models import LinearColorMapper
         tools = 'box_zoom,pan,reset,save,wheel_zoom'
         fig = figure(title_location="below", frame_width=nx, frame_height=ny, 
-            x_axis_label=None, y_axis_label=None, 
-            x_range=(-nx//2*dsx, nx//2*dsx), y_range=(-ny//2*dsy, ny//2*dsy), 
-            tools=tools)
+            x_axis_label=None, y_axis_label=None, x_range=x_range, y_range=y_range, tools=tools)
         fig.grid.visible = False
         fig.title.text = f"Power Spectra"
         fig.title.align = "center"
         fig.title.text_font_size = "20px"
 
-        sy, sx = np.meshgrid(np.arange(-ny//2, ny//2)*dsy, np.arange(-nx//2, nx//2)*dsx, indexing='ij', copy=False)
-        sy = sy.astype(np.float32)
-        sx = sx.astype(np.float32)
-        resx = np.abs(1./sx).astype(np.float32)
-        resy = np.abs(1./sy).astype(np.float32)
-        res  = 1./np.hypot(sx, sy).astype(np.float32)
-        bessel = bessel_n_image(ny, nx, cutoff_res_x, cutoff_res_y, radius, tilt)
-
-        source_data = dict(image=[pwr.astype(np.float32)], x=[-nx//2*dsx], y=[-ny//2*dsy], dw=[nx*dsx], dh=[ny*dsy], resx=[resx], resy=[resy], res=[res], bessel=[bessel])
+        source_data = dict(image=[pwr.astype(np.float16)], x=[-nx//2*dsx], y=[-ny//2*dsy], dw=[nx*dsx], dh=[ny*dsy], resx=[resx], resy=[resy], res=[res], bessel=[bessel])
+        if phase is not None: source_data["phase"] = [np.fmod(np.rad2deg(phase)+360, 360).astype(np.float16)]
         from bokeh.models import LinearColorMapper
         palette = 'Viridis256' if show_pseudocolor else 'Greys256'
         color_mapper = LinearColorMapper(palette=palette)    # Greys256, Viridis256
         image = fig.image(source=source_data, image='image', color_mapper=color_mapper, x='x', y='y', dw='dw', dh='dh')
         # add hover tool only for the image
         from bokeh.models.tools import HoverTool
-        tooltips = [("Res", "@resÅ"), ('Res y', '@resyÅ'), ('Res x', '@resxÅ'), ('Jn', '@bessel'), ('PS', '@image')]
+        tooltips = [("Res", "@resÅ"), ('Res y', '@resyÅ'), ('Res x', '@resxÅ'), ('Jn', '@bessel'), ('Amp', '@image')]
+        if phase is not None: tooltips.append(("Phase", "@phase°"))
         image_hover = HoverTool(renderers=[image], tooltips=tooltips)
         fig.add_tools(image_hover)
 
@@ -242,54 +256,91 @@ def main():
         crosshair.line_color = 'red'
         fig.add_tools(crosshair)
 
-        if ball_radius>0:
-            proj_pwr, _ = compute_power_spectra(proj, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
+        if show_phase_diff:
+            if nx%2:
+                phase_diff = phase - phase[:, ::-1]
+            else:
+                phase_diff = phase * 1.0
+                phase_diff[:, 0] = np.pi/2
+                phase_diff[:, 1:] -= phase_diff[:, 1:][:, ::-1]
+            phase_diff = np.rad2deg(np.arccos(np.cos(phase_diff)))   # set the range to [0, 180]. 0 -> even order, 180 - odd order
+            
+            fig_phase = figure(title_location="below", frame_width=nx, frame_height=ny, 
+                x_axis_label=None, y_axis_label=None, x_range=fig.x_range, y_range=fig.y_range, y_axis_location = "right",
+                tools=tools)
+            fig_phase.grid.visible = False
+            fig_phase.title.text = f"Phase Diff Across Meridian"
+            fig_phase.title.align = "center"
+            fig_phase.title.text_font_size = "20px"
+            if show_simu:
+                fig_phase.yaxis.visible = False
+
+            source_data["image"] = [phase_diff.astype(np.float16)]
+            phase_image = fig_phase.image(source=source_data, image='image', color_mapper=color_mapper,
+                        x='x', y='y', dw='dw', dh='dh'
+                    )
+            # add hover tool only for the image
+            tooltips = [("Res", "@resÅ"), ('Res y', '@resyÅ'), ('Res x', '@resxÅ'), ('Jn', '@bessel'), ('Phase Diff', '@image°')]
+            phase_hover = HoverTool(renderers=[phase_image], tooltips=tooltips)
+            fig_phase.add_tools(phase_hover)
+            fig_phase.add_tools(crosshair)
+
+        if show_simu and show_pwr:
+            proj_pwr, proj_phase = compute_power_spectra(proj, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
                     output_size=(pny, pnx), low_pass_fraction=0.2, high_pass_fraction=0.004)
 
             fig_proj = figure(title_location="below", frame_width=nx, frame_height=ny, 
                 x_axis_label=None, y_axis_label=None, 
-                x_range=fig.x_range, y_range=fig.y_range, y_axis_location = "right",
+                x_range=x_range, y_range=y_range, y_axis_location = "right",
                 tools=tools)
             fig_proj.grid.visible = False
             fig_proj.title.text = f"Simulated Power Spectra"
             fig_proj.title.align = "center"
             fig_proj.title.text_font_size = "20px"
+            if show_phase_diff:
+                fig_proj.yaxis.visible = False
 
-            source_data["image"] = [proj_pwr.astype(np.float32)]
+            source_data["image"] = [proj_pwr.astype(np.float16)]
+            if proj_phase is not None: source_data["phase"] = [np.fmod(np.rad2deg(proj_phase)+360, 360).astype(np.float16)]
             proj_image = fig_proj.image(source=source_data, image='image', color_mapper=color_mapper,
                         x='x', y='y', dw='dw', dh='dh'
                     )
             # add hover tool only for the image
+            tooltips = [("Res", "@resÅ"), ('Res y', '@resyÅ'), ('Res x', '@resxÅ'), ('Jn', '@bessel'), ('Amp', '@image')]
+            if proj_phase is not None: tooltips.append(("Phase", "@phase"))
             image_hover = HoverTool(renderers=[proj_image], tooltips=tooltips)
             fig_proj.add_tools(image_hover)
             fig_proj.add_tools(crosshair)
-        else:
-            fig_proj = None
 
-        if show_yprofile:
-            y=np.arange(-ny//2, ny//2)*dsy
-            ll_profile = np.max(pwr, axis=1)
-            ll_profile /= ll_profile.max()
-            source_data = dict(ll=ll_profile, y=y, resy=np.abs(1./y))
-            if fig_proj:
-                ll_profile_proj = np.mean(proj_pwr, axis=1)
-                ll_profile_proj /= ll_profile_proj.max()
-                source_data["ll_proj"] = ll_profile_proj           
+            if show_phase_diff:
+                if nx%2:
+                    phase_diff = proj_phase - proj_phase[:, ::-1]
+                else:
+                    phase_diff = proj_phase * 1.0
+                    phase_diff[:, 0] = np.pi/2
+                    phase_diff[:, 1:] -= phase_diff[:, 1:][:, ::-1]
+                phase_diff = np.rad2deg(np.arccos(np.cos(phase_diff)))   # set the range to [0, 180]. 0 -> even order, 180 - odd order
+                
+                fig_proj_phase = figure(title_location="below", frame_width=nx, frame_height=ny, 
+                    x_axis_label=None, y_axis_label=None, 
+                    x_range=x_range, y_range=y_range, y_axis_location = "right",
+                    tools=tools)
+                fig_proj_phase.grid.visible = False
+                fig_proj_phase.title.text = f"Phase Diff Across Meridian"
+                fig_proj_phase.title.align = "center"
+                fig_proj_phase.title.text_font_size = "20px"
 
-            tools = 'box_zoom,hover,pan,reset,save,wheel_zoom'
-            tooltips = [('Res y', '@resyÅ'), ('PS', '$x')]
-            fig_y = figure(frame_width=nx//2, frame_height=ny, y_range=fig.y_range, y_axis_location = "right", 
-                title=None, tools=tools, tooltips=tooltips)
-            fig_y.line(source=source_data, x='ll', y='y', line_width=2, color='blue')
-            if fig_proj:
-                fig_y.line(source=source_data, x='ll_proj', y='y', line_width=2, color='red')
-            fig_y.add_tools(crosshair)
-            if ball_radius:
-                fig_y.yaxis.visible = False
-        else:
-            fig_y = None
+                source_data["image"] = [phase_diff.astype(np.float16)]
+                phase_image = fig_proj_phase.image(source=source_data, image='image', color_mapper=color_mapper,
+                            x='x', y='y', dw='dw', dh='dh'
+                        )
+                # add hover tool only for the image
+                tooltips = [("Res", "@resÅ"), ('Res y', '@resyÅ'), ('Res x', '@resxÅ'), ('Jn', '@bessel'), ('Phase Diff', '@image°')]
+                phase_hover = HoverTool(renderers=[phase_image], tooltips=tooltips)
+                fig_proj_phase.add_tools(phase_hover)
+                fig_proj_phase.add_tools(crosshair)
 
-        if show_LL:
+        if show_pwr and show_LL:
             if max(m_groups[0]["LL"][0])>0:
                 from bokeh.palettes import viridis, gray
                 if show_pseudocolor:
@@ -305,14 +356,36 @@ def main():
                     if not show_choices[m]: continue
                     x, y = m_groups[m]["LL"]
                     color = ll_colors[mi]
-                    fig.ellipse(x, y, width=width, height=height, line_width=4, line_color=color, fill_alpha=0)
+                    if fig:
+                        fig.ellipse(x, y, width=width, height=height, line_width=4, line_color=color, fill_alpha=0)
                     if fig_proj:
                         fig_proj.ellipse(x, y, width=width, height=height, line_width=4, line_color=color, fill_alpha=0)
             else:
                 st.warning(f"No off-equator layer lines to draw for Pitch={pitch:.2f} Csym={csym} combinations. Consider increasing Pitch or reducing Csym")
 
-        if fig_proj or fig_y:
-            figs = [f for f in [fig, fig_y, fig_proj] if f]
+        if show_yprofile:
+            y=np.arange(-ny//2, ny//2)*dsy
+            ll_profile = np.max(pwr, axis=1)
+            ll_profile /= ll_profile.max()
+            source_data = dict(ll=ll_profile, y=y, resy=np.abs(1./y))
+            if fig_proj:
+                ll_profile_proj = np.mean(proj_pwr, axis=1)
+                ll_profile_proj /= ll_profile_proj.max()
+                source_data["ll_proj"] = ll_profile_proj           
+
+            tools = 'box_zoom,hover,pan,reset,save,wheel_zoom'
+            tooltips = [('Res y', '@resyÅ'), ('Amp', '$x')]
+            fig_y = figure(frame_width=nx//2, frame_height=ny, y_range=fig.y_range, y_axis_location = "right", 
+                title=None, tools=tools, tooltips=tooltips)
+            fig_y.line(source=source_data, x='ll', y='y', line_width=2, color='blue')
+            if fig_proj:
+                fig_y.line(source=source_data, x='ll_proj', y='y', line_width=2, color='red')
+            fig_y.add_tools(crosshair)
+            if show_phase_diff or show_simu:
+                fig_y.yaxis.visible = False
+
+        if fig_phase or fig_proj or fig_proj_phase or fig_y:
+            figs = [f for f in [fig, fig_y, fig_phase, fig_proj, fig_proj_phase] if f]
             from bokeh.layouts import gridplot
             fig = gridplot(children=[figs], toolbar_location='right')
         
@@ -605,7 +678,7 @@ def auto_vertical_center(image):
     cx = int(round(center_of_mass(y)[0]))
     max_shift = abs((cx-n//2)*2)+3
 
-    from scipy import interpolate
+    import scipy.interpolate as interpolate
     x = np.arange(3*n)
     f = interpolate.interp1d(x, np.tile(y, 3), kind='cubic')    # avoid out-of-bound errors
     def score_shift(dx):
