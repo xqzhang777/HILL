@@ -4,6 +4,7 @@ import numpy as np
 
 def main():
     st.set_page_config(page_title="Helical Indexing", layout="wide")
+    st.server.server_util.MESSAGE_SIZE_LIMIT = 2e8  # default is 5e7 (50MB)
 
     title = "Helical indexing using layer lines"
     st.title(title)
@@ -168,8 +169,10 @@ def main():
         show_pwr = st.checkbox(label="PS", value=True)
         if show_pwr:
             if is_pwr:
+                show_phase = False
                 show_phase_diff = False
             else:
+                show_phase = st.checkbox(label="Phase", value=False)
                 show_phase_diff = st.checkbox(label="PD", value=True)
             show_yprofile = st.checkbox(label="YP", value=False)
             show_pseudocolor = st.checkbox(label="Color", value=True)
@@ -236,9 +239,10 @@ def main():
         fig.title.text = f"Power Spectra"
         fig.title.align = "center"
         fig.title.text_font_size = "20px"
+        fig.yaxis.visible = False   # leaving yaxis on will make the crosshair x-position out of sync with other figures
 
         source_data = dict(image=[pwr.astype(np.float16)], x=[-nx//2*dsx], y=[-ny//2*dsy], dw=[nx*dsx], dh=[ny*dsy], resx=[resx], resy=[resy], res=[res], bessel=[bessel])
-        if phase is not None: source_data["phase"] = [np.fmod(np.rad2deg(phase)+360, 360).astype(np.float16)]
+        if show_phase: source_data["phase"] = [np.fmod(np.rad2deg(phase)+360, 360).astype(np.float16)]
         from bokeh.models import LinearColorMapper
         palette = 'Viridis256' if show_pseudocolor else 'Greys256'
         color_mapper = LinearColorMapper(palette=palette)    # Greys256, Viridis256
@@ -246,7 +250,7 @@ def main():
         # add hover tool only for the image
         from bokeh.models.tools import HoverTool
         tooltips = [("Res", "@resÅ"), ('Res y', '@resyÅ'), ('Res x', '@resxÅ'), ('Jn', '@bessel'), ('Amp', '@image')]
-        if phase is not None: tooltips.append(("Phase", "@phase°"))
+        if show_phase: tooltips.append(("Phase", "@phase°"))
         image_hover = HoverTool(renderers=[image], tooltips=tooltips)
         fig.add_tools(image_hover)
 
@@ -301,13 +305,13 @@ def main():
                 fig_proj.yaxis.visible = False
 
             source_data["image"] = [proj_pwr.astype(np.float16)]
-            if proj_phase is not None: source_data["phase"] = [np.fmod(np.rad2deg(proj_phase)+360, 360).astype(np.float16)]
+            if show_phase: source_data["phase"] = [np.fmod(np.rad2deg(proj_phase)+360, 360).astype(np.float16)]
             proj_image = fig_proj.image(source=source_data, image='image', color_mapper=color_mapper,
                         x='x', y='y', dw='dw', dh='dh'
                     )
             # add hover tool only for the image
             tooltips = [("Res", "@resÅ"), ('Res y', '@resyÅ'), ('Res x', '@resxÅ'), ('Jn', '@bessel'), ('Amp', '@image')]
-            if proj_phase is not None: tooltips.append(("Phase", "@phase"))
+            if show_phase: tooltips.append(("Phase", "@phase"))
             image_hover = HoverTool(renderers=[proj_image], tooltips=tooltips)
             fig_proj.add_tools(image_hover)
             fig_proj.add_tools(crosshair)
