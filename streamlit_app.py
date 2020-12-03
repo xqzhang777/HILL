@@ -88,12 +88,14 @@ def main():
         tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-90.0, max_value=90.0, step=1.0)
         cutoff_res_x = st.number_input('Limit FFT X-dim to resolution (Å)', value=round(3*apix, 0), min_value=2*apix, step=1.0)
         cutoff_res_y = st.number_input('Limit FFT Y-dim to resolution (Å)', value=round(3*apix, 0), min_value=2*apix, step=1.0)
-        pnx = st.number_input('FFT X-dim size (pixels)', value=max(min(nx,ny), 256), min_value=min(nx, 128), step=2)
-        pny = st.number_input('FFT Y-dim size (pixels)', value=max(max(nx,ny), 800), min_value=min(ny, 512), step=2)
+        pnx = st.number_input('FFT X-dim size (pixels)', value=max(min(nx,ny), 512), min_value=min(nx, 128), step=2)
+        pny = st.number_input('FFT Y-dim size (pixels)', value=max(max(nx,ny), 1024), min_value=min(ny, 512), step=2)
         st.subheader("Simulate the helix with Gaussians")
         ball_radius = st.number_input('Gaussian radius (Å)', value=0.0, min_value=0.0, max_value=radius, step=5.0, format="%.1f")
-        az = st.number_input('Azimuthal angle (°)', value=0, min_value=0, max_value=360, step=1, format="%.1f")
         show_simu = True if ball_radius > 0 else False
+        if show_simu:
+            az = st.number_input('Azimuthal angle (°)', value=0, min_value=0, max_value=360, step=1, format="%.1f")
+            noise = st.number_input('Noise (sigma)', value=0., min_value=0., step=1., format="%.1f")
 
     if not is_pwr:
         with ploty:
@@ -190,8 +192,11 @@ def main():
     if show_simu:
         proj = simulate_helix(twist, rise, csym, helical_radius=radius, ball_radius=ball_radius, 
                 ny=data.shape[0], nx=data.shape[1], apix=apix, tilt=tilt, az0=az)
+        if noise>0:
+            sigma = np.std(proj[np.nonzero(proj)])
+            proj = proj + np.random.normal(loc=0.0, scale=noise*sigma, size=proj.shape)
         proj = tapering(proj, fraction_start=[0.7, 0], fraction_slope=0.1)
-        if angle or dx:
+        if transpose or angle or dx:
             image_container = rotated_image
             image_label = "Rotated image"
         else:
