@@ -54,7 +54,10 @@ def main():
             if transpose:
                 data = data.T
                 ny, nx = data.shape
-            angle_auto, dx_auto = auto_vertical_center(data)
+            if input_mode == "emd-xxxx":
+                angle_auto, dx_auto = 0., 0.
+            else:
+                angle_auto, dx_auto = auto_vertical_center(data)
             angle = st.number_input('Rotate (°)', value=-angle_auto, min_value=-180., max_value=180., step=1.0)
             dx = st.number_input('Shift along X-dim (Å)', value=dx_auto*apix, min_value=-nx*apix, max_value=nx*apix, step=1.0)
         
@@ -83,7 +86,7 @@ def main():
         rise = st.number_input('Rise (Å)', value=data_example.rise, min_value=-180.0, max_value=180.0, step=1.0, format="%.3f")
         csym = st.number_input('Csym', value=data_example.csym, min_value=1, max_value=16, step=1)
 
-        radius = st.number_input('Radius (Å)', value=radius_auto*apix, min_value=10.0, max_value=1000.0, step=10., format="%.1f")
+        radius = st.number_input('Radius (Å)', value=max(1.0, radius_auto*apix), min_value=1.0, max_value=1000.0, step=10., format="%.1f")
         
         tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-90.0, max_value=90.0, step=1.0)
         cutoff_res_x = st.number_input('Limit FFT X-dim to resolution (Å)', value=round(3*apix, 0), min_value=2*apix, step=1.0)
@@ -351,6 +354,7 @@ def main():
 
         if show_pwr and show_LL:
             if max(m_groups[0]["LL"][0])>0:
+                figs = [f for f in [fig, fig_phase, fig_proj, fig_proj_phase] if f is not None]
                 from bokeh.palettes import viridis, gray
                 if show_pseudocolor:
                     ll_colors = gray(ng*2)[::-1]
@@ -365,10 +369,8 @@ def main():
                     if not show_choices[m]: continue
                     x, y = m_groups[m]["LL"]
                     color = ll_colors[mi]
-                    if fig:
-                        fig.ellipse(x, y, width=width, height=height, line_width=4, line_color=color, fill_alpha=0)
-                    if fig_proj:
-                        fig_proj.ellipse(x, y, width=width, height=height, line_width=4, line_color=color, fill_alpha=0)
+                    for f in figs:
+                        f.ellipse(x, y, width=width, height=height, line_width=4, line_color=color, fill_alpha=0)
             else:
                 st.warning(f"No off-equator layer lines to draw for Pitch={pitch:.2f} Csym={csym} combinations. Consider increasing Pitch or reducing Csym")
 
@@ -699,6 +701,7 @@ def auto_vertical_center(image):
     dx = res.x + (0.0 if n%2 else 0.5)
     return angle, dx
 
+@st.cache(persist=True, show_spinner=False)
 def rotate_shift_image(data, angle=0, pre_shift=(0, 0), post_shift=(0, 0), rotation_center=None, order=1):
     # pre_shift/rotation_center/post_shift: [y, x]
     if angle==0 and pre_shift==[0,0] and post_shift==[0,0]: return data*1.0
