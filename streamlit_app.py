@@ -18,15 +18,13 @@ def main():
         # make radio display horizontal
         st.write('<style>div.Widget.row-widget.stRadio > div{flex-direction:row;}</style>', unsafe_allow_html=True)
         input_mode = st.radio(label="How to obtain the input image/map:", options=["upload a mrc/mrcs file", "url", "emd-xxxx"], index=1)
+        is_3d = False
         if input_mode == "emd-xxxx":
             label = "Input an EMDB ID (emd-xxxx):"
             value = "emd-2699"
             emdid = st.text_input(label=label, value=value)
-            data3d, apix = get_emdb_map(emdid.strip())
-            with st.beta_expander(label="Generate 2-D projection from the 3-D map", expanded=False):
-                az = st.number_input(label=f"Rotation around the helical axis (°):", min_value=0.0, max_value=360., value=0.0, step=1.0)
-                tilt = st.number_input(label=f"Tilt (°):", min_value=-180.0, max_value=180., value=0.0, step=1.0)
-                data = generate_projection(data3d, az=az, tilt=tilt)
+            data_all, apix = get_emdb_map(emdid.strip())
+            is_3d = True
         else:
             if input_mode == "upload a mrc/mrcs file":
                 fileobj = st.file_uploader("Upload a mrc or mrcs file", type=['mrc', 'mrcs', 'map', 'map.gz'])
@@ -39,7 +37,16 @@ def main():
                     value = data_example.url
                     image_url = st.text_input(label=label, value=value)
                     data_all, apix = get_2d_image_from_url(image_url.strip())
-
+            nz, ny, nx = data_all.shape
+            if nx==ny and nz>nx//4:
+                is_3d_auto = True
+                is_3d = st.checkbox(label=f"The input ({nx}x{ny}x{nz}) is a 3D map", value=is_3d_auto)
+        if is_3d:
+            with st.beta_expander(label="Generate 2-D projection from the 3-D map", expanded=False):
+                az = st.number_input(label=f"Rotation around the helical axis (°):", min_value=0.0, max_value=360., value=0.0, step=1.0)
+                tilt = st.number_input(label=f"Tilt (°):", min_value=-180.0, max_value=180., value=0.0, step=1.0)
+                data = generate_projection(data_all, az=az, tilt=tilt)
+        else:
             nz, ny, nx = data_all.shape
             if nz>1:
                 image_index = st.slider(label=f"Choose an image (out of {nz}):", min_value=1, max_value=nz, value=1, step=1)
@@ -55,7 +62,7 @@ def main():
         with st.beta_expander(label="Transpose/Rotate/Shift the image", expanded=False):
             is_pwr = st.checkbox(label="Input image is power spectra", value=False)
             transpose = st.checkbox(label='Transpose the image', value=False)
-            if input_mode == "emd-xxxx":
+            if is_3d:
                 angle_auto, dx_auto = 0., 0.
             else:
                 angle_auto, dx_auto = auto_vertical_center(data)
