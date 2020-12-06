@@ -18,31 +18,35 @@ def main():
         # make radio display horizontal
         st.write('<style>div.Widget.row-widget.stRadio > div{flex-direction:row;}</style>', unsafe_allow_html=True)
         input_mode = st.radio(label="How to obtain the input image/map:", options=["upload a mrc/mrcs file", "url", "emd-xxxx"], index=1)
-        if input_mode == "upload a mrc/mrcs file":
-            fileobj = st.file_uploader("Upload a mrc or mrcs file", type=['mrc', 'mrcs', 'map', 'map.gz'])
-            if fileobj is not None:
-                data_all, apix = get_2d_image_from_uploaded_file(fileobj)
-            else:
-                return
+        if input_mode == "emd-xxxx":
+            label = "Input an EMDB ID (emd-xxxx):"
+            value = "emd-2699"
+            emdid = st.text_input(label=label, value=value)
+            data3d, apix = get_emdb_map(emdid.strip())
+            with st.beta_expander(label="Generate 2-D projection from the 3-D map", expanded=False):
+                az = st.number_input(label=f"Rotation around the helical axis (°):", min_value=0.0, max_value=360., value=0.0, step=1.0)
+                tilt = st.number_input(label=f"Tilt (°):", min_value=-180.0, max_value=180., value=0.0, step=1.0)
+                data = generate_projection(data3d, az=az, tilt=tilt)
         else:
-            if input_mode == "url":
-                label = "Input a url of 2D projection image(s) or a 3D map:"
-                value = data_example.url
-                image_url = st.text_input(label=label, value=value)
-                data_all, apix = get_2d_image_from_url(image_url.strip())
-            elif input_mode == "emd-xxxx":
-                label = "Input an EMDB ID (emd-xxxx):"
-                value = "emd-2699"
-                emdid = st.text_input(label=label, value=value)
-                data_all, apix = get_emdb_map_projections(emdid.strip())
+            if input_mode == "upload a mrc/mrcs file":
+                fileobj = st.file_uploader("Upload a mrc or mrcs file", type=['mrc', 'mrcs', 'map', 'map.gz'])
+                if fileobj is not None:
+                    data_all, apix = get_2d_image_from_uploaded_file(fileobj)
+                else:
+                    return
+            elif input_mode == "url":
+                    label = "Input a url of 2D projection image(s) or a 3D map:"
+                    value = data_example.url
+                    image_url = st.text_input(label=label, value=value)
+                    data_all, apix = get_2d_image_from_url(image_url.strip())
 
-        nz, ny, nx = data_all.shape
-        if nz>1:
-            image_index = st.slider(label=f"Choose an image (out of {nz}):", min_value=1, max_value=nz, value=1, step=1)
-            image_index -= 1
-        else:
-            image_index = 0
-        data = data_all[image_index]
+            nz, ny, nx = data_all.shape
+            if nz>1:
+                image_index = st.slider(label=f"Choose an image (out of {nz}):", min_value=1, max_value=nz, value=1, step=1)
+                image_index -= 1
+            else:
+                image_index = 0
+            data = data_all[image_index]
         ny, nx = data.shape
         original_image = st.empty()
         with original_image:
@@ -51,9 +55,6 @@ def main():
         with st.beta_expander(label="Transpose/Rotate/Shift the image", expanded=False):
             is_pwr = st.checkbox(label="Input image is power spectra", value=False)
             transpose = st.checkbox(label='Transpose the image', value=False)
-            if transpose:
-                data = data.T
-                ny, nx = data.shape
             if input_mode == "emd-xxxx":
                 angle_auto, dx_auto = 0., 0.
             else:
@@ -61,20 +62,19 @@ def main():
             angle = st.number_input('Rotate (°)', value=-angle_auto, min_value=-180., max_value=180., step=1.0)
             dx = st.number_input('Shift along X-dim (Å)', value=dx_auto*apix, min_value=-nx*apix, max_value=nx*apix, step=1.0)
         
-        rotated_image = st.empty()
+        transformed_image = st.empty()
+        if transpose:
+            data = data.T
         if angle or dx:
-            data = rotate_shift_image(data, angle=-angle, post_shift=(0, dx/apix), order=3)
-            with rotated_image:
-                st.image(data, width=min(600, nx), caption="Transformed image", clamp=True)
-
-        radius_auto, mask_radius_auto = estimate_radial_range(data, thresh_ratio=0.1)
+            data = rotate_shift_image(data, angle=-angle, post_shift=(0, dx/apix), order=1)
 
         plotx = st.empty()
+        radius_auto, mask_radius_auto = estimate_radial_range(data, thresh_ratio=0.1)
         mask_radius = st.number_input('Mask radius (Å)', value=mask_radius_auto*apix, min_value=1.0, max_value=nx/2*apix, step=1.0, format="%.1f")
 
         fraction_x = mask_radius/(nx//2*apix)
         data = tapering(data, fraction_start=[0.9, fraction_x], fraction_slope=0.1)
-        with rotated_image:
+        with transformed_image:
             st.image(data, width=min(600, nx), caption="Transformed image", clamp=True)
 
         ploty = st.empty()
@@ -166,7 +166,7 @@ def main():
                     st.warning(f"pitch is too small. it should be > {cutoff_res_y} (Limit FFT X-dim to resolution (Å))")
                     return
                 twist = 360./(pitch/rise)
-                st.markdown(f"*(twist = {twist:.2f} Å)*")
+                st.markdown(f"*(twist = {twist:.2f} °)*")
             else:
                 twist = st.number_input('Twist (°)', value=data_example.twist, min_value=-180.0, max_value=180.0, step=1.0, format="%.2f")
                 pitch = (360./twist)*rise
@@ -648,8 +648,8 @@ def estimate_radial_range(data, thresh_ratio=0.1):
 def auto_vertical_center(image):
     background = np.mean(image[[0,1,2,-3,-2,-1],[0,1,2,-3,-2,-1]])
     thresh = (image.max()-background) * 0.2 + background
-    image_work = 1.0 * image
-    image_work[image<thresh] = 0
+    image_work = (image-thresh)/(image.max()-thresh)
+    image_work[image_work<0] = 0
 
     # rough estimate of rotation
     def score_rotation(angle):
@@ -684,14 +684,15 @@ def auto_vertical_center(image):
     # refine dx 
     image_work = rotate_shift_image(data=image_work, angle=angle)
     y = np.sum(image_work, axis=0)
+    y /= y.max()
+    y[y<0.2] = 0
     n = len(y)
-    from scipy.ndimage.measurements import center_of_mass
-    cx = int(round(center_of_mass(y)[0]))
-    max_shift = abs((cx-n//2)*2)+3
+    mask = np.where(y>0.5)
+    max_shift = abs((np.max(mask)-n//2) - (n//2-np.min(mask)))*1.5
 
     import scipy.interpolate as interpolate
     x = np.arange(3*n)
-    f = interpolate.interp1d(x, np.tile(y, 3), kind='cubic')    # avoid out-of-bound errors
+    f = interpolate.interp1d(x, np.tile(y, 3), kind='linear')    # avoid out-of-bound errors
     def score_shift(dx):
         x_tmp = x[n:2*n]-dx
         tmp = f(x_tmp)
@@ -722,6 +723,22 @@ def rotate_shift_image(data, angle=0, pre_shift=(0, 0), post_shift=(0, 0), rotat
     return ret
 
 @st.cache(persist=True, show_spinner=False)
+def generate_projection(data, az=0, tilt=0):
+    from scipy.spatial.transform import Rotation as R
+    from scipy.ndimage import affine_transform
+    # note the convention change
+    # xyz in scipy is zyx in cryoEM maps
+    rot = R.from_euler('zx', [tilt, az], degrees=True)  # order: right to left
+    m = rot.as_matrix()
+    nx, ny, nz = data.shape
+    bcenter = np.array((nx//2, ny//2, nz//2), dtype=np.float)
+    offset = bcenter.T - np.dot(m, bcenter.T)
+    tmp = affine_transform(data, matrix=m, offset=offset, mode='nearest')
+    ret = tmp.sum(axis=1)   # integrate along y-axis
+    ret = normalize(ret)
+    return ret
+
+@st.cache(persist=True, show_spinner=False)
 def normalize(data, percentile=(0, 100)):
     p0, p1 = percentile
     vmin, vmax = sorted(np.percentile(data, (p0, p1)))
@@ -739,10 +756,17 @@ def get_2d_image_from_uploaded_file(fileobj):
     return data, apix
 
 @st.cache(persist=True, show_spinner=False)
-def get_emdb_map_projections(emdid):
+def get_emdb_map(emdid):
     emdid_number = emdid.lower().split("emd-")[-1]
     url = f"ftp://ftp.ebi.ac.uk/pub/databases/emdb/structures/EMD-{emdid_number}/map/emd_{emdid_number}.map.gz"
-    return get_2d_image_from_url(url, as_3d=True)
+    ds = np.DataSource(None)
+    fp = ds.open(url)
+    import mrcfile
+    with mrcfile.open(fp.name) as mrc:
+        vmin, vmax = np.min(mrc.data), np.max(mrc.data)
+        data = ((mrc.data - vmin) / (vmax - vmin)).astype(np.float32)
+        apix = mrc.voxel_size.x.item()
+    return data, apix
 
 @st.cache(persist=True, show_spinner=False)
 def get_2d_image_from_url(url, as_3d=False):
