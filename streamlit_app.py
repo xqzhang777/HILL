@@ -235,13 +235,13 @@ def main():
             proj = proj + np.random.normal(loc=0.0, scale=noise*sigma, size=proj.shape)
         proj = tapering(proj, fraction_start=[0.7, 0], fraction_slope=0.1)
         if transpose or angle or dx:
-            image_container = rotated_image
-            image_label = "Rotated image"
+            image_container = transformed_image
+            image_label = "Transformed image"
         else:
             image_container = original_image
             image_label = "Original image"
         with image_container:
-            st.image([data, proj], width=data.shape[1], caption=[image_label, "Simulated"], clamp=True)
+            st.image([data, proj], use_column_width=True, caption=[image_label, "Simulated"], clamp=True)
 
     with col4:
         if not show_pwr: return
@@ -269,10 +269,7 @@ def main():
         sy, sx = np.meshgrid(np.arange(-ny//2, ny//2)*dsy, np.arange(-nx//2, nx//2)*dsx, indexing='ij', copy=False)
         sy = sy.astype(np.float16)
         sx = sx.astype(np.float16)
-        resx = np.abs(1./sx).astype(np.float16)
-        resy = np.abs(1./sy).astype(np.float16)
-        res  = 1./np.hypot(sx, sy).astype(np.float16)
-        bessel = bessel_n_image(ny, nx, cutoff_res_x, cutoff_res_y, radius, tilt).astype(np.float16)
+        bessel = bessel_n_image(ny, nx, cutoff_res_x, cutoff_res_y, radius, tilt).astype(np.int16)
 
         from bokeh.models import LinearColorMapper
         tools = 'box_zoom,pan,reset,save,wheel_zoom'
@@ -284,7 +281,7 @@ def main():
         fig.title.text_font_size = "20px"
         fig.yaxis.visible = False   # leaving yaxis on will make the crosshair x-position out of sync with other figures
 
-        source_data = dict(image=[pwr.astype(np.float16)], x=[-nx//2*dsx], y=[-ny//2*dsy], dw=[nx*dsx], dh=[ny*dsy], resx=[resx], resy=[resy], res=[res], bessel=[bessel])
+        source_data = dict(image=[pwr.astype(np.float16)], x=[-nx//2*dsx], y=[-ny//2*dsy], dw=[nx*dsx], dh=[ny*dsy], bessel=[bessel])
         if show_phase: source_data["phase"] = [np.fmod(np.rad2deg(phase)+360, 360).astype(np.float16)]
         from bokeh.models import LinearColorMapper
         palette = 'Viridis256' if show_pseudocolor else 'Greys256'
@@ -292,10 +289,26 @@ def main():
         image = fig.image(source=source_data, image='image', color_mapper=color_mapper, x='x', y='y', dw='dw', dh='dh')
         # add hover tool only for the image
         from bokeh.models.tools import HoverTool
-        tooltips = [("Res r", "@resÅ"), ('Res y', '@resyÅ'), ('Res x', '@resxÅ'), ('Jn', '@bessel'), ('Amp', '@image')]
-        if show_phase: tooltips.append(("Phase", "@phase°"))
-        image_hover = HoverTool(renderers=[image], tooltips=tooltips)
+        tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Amp', '@image')]
+        if show_phase: tooltips.append(("Phase", "@phase °"))
+        image_hover = HoverTool(renderers=[image], tooltips=tooltips, attachment="vertical")
         fig.add_tools(image_hover)
+
+        # avoid the need for embedding resr/resy/resx image -> smaller fig object and less data to transfer
+        from bokeh.events import MouseMove
+        from bokeh.models import CustomJS
+        mousemove_callback_code = """
+        var x = cb_obj.x
+        var y = cb_obj.y
+        var resr = Math.round((1./Math.sqrt(x*x + y*y) + Number.EPSILON) * 100) / 100
+        var resy = Math.abs(Math.round((1./y + Number.EPSILON) * 100) / 100)
+        var resx = Math.abs(Math.round((1./x + Number.EPSILON) * 100) / 100)
+        hover.tooltips[0][1] = resr.toString() + " Å"
+        hover.tooltips[1][1] = resy.toString() + " Å"
+        hover.tooltips[2][1] = resx.toString() + " Å"
+        """
+        mousemove_callback = CustomJS(args={"hover":fig.hover[0]}, code=mousemove_callback_code)
+        fig.js_on_event(MouseMove, mousemove_callback)
 
         # create a linked crosshair tool among the figures
         from bokeh.models import CrosshairTool
@@ -327,10 +340,12 @@ def main():
                         x='x', y='y', dw='dw', dh='dh'
                     )
             # add hover tool only for the image
-            tooltips = [("Res", "@resÅ"), ('Res y', '@resyÅ'), ('Res x', '@resxÅ'), ('Jn', '@bessel'), ('Phase Diff', '@image°')]
-            phase_hover = HoverTool(renderers=[phase_image], tooltips=tooltips)
+            tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Phase Diff', '@image °')]
+            phase_hover = HoverTool(renderers=[phase_image], tooltips=tooltips, attachment="vertical")
             fig_phase.add_tools(phase_hover)
             fig_phase.add_tools(crosshair)
+            mousemove_callback = CustomJS(args={"hover":fig_phase.hover[0]}, code=mousemove_callback_code)
+            fig_phase.js_on_event(MouseMove, mousemove_callback)
 
         if show_simu and show_pwr:
             proj_pwr, proj_phase = compute_power_spectra(proj, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
@@ -353,11 +368,13 @@ def main():
                         x='x', y='y', dw='dw', dh='dh'
                     )
             # add hover tool only for the image
-            tooltips = [("Res", "@resÅ"), ('Res y', '@resyÅ'), ('Res x', '@resxÅ'), ('Jn', '@bessel'), ('Amp', '@image')]
-            if show_phase: tooltips.append(("Phase", "@phase"))
-            image_hover = HoverTool(renderers=[proj_image], tooltips=tooltips)
+            tooltips = [("Res r", "@resÅ"), ('Res y', '@resyÅ'), ('Res x', '@resxÅ'), ('Jn', '@bessel'), ('Amp', '@image')]
+            if show_phase: tooltips.append(("Phase", "@phase °"))
+            image_hover = HoverTool(renderers=[proj_image], tooltips=tooltips, attachment="vertical")
             fig_proj.add_tools(image_hover)
             fig_proj.add_tools(crosshair)
+            mousemove_callback = CustomJS(args={"hover":fig_proj.hover[0]}, code=mousemove_callback_code)
+            fig_phase.js_on_event(MouseMove, mousemove_callback)
 
             if show_phase_diff:
                 if nx%2:
@@ -382,10 +399,12 @@ def main():
                             x='x', y='y', dw='dw', dh='dh'
                         )
                 # add hover tool only for the image
-                tooltips = [("Res", "@resÅ"), ('Res y', '@resyÅ'), ('Res x', '@resxÅ'), ('Jn', '@bessel'), ('Phase Diff', '@image°')]
-                phase_hover = HoverTool(renderers=[phase_image], tooltips=tooltips)
+                tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Phase Diff', '@image °')]
+                phase_hover = HoverTool(renderers=[phase_image], tooltips=tooltips, attachment="vertical")
                 fig_proj_phase.add_tools(phase_hover)
                 fig_proj_phase.add_tools(crosshair)
+                mousemove_callback = CustomJS(args={"hover":fig_proj_phase.hover[0]}, code=mousemove_callback_code)
+                fig_phase.js_on_event(MouseMove, mousemove_callback)
 
         if show_pwr and show_LL:
             if max(m_groups[0]["LL"][0])>0:
