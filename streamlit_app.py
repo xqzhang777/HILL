@@ -6,35 +6,39 @@ def main():
     st.set_page_config(page_title="Helical Indexing", layout="wide")
     st.server.server_util.MESSAGE_SIZE_LIMIT = 2e8  # default is 5e7 (50MB)
 
+    query_params = st.experimental_get_query_params()
+
     title = "Helical indexing using layer lines"
     st.title(title)
 
-    col1, col2, col3, col4 = st.beta_columns((1.5, 0.75, 0.25, 3.5))
+    col1, col2, col3, col4 = st.beta_columns((1., 0.5, 0.25, 3.0))
 
     with col1:
         with st.beta_expander(label="README", expanded=False):
             st.write("This Web app considers a biological helical structure as the product of a continous helix and a set of parallel planes, and based on the covolution theory, the Fourier Transform (FT) of a helical structure would be the convolution of the FT of the continous helix and the FT of the planes.  \nThe FT of a continous helix consists of equally spaced layer planes (3D) or layerlines (2D projection) that can be described by Bessel functions of increasing orders (0, +/-1, +/-2, ...) from the Fourier origin (i.e. equator). The spacing between the layer planes/lines is determined by the helical pitch (i.e. the shift along the helical axis for a 360 ° turn of the helix). If the structure has additional cyclic symmetry (for example, C6) around the helical axis, only the layer plane/line orders of integer multiplier of the symmetry (e.g. 0, +/-6, +/-12, ...) are visible. The primary peaks of the layer lines in the power spectra form a pattern similar to a X symbol.  \nThe FT of the parallel planes consists of equally spaced points along the helical axis (i.e. meridian) with the spacing being determined by the helical rise.  \nThe convolution of these two components (X-shaped pattern of layer lines and points along the meridian) generates the layer line patterns seen in the power spectra of the projection images of helical structures. The helical indexing task is thus to identify the helical rise, pitch (or twist), and cyclic symmetry that would predict a layer line pattern to explain the observed the layer lines in the power spectra. This Web app allows you to interactively change the helical parameters and superimpose the predicted layer liines on the power spectra to complete the helical indexing task.  \n  \nPS: power spectra; PD: phase difference between the two sides of meridian; YP: Y-axis power spectra profile; LL: layer lines; m: indices of the X-patterns along the meridian; Jn: Bessel order")
         
         # make radio display horizontal
-        st.write('<style>div.Widget.row-widget.stRadio > div{flex-direction:row;}</style>', unsafe_allow_html=True)
-        input_mode = st.radio(label="How to obtain the input image/map:", options=["upload a mrc/mrcs file", "url", "emd-xxxx"], index=1)
+        st.markdown('<style>div.Widget.row-widget.stRadio > div{flex-direction:row;}</style>', unsafe_allow_html=True)
+        input_modes = {0:"upload a mrc/mrcs file", 1:"url", 2:"emd-xxxx"}
+        value = int(query_params["input_mode"][0]) if "input_mode" in query_params else 1
+        input_mode = st.radio(label="How to obtain the input image/map:", options=list(input_modes.keys()), format_func=lambda i:input_modes[i], index=value)
         is_3d = False
-        if input_mode == "emd-xxxx":
+        if input_mode == 2:  # "emd-xxxx":
             label = "Input an EMDB ID (emd-xxxx):"
-            value = "emd-2699"
+            value = query_params["emdid"][0] if "emdid" in query_params else "emd-2699"
             emdid = st.text_input(label=label, value=value)
             data_all, apix = get_emdb_map(emdid.strip())
             is_3d = True
         else:
-            if input_mode == "upload a mrc/mrcs file":
+            if input_mode == 0:  # "upload a mrc/mrcs file":
                 fileobj = st.file_uploader("Upload a mrc or mrcs file", type=['mrc', 'mrcs', 'map', 'map.gz'])
                 if fileobj is not None:
                     data_all, apix = get_2d_image_from_uploaded_file(fileobj)
                 else:
                     return
-            elif input_mode == "url":
+            elif input_mode == 1:   # "url":
                     label = "Input a url of 2D projection image(s) or a 3D map:"
-                    value = data_example.url
+                    value = query_params["url"][0] if "url" in query_params else data_example.url
                     image_url = st.text_input(label=label, value=value)
                     data_all, apix = get_2d_image_from_url(image_url.strip())
             nz, ny, nx = data_all.shape
@@ -42,22 +46,39 @@ def main():
                 is_3d_auto = True
                 is_3d = st.checkbox(label=f"The input ({nx}x{ny}x{nz}) is a 3D map", value=is_3d_auto)
         if is_3d:
+            if not np.any(data_all):
+                st.warning("All voxels of the input 3D map have zero value")
+                st.stop()
+            
             with st.beta_expander(label="Generate 2-D projection from the 3-D map", expanded=False):
                 az = st.number_input(label=f"Rotation around the helical axis (°):", min_value=0.0, max_value=360., value=0.0, step=1.0)
                 tilt = st.number_input(label=f"Tilt (°):", min_value=-180.0, max_value=180., value=0.0, step=1.0)
                 data = generate_projection(data_all, az=az, tilt=tilt)
         else:
+            nonzeros = nonzero_images(data_all)
+            if nonzeros is None:
+                st.warning("All pixels of the input 2D images have zero value")
+                st.stop()
+            
             nz, ny, nx = data_all.shape
             if nz>1:
-                image_index = st.slider(label=f"Choose an image (out of {nz}):", min_value=1, max_value=nz, value=1, step=1)
+                if len(nonzeros)==nz:
+                    image_index = st.slider(label=f"Choose an image (out of {nz}):", min_value=1, max_value=nz, value=1, step=1)
+                else:
+                    image_index = st.select_slider(label=f"Choose an image ({len(nonzeros)} non-zero images out of {nz}):", options=list(nonzeros+1), value=nonzeros[0]+1)
                 image_index -= 1
             else:
                 image_index = 0
             data = data_all[image_index]
+
+        if not np.any(data):
+            st.warning("All pixels of the 2D image have zero value")
+            st.stop()
+
         ny, nx = data.shape
         original_image = st.empty()
         with original_image:
-            st.image(data, width=min(600, nx), caption=f"Orignal image ({nx}x{ny})", clamp=True)
+            st.image(data, use_column_width=True, caption=f"Orignal image ({nx}x{ny})", clamp=True)
 
         with st.beta_expander(label="Transpose/Rotate/Shift the image", expanded=False):
             is_pwr = st.checkbox(label="Input image is power spectra", value=False)
@@ -82,7 +103,7 @@ def main():
         fraction_x = mask_radius/(nx//2*apix)
         data = tapering(data, fraction_start=[0.9, fraction_x], fraction_slope=0.1)
         with transformed_image:
-            st.image(data, width=min(600, nx), caption="Transformed image", clamp=True)
+            st.image(data, use_column_width=True, caption="Transformed image", clamp=True)
 
         ploty = st.empty()
         st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to Wen Jiang (jiang12 at purdue.edu)*")
@@ -90,8 +111,10 @@ def main():
     with col2:
         apix = st.number_input('Pixel size (Å/pixel)', value=apix, min_value=0.1, max_value=10., step=0.01, format="%.4f")
         pitch_or_twist = st.beta_container()
-        rise = st.number_input('Rise (Å)', value=data_example.rise, min_value=-180.0, max_value=180.0, step=1.0, format="%.3f")
-        csym = st.number_input('Csym', value=data_example.csym, min_value=1, max_value=16, step=1)
+        value = float(query_params["rise"][0]) if "rise" in query_params else data_example.rise
+        rise = st.number_input('Rise (Å)', value=value, min_value=-180.0, max_value=180.0, step=1.0, format="%.3f")
+        value = int(query_params["csym"][0]) if "csym" in query_params else data_example.csym
+        csym = st.number_input('Csym', value=value, min_value=1, max_value=16, step=1)
 
         radius = st.number_input('Radius (Å)', value=max(1.0, radius_auto*apix), min_value=1.0, max_value=1000.0, step=10., format="%.1f")
         
@@ -100,7 +123,7 @@ def main():
         cutoff_res_y = st.number_input('Limit FFT Y-dim to resolution (Å)', value=round(3*apix, 0), min_value=2*apix, step=1.0)
         pnx = st.number_input('FFT X-dim size (pixels)', value=max(min(nx,ny), 512), min_value=min(nx, 128), step=2)
         pny = st.number_input('FFT Y-dim size (pixels)', value=max(max(nx,ny), 1024), min_value=min(ny, 512), step=2)
-        st.subheader("Simulate the helix with Gaussians")
+        st.subheader("Simulation")
         ball_radius = st.number_input('Gaussian radius (Å)', value=0.0, min_value=0.0, max_value=radius, step=5.0, format="%.1f")
         show_simu = True if ball_radius > 0 else False
         if show_simu:
@@ -118,6 +141,7 @@ def main():
             p = figure(x_axis_label="pixel value", y_axis_label="y (Å)", frame_height=ny, tools=tools, tooltips=tooltips)
             p.line(xmax, y, line_width=2, color='red', legend_label="max")
             p.line(xmean, y, line_width=2, color='blue', legend_label="mean")
+            p.legend.visible = False
             p.legend.location = "top_right"
             p.legend.click_policy="hide"
             from bokeh import events
@@ -150,6 +174,7 @@ def main():
             rmax_span = Span(location=mask_radius, dimension='height', line_color='green', line_dash='dashed', line_width=3)
             p.add_layout(rmin_span)
             p.add_layout(rmax_span)
+            p.legend.visible = False
             p.legend.location = "top_right"
             p.legend.click_policy="hide"
             toggle_legend_js_x = CustomJS(args=dict(leg=p.legend[0]), code="""
@@ -165,17 +190,20 @@ def main():
 
     with col3:
         st.subheader("Display:")
-        show_pitch = st.checkbox(label="Pitch", value=True)
+        value = int(query_params["show_pitch"][0]) if "show_pitch" in query_params else True
+        show_pitch = st.checkbox(label="Pitch", value=value)
         with pitch_or_twist:
             if show_pitch:
-                pitch = st.number_input('Pitch (Å)', value=data_example.pitch, min_value=1.0, max_value=max(pny,pnx)*apix, step=1.0, format="%.2f")
+                value = float(query_params["pitch"][0]) if "pitch" in query_params else data_example.pitch
+                pitch = st.number_input('Pitch (Å)', value=value, min_value=1.0, max_value=max(pny,pnx)*apix, step=1.0, format="%.2f")
                 if pitch < cutoff_res_y:
                     st.warning(f"pitch is too small. it should be > {cutoff_res_y} (Limit FFT X-dim to resolution (Å))")
                     return
                 twist = 360./(pitch/rise)
                 st.markdown(f"*(twist = {twist:.2f} °)*")
             else:
-                twist = st.number_input('Twist (°)', value=data_example.twist, min_value=-180.0, max_value=180.0, step=1.0, format="%.2f")
+                value = float(query_params["twist"][0]) if "twist" in query_params else data_example.twist
+                twist = st.number_input('Twist (°)', value=value, min_value=-180.0, max_value=180.0, step=1.0, format="%.2f")
                 pitch = (360./twist)*rise
                 st.markdown(f"*(pitch = {pitch:.2f} Å)*")
         show_pwr = st.checkbox(label="PS", value=True)
@@ -264,7 +292,7 @@ def main():
         image = fig.image(source=source_data, image='image', color_mapper=color_mapper, x='x', y='y', dw='dw', dh='dh')
         # add hover tool only for the image
         from bokeh.models.tools import HoverTool
-        tooltips = [("Res", "@resÅ"), ('Res y', '@resyÅ'), ('Res x', '@resxÅ'), ('Jn', '@bessel'), ('Amp', '@image')]
+        tooltips = [("Res r", "@resÅ"), ('Res y', '@resyÅ'), ('Res x', '@resxÅ'), ('Jn', '@bessel'), ('Amp', '@image')]
         if show_phase: tooltips.append(("Phase", "@phase°"))
         image_hover = HoverTool(renderers=[image], tooltips=tooltips)
         fig.add_tools(image_hover)
@@ -409,7 +437,12 @@ def main():
         
         st.bokeh_chart(fig, use_container_width=False)
 
-        return
+    if input_mode == 2:
+        st.experimental_set_query_params(input_mode=2, emdid=emdid, show_pitch=int(show_pitch), pitch=round(pitch,3), twist=round(twist,3), rise=round(rise,3), csym=csym)
+    elif input_mode == 1:
+        st.experimental_set_query_params(input_mode=1, url=image_url, show_pitch=int(show_pitch), pitch=round(pitch,3), twist=round(twist,3), rise=round(rise,3), csym=csym)
+    else:
+        st.experimental_set_query_params()
 
 @st.cache(persist=True, show_spinner=False)
 def bessel_n_image(ny, nx, nyquist_res_x, nyquist_res_y, radius, tilt):
@@ -753,6 +786,16 @@ def normalize(data, percentile=(0, 100)):
     return data2
 
 @st.cache(persist=True, show_spinner=False)
+def nonzero_images(data):
+    assert(len(data.shape) == 3)
+    nonzeros = np.any(data, axis=(1,2))
+    n = np.count_nonzero(nonzeros)
+    if n>0: 
+        return np.nonzero(nonzeros)[0]
+    else:
+        None
+
+@st.cache(persist=True, show_spinner=False)
 def get_2d_image_from_uploaded_file(fileobj):
     import os, tempfile
     orignal_filename = fileobj.name
@@ -776,27 +819,19 @@ def get_emdb_map(emdid):
     return data, apix
 
 @st.cache(persist=True, show_spinner=False)
-def get_2d_image_from_url(url, as_3d=False):
+def get_2d_image_from_url(url):
     ds = np.DataSource(None)
     fp=ds.open(url)
-    return get_2d_image_from_file(fp.name, as_3d=as_3d)
+    return get_2d_image_from_file(fp.name)
 
 @st.cache(persist=True, show_spinner=False)
-def get_2d_image_from_file(filename, as_3d=False):
+def get_2d_image_from_file(filename):
     import mrcfile
     with mrcfile.open(filename) as mrc:
         data = mrc.data * 1.0
         apix = mrc.voxel_size.x.item()
     nz, ny, nx = data.shape
-    if nz>1 and as_3d:
-        projs = np.zeros((2, nz, nx))
-        for ai, axis in enumerate([1, 2]):
-            proj = data.mean(axis=axis)
-            proj = normalize(proj, percentile=(0, 100))
-            projs[ai] = proj
-        return projs, apix
-    else:
-        return data, apix
+    return data, apix
 class Data(object):
     def __init__(self, twist, rise, csym, diameter, apix, url=None):
         self.twist = twist
