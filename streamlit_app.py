@@ -136,14 +136,18 @@ def main(args):
         cutoff_res_x = st.number_input('Resolution limit - X (Å)', value=value, min_value=2*apix, step=1.0)
         value = float(query_params["resy"][0]) if "resy" in query_params else round(3*apix, 0)
         cutoff_res_y = st.number_input('Resolution limit - Y (Å)', value=value, min_value=2*apix, step=1.0)
-        pnx = st.number_input('FFT X-dim size (pixels)', value=max(min(nx,ny), 512), min_value=min(nx, 128), step=2)
-        pny = st.number_input('FFT Y-dim size (pixels)', value=max(max(nx,ny), 1024), min_value=min(ny, 512), step=2)
-        st.subheader("Simulation")
-        ball_radius = st.number_input('Gaussian radius (Å)', value=0.0, min_value=0.0, max_value=radius, step=5.0, format="%.1f")
-        show_simu = True if ball_radius > 0 else False
-        if show_simu:
-            az = st.number_input('Azimuthal angle (°)', value=0, min_value=0, max_value=360, step=1, format="%.1f")
-            noise = st.number_input('Noise (sigma)', value=0., min_value=0., step=1., format="%.1f")
+        with st.beta_expander(label="Filters", expanded=False):
+            log_xform = st.checkbox(label="Log(amplitude)", value=True)
+            hp_fraction = st.number_input('Fourier high-pass (%)', value=0.4, min_value=0.0, max_value=100.0, step=0.1, format="%.2f") / 100.0
+            lp_fraction = st.number_input('Fourier low-pass (%)', value=0.0, min_value=0.0, max_value=100.0, step=10.0, format="%.2f") / 100.0
+            pnx = st.number_input('FFT X-dim size (pixels)', value=max(min(nx,ny), 512), min_value=min(nx, 128), step=2)
+            pny = st.number_input('FFT Y-dim size (pixels)', value=max(max(nx,ny), 1024), min_value=min(ny, 512), step=2)
+        with st.beta_expander(label="Simulation", expanded=False):
+            ball_radius = st.number_input('Gaussian radius (Å)', value=0.0, min_value=0.0, max_value=radius, step=5.0, format="%.1f")
+            show_simu = True if ball_radius > 0 else False
+            if show_simu:
+                az = st.number_input('Azimuthal angle (°)', value=0, min_value=0, max_value=360, step=1, format="%.1f")
+                noise = st.number_input('Noise (sigma)', value=0., min_value=0., step=1., format="%.1f")
 
     if not is_pwr:
         with ploty:
@@ -270,11 +274,11 @@ def main(args):
 
         if is_pwr:
             pwr = resize_rescale_power_spectra(data, nyquist_res=2*apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
-                    output_size=(pny, pnx), low_pass_fraction=0.2, high_pass_fraction=0.004)
+                    output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
             phase = None
         else:
             pwr, phase = compute_power_spectra(data, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
-                    output_size=(pny, pnx), low_pass_fraction=0.2, high_pass_fraction=0.004)
+                    output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
 
         ny, nx = pwr.shape
         dsy = 1/(ny//2*cutoff_res_y)
@@ -430,6 +434,7 @@ def main(args):
                     ll_colors = gray(ng*2)[::-1]
                 else:
                     ll_colors = viridis(ng*2)[::-1]
+                ll_colors = np.array(ll_colors)[distinct_sampling(ng)]                
                 x, y = m_groups[0]["LL"]
                 tmp_x = np.sort(np.unique(x))
                 width = np.mean(tmp_x[1:]-tmp_x[:-1])
@@ -564,6 +569,25 @@ def simulate_helix(twist, rise, csym, helical_radius, ball_radius, ny, nx, apix,
     return projection
 
 @st.cache(persist=True, show_spinner=False)
+def distinct_sampling(n):
+    assert(n>0)
+    if n==1: return [0]
+    all = list(range(1, n))
+    ret = [0]
+    while all:
+        ref = ret[-2:][0]
+        err_max = 0
+        val_max = None
+        for v in all:
+            err = abs(v-ref)
+            if err>err_max:
+                err_max = err
+                val_max = v
+        ret.append(val_max)
+        all.remove(val_max)
+    return ret
+
+@st.cache(persist=True, show_spinner=False)
 def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m=[]):
     def pitch(twist, rise):
         p = np.abs(rise * 360./twist)   # pitch in Å
@@ -614,7 +638,7 @@ def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m=
     return m_groups
 
 @st.cache(persist=True, show_spinner=False)
-def resize_rescale_power_spectra(data, nyquist_res, cutoff_res=None, output_size=None, low_pass_fraction=0, high_pass_fraction=0):
+def resize_rescale_power_spectra(data, nyquist_res, cutoff_res=None, output_size=None, log=True, low_pass_fraction=0, high_pass_fraction=0):
     from scipy.ndimage.interpolation import map_coordinates
     ny, nx = data.shape
     ony, onx = output_size
@@ -623,18 +647,18 @@ def resize_rescale_power_spectra(data, nyquist_res, cutoff_res=None, output_size
     Y = Y/(ony//2) * nyquist_res/res_y * ny//2 + ny//2
     X = X/(onx//2) * nyquist_res/res_x * nx//2 + nx//2
     pwr = map_coordinates(data, (Y.flatten(), X.flatten()), order=3, mode='constant').reshape(Y.shape)
-    pwr = np.log(np.abs(pwr))
+    if log: pwr = np.log(np.abs(pwr))
     if 0<low_pass_fraction<1 or 0<high_pass_fraction<1:
         pwr = low_high_pass_filter(pwr, low_pass_fraction=low_pass_fraction, high_pass_fraction=high_pass_fraction)
     pwr = normalize(pwr, percentile=(0, 100))
     return pwr
 
 @st.cache(persist=True, show_spinner=False)
-def compute_power_spectra(data, apix, cutoff_res=None, output_size=None, low_pass_fraction=0, high_pass_fraction=0):
+def compute_power_spectra(data, apix, cutoff_res=None, output_size=None, log=True, low_pass_fraction=0, high_pass_fraction=0):
     fft = fft_rescale(data, apix=apix, cutoff_res=cutoff_res, output_size=output_size)
     fft = np.fft.fftshift(fft)  # shift fourier origin from corner to center
 
-    pwr = np.log(np.abs(fft))
+    if log: pwr = np.log(np.abs(fft))
     if 0<low_pass_fraction<1 or 0<high_pass_fraction<1:
         pwr = low_high_pass_filter(pwr, low_pass_fraction=low_pass_fraction, high_pass_fraction=high_pass_fraction)
     pwr = normalize(pwr, percentile=(0, 100))
