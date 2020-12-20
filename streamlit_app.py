@@ -2,7 +2,7 @@ from bokeh.plotting import figure
 import streamlit as st
 import numpy as np
 
-def main(input_mode=0, message=""):
+def main(args):
     st.set_page_config(page_title="Helical Indexing", layout="wide")
     st.server.server_util.MESSAGE_SIZE_LIMIT = 2e8  # default is 5e7 (50MB)
 
@@ -17,12 +17,12 @@ def main(input_mode=0, message=""):
         with st.beta_expander(label="README", expanded=False):
             st.write("This Web app considers a biological helical structure as the product of a continous helix and a set of parallel planes, and based on the covolution theory, the Fourier Transform (FT) of a helical structure would be the convolution of the FT of the continous helix and the FT of the planes.  \nThe FT of a continous helix consists of equally spaced layer planes (3D) or layerlines (2D projection) that can be described by Bessel functions of increasing orders (0, +/-1, +/-2, ...) from the Fourier origin (i.e. equator). The spacing between the layer planes/lines is determined by the helical pitch (i.e. the shift along the helical axis for a 360 ° turn of the helix). If the structure has additional cyclic symmetry (for example, C6) around the helical axis, only the layer plane/line orders of integer multiplier of the symmetry (e.g. 0, +/-6, +/-12, ...) are visible. The primary peaks of the layer lines in the power spectra form a pattern similar to a X symbol.  \nThe FT of the parallel planes consists of equally spaced points along the helical axis (i.e. meridian) with the spacing being determined by the helical rise.  \nThe convolution of these two components (X-shaped pattern of layer lines and points along the meridian) generates the layer line patterns seen in the power spectra of the projection images of helical structures. The helical indexing task is thus to identify the helical rise, pitch (or twist), and cyclic symmetry that would predict a layer line pattern to explain the observed the layer lines in the power spectra. This Web app allows you to interactively change the helical parameters and superimpose the predicted layer liines on the power spectra to complete the helical indexing task.  \n  \nPS: power spectra; PD: phase difference between the two sides of meridian; YP: Y-axis power spectra profile; LL: layer lines; m: indices of the X-patterns along the meridian; Jn: Bessel order")
         
-        show_initial_message(message=message) # only show once on the first run
+        show_initial_message(message=args.message) # only show once on the first run
 
         # make radio display horizontal
         st.markdown('<style>div.Widget.row-widget.stRadio > div{flex-direction:row;}</style>', unsafe_allow_html=True)
         input_modes = {0:"upload a mrc/mrcs file", 1:"url", 2:"emd-xxxx"}
-        value = int(query_params["input_mode"][0]) if "input_mode" in query_params else input_mode
+        value = int(query_params["input_mode"][0]) if "input_mode" in query_params else args.input_mode
         input_mode = st.radio(label="How to obtain the input image/map:", options=list(input_modes.keys()), format_func=lambda i:input_modes[i], index=value)
         is_3d = False
         if input_mode == 2:  # "emd-xxxx":
@@ -83,9 +83,10 @@ def main(input_mode=0, message=""):
             st.image(data, use_column_width=True, caption=f"Orignal image ({nx}x{ny})", clamp=True)
 
         with st.beta_expander(label="Transpose/Rotate/Shift the image", expanded=False):
-            is_pwr = st.checkbox(label="Input image is power spectra", value=False)
+            value = int(query_params["is_pwr"][0]) if "is_pwr" in query_params else args.input_is_power
+            is_pwr = st.checkbox(label="Input image is power spectra", value=value)
             transpose = st.checkbox(label='Transpose the image', value=False)
-            if is_3d:
+            if is_pwr or is_3d:
                 angle_auto, dx_auto = 0., 0.
             else:
                 angle_auto, dx_auto = auto_vertical_center(data)
@@ -93,21 +94,30 @@ def main(input_mode=0, message=""):
             dx = st.number_input('Shift along X-dim (Å)', value=dx_auto*apix, min_value=-nx*apix, max_value=nx*apix, step=1.0)
         
         transformed_image = st.empty()
+        transformed = transpose or angle or dx 
         if transpose:
             data = data.T
         if angle or dx:
             data = rotate_shift_image(data, angle=-angle, post_shift=(0, dx/apix), order=1)
 
-        plotx = st.empty()
-        radius_auto, mask_radius_auto = estimate_radial_range(data, thresh_ratio=0.1)
-        mask_radius = st.number_input('Mask radius (Å)', value=mask_radius_auto*apix, min_value=1.0, max_value=nx/2*apix, step=1.0, format="%.1f")
+        radius_auto = 0
+        if not is_pwr:
+            plotx = st.empty()
 
-        fraction_x = mask_radius/(nx//2*apix)
-        data = tapering(data, fraction_start=[0.9, fraction_x], fraction_slope=0.1)
-        with transformed_image:
-            st.image(data, use_column_width=True, caption="Transformed image", clamp=True)
+            radius_auto, mask_radius_auto = estimate_radial_range(data, thresh_ratio=0.1)
+            mask_radius = st.number_input('Mask radius (Å)', value=mask_radius_auto*apix, min_value=1.0, max_value=nx/2*apix, step=1.0, format="%.1f")
 
-        ploty = st.empty()
+            fraction_x = mask_radius/(nx//2*apix)
+            data = tapering(data, fraction_start=[0.9, fraction_x], fraction_slope=0.1)
+            transformed = 1
+        
+        if transformed:
+            with transformed_image:
+                st.image(data, use_column_width=True, caption="Transformed image", clamp=True)
+
+        if not is_pwr:
+            ploty = st.empty()
+
         st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to Wen Jiang (jiang12 at purdue.edu)*")
 
     with col2:
@@ -221,7 +231,8 @@ def main(input_mode=0, message=""):
                 show_phase_diff = st.checkbox(label="PD", value=True)
             show_yprofile = st.checkbox(label="YP", value=False)
             show_pseudocolor = st.checkbox(label="Color", value=True)
-            show_LL = st.checkbox(label="LL", value=True)
+            value=False if input_mode==0 or is_pwr else True
+            show_LL = st.checkbox(label="LL", value=value)
             if show_LL:
                 m_groups = compute_layer_line_positions(twist=twist, rise=rise, csym=csym, radius=radius, tilt=tilt, cutoff_res=cutoff_res_y)
                 ng = len(m_groups)
@@ -473,6 +484,7 @@ def main(input_mode=0, message=""):
         else:
             params["twist"] = round(twist,3)
         params.update(dict(rise=round(rise,3), csym=csym, radius=round(radius,1), resx=round(cutoff_res_x,2), resy=round(cutoff_res_y,2)))
+        if is_pwr: params["is_pwr"] = int(is_pwr)
     else:
         params = dict()
     st.experimental_set_query_params(**params)
@@ -905,7 +917,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--input_mode", metavar="<n>", choices=(0,1,2), type=int, help="input mode (0, 1, 2). default: %(default)s", default=1)
+    parser.add_argument("--input_is_power", metavar="<0|1>", choices=(0,1), type=int, help="if the input is power spectra. default: %(default)s", default=0)
     parser.add_argument("--message", metavar="<str>", type=str, help="initial message. default: %(default)s", default="")
     args = parser.parse_args()
-    print(args)
-    main(input_mode=args.input_mode, message=args.message)
+    main(args)
