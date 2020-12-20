@@ -116,11 +116,14 @@ def main():
         value = int(query_params["csym"][0]) if "csym" in query_params else data_example.csym
         csym = st.number_input('Csym', value=value, min_value=1, max_value=16, step=1)
 
-        radius = st.number_input('Radius (Å)', value=max(1.0, radius_auto*apix), min_value=1.0, max_value=1000.0, step=10., format="%.1f")
+        value = float(query_params["radius"][0]) if "radius" in query_params else max(1.0, radius_auto*apix)
+        radius = st.number_input('Radius (Å)', value=value, min_value=1.0, max_value=1000.0, step=10., format="%.1f")
         
         tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-90.0, max_value=90.0, step=1.0)
-        cutoff_res_x = st.number_input('Limit FFT X-dim to resolution (Å)', value=round(3*apix, 0), min_value=2*apix, step=1.0)
-        cutoff_res_y = st.number_input('Limit FFT Y-dim to resolution (Å)', value=round(3*apix, 0), min_value=2*apix, step=1.0)
+        value = float(query_params["resx"][0]) if "resx" in query_params else round(3*apix, 0)
+        cutoff_res_x = st.number_input('Resolution limit - X (Å)', value=value, min_value=2*apix, step=1.0)
+        value = float(query_params["resy"][0]) if "resy" in query_params else round(3*apix, 0)
+        cutoff_res_y = st.number_input('Resolution limit - Y (Å)', value=value, min_value=2*apix, step=1.0)
         pnx = st.number_input('FFT X-dim size (pixels)', value=max(min(nx,ny), 512), min_value=min(nx, 128), step=2)
         pny = st.number_input('FFT Y-dim size (pixels)', value=max(max(nx,ny), 1024), min_value=min(ny, 512), step=2)
         st.subheader("Simulation")
@@ -456,12 +459,21 @@ def main():
         
         st.bokeh_chart(fig, use_container_width=False)
 
-    if input_mode == 2:
-        st.experimental_set_query_params(input_mode=2, emdid=emdid, show_pitch=int(show_pitch), pitch=round(pitch,3), twist=round(twist,3), rise=round(rise,3), csym=csym)
-    elif input_mode == 1:
-        st.experimental_set_query_params(input_mode=1, url=image_url, show_pitch=int(show_pitch), pitch=round(pitch,3), twist=round(twist,3), rise=round(rise,3), csym=csym)
+    if input_mode in [2, 1]:
+        params=dict(input_mode=input_mode)
+        if input_mode == 3:
+            params["emdid"] = emdid
+        elif input_mode == 1:
+            params["url"] = image_url
+        params["show_pitch"] = int(show_pitch)
+        if show_pitch:
+            params["pitch"] = round(pitch,3)
+        else:
+            params["twist"] = round(twist,3)
+        params.update(dict(rise=round(rise,3), csym=csym, radius=round(radius,1), resx=round(cutoff_res_x,2), resy=round(cutoff_res_y,2)))
     else:
-        st.experimental_set_query_params()
+        params = dict()
+    st.experimental_set_query_params(**params)
 
 @st.cache(persist=True, show_spinner=False)
 def bessel_n_image(ny, nx, nyquist_res_x, nyquist_res_y, radius, tilt):
