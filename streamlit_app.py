@@ -1,6 +1,9 @@
-from bokeh.plotting import figure
 import streamlit as st
 import numpy as np
+from bokeh.plotting import figure
+from bokeh.models import CustomJS, Span, LinearColorMapper
+from bokeh.models import HoverTool, CrosshairTool
+from bokeh.events import MouseMove, DoubleTap
 
 def main(args):
     st.set_page_config(page_title="Helical Indexing", layout="wide")
@@ -102,14 +105,14 @@ def main(args):
 
         radius_auto = 0
         if not is_pwr:
-            plotx = st.empty()
-
             radius_auto, mask_radius_auto = estimate_radial_range(data, thresh_ratio=0.1)
             mask_radius = st.number_input('Mask radius (Å)', value=mask_radius_auto*apix, min_value=1.0, max_value=nx/2*apix, step=1.0, format="%.1f")
 
             fraction_x = mask_radius/(nx//2*apix)
             data = tapering(data, fraction_start=[0.9, fraction_x], fraction_slope=0.1)
             transformed = 1
+
+            plotx = st.empty()
         
         if transformed:
             with transformed_image:
@@ -117,6 +120,105 @@ def main(args):
 
         if not is_pwr:
             ploty = st.empty()
+
+        # let user to input another image to replace the Fourier amplitudes
+        if is_pwr:
+            label = f"Add phases from another image"
+        else:
+            label = f"Replace amplitudes with another image"
+        input_image2 = st.checkbox(label=label, value=False)        
+        if input_image2:
+            # make radio display horizontal
+            input_mode2 = st.radio(label="How to obtain the 2nd input image/map:", options=list(input_modes.keys()), format_func=lambda i:input_modes[i], index=input_mode)
+            is_3d2 = False
+            if input_mode2 == 2:  # "emd-xxxx":
+                label = "Input an EMDB ID (emd-xxxx):"
+                value = query_params["emdid"][0] if "emdid" in query_params else "emd-2699"
+                emdid2 = st.text_input(label=label, value=value)
+                data_all2, apix2 = get_emdb_map(emdid2.strip())
+                is_3d2 = True
+            else:
+                if input_mode2 == 0:  # "upload a mrc/mrcs file":
+                    fileobj = st.file_uploader("Upload a mrc or mrcs file ", type=['mrc', 'mrcs', 'map', 'map.gz'])
+                    if fileobj is not None:
+                        data_all2, apix2 = get_2d_image_from_uploaded_file(fileobj)
+                    else:
+                        return
+                elif input_mode2 == 1:   # "url":
+                        label = "Input a 2nd url of 2D projection image(s) or a 3D map:"
+                        value = query_params["url"][0] if "url" in query_params else data_example.url
+                        image_url2 = st.text_input(label=label, value=value)
+                        data_all2, apix2 = get_2d_image_from_url(image_url2.strip())
+                nz2, ny2, nx2 = data_all2.shape
+                if nx2==ny2 and nz2>nx2//4:
+                    is_3d_auto2 = True
+                    is_3d2 = st.checkbox(label=f"The input ({nx2}x{ny2}x{nz2}) is a 3D map", value=is_3d_auto2)
+            if is_3d2:
+                if not np.any(data_all2):
+                    st.warning("All voxels of the input 3D map have zero value")
+                    st.stop()
+                
+                with st.beta_expander(label="Generate 2-D projection from the 3-D map", expanded=False):
+                    az2 = st.number_input(label=f"Rotation around the helical axis (°):", min_value=0.0, max_value=360., value=0.0, step=1.0)
+                    tilt2 = st.number_input(label=f"Tilt (°):", min_value=-180.0, max_value=180., value=0.0, step=1.0)
+                    data2 = generate_projection(data_all2, az=az, tilt=tilt)
+            else:
+                nonzeros2 = nonzero_images(data_all2)
+                if nonzeros2 is None:
+                    st.warning("All pixels of the input 2D images have zero value")
+                    st.stop()
+                
+                nz2, ny2, nx2 = data_all2.shape
+                if nz2>1:
+                    if len(nonzeros2)==nz2:
+                        image_index2 = st.slider(label=f"Choose an 2nd image (out of {nz2}):", min_value=1, max_value=nz, value=1, step=1)
+                    else:
+                        image_index2 = st.select_slider(label=f"Choose an 2nd image ({len(nonzeros2)} non-zero images out of {nz2}):", options=list(nonzeros2+1), value=nonzeros2[0]+1)
+                    image_index2 -= 1
+                else:
+                    image_index2 = 0
+                data2 = data_all2[image_index2]
+
+            if not np.any(data2):
+                st.warning("All pixels of the 2D image have zero value")
+                st.stop()
+
+            ny2, nx2 = data2.shape
+            original_image2 = st.empty()
+            with original_image2:
+                st.image(data2, use_column_width=True, caption=f"Orignal image ({nx2}x{ny2})", clamp=True)
+
+            with st.beta_expander(label="Transpose/Rotate/Shift the image", expanded=False):
+                is_pwr2 = st.checkbox(label="Input image is power spectra ", value=False if is_pwr else True)
+                transpose2 = st.checkbox(label='Transpose the 2nd image', value=False)
+                if is_pwr2 or is_3d2:
+                    angle_auto2, dx_auto2 = 0., 0.
+                else:
+                    angle_auto2, dx_auto2 = auto_vertical_center(data2)
+                angle2 = st.number_input('Rotate (°) ', value=-angle_auto2, min_value=-180., max_value=180., step=1.0)
+                dx2 = st.number_input('Shift along X-dim (Å) ', value=dx_auto2*apix2, min_value=-nx*apix2, max_value=nx*apix2, step=1.0)
+            
+            transformed_image2 = st.empty()
+            transformed2 = transpose2 or angle2 or dx2 
+            if transpose2:
+                data2 = data2.T
+            if angle2 or dx2:
+                data2 = rotate_shift_image(data2, angle=-angle2, post_shift=(0, dx2/apix2), order=1)
+
+            radius_auto2 = 0
+            if not is_pwr2:
+                radius_auto2, mask_radius_auto2 = estimate_radial_range(data2, thresh_ratio=0.1)
+                mask_radius2 = st.number_input('Mask radius (Å) ', value=mask_radius_auto2*apix2, min_value=1.0, max_value=nx2/2*apix2, step=1.0, format="%.1f")
+
+                fraction_x2 = mask_radius2/(nx2//2*apix2)
+                data2 = tapering(data2, fraction_start=[0.9, fraction_x2], fraction_slope=0.1)
+                transformed2 = 1
+
+                plotx2 = st.empty()
+            
+            if transformed2:
+                with transformed_image2:
+                    st.image(data2, use_column_width=True, caption="Transformed image", clamp=True)
 
         st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to Wen Jiang (jiang12 at purdue.edu)*")
 
@@ -163,8 +265,6 @@ def main(args):
             p.legend.visible = False
             p.legend.location = "top_right"
             p.legend.click_policy="hide"
-            from bokeh import events
-            from bokeh.models import CustomJS
             toggle_legend_js_y = CustomJS(args=dict(leg=p.legend[0]), code="""
                 if (leg.visible) {
                     leg.visible = false
@@ -173,7 +273,7 @@ def main(args):
                     leg.visible = true
                 }
             """)
-            p.js_on_event(events.DoubleTap, toggle_legend_js_y)
+            p.js_on_event(DoubleTap, toggle_legend_js_y)
             st.bokeh_chart(p, use_container_width=True)
 
         with plotx:
@@ -188,7 +288,6 @@ def main(args):
             p.line(-x, ymax, line_width=2, color='red', line_dash="dashed", legend_label="max flipped")
             p.line(x, ymean, line_width=2, color='blue', legend_label="mean")
             p.line(-x, ymean, line_width=2, color='blue', line_dash="dashed", legend_label="mean flipped")
-            from bokeh.models import Span
             rmin_span = Span(location=-mask_radius, dimension='height', line_color='green', line_dash='dashed', line_width=3)
             rmax_span = Span(location=mask_radius, dimension='height', line_color='green', line_dash='dashed', line_width=3)
             p.add_layout(rmin_span)
@@ -204,7 +303,38 @@ def main(args):
                     leg.visible = true
                 }
             """)
-            p.js_on_event(events.DoubleTap, toggle_legend_js_x)
+            p.js_on_event(DoubleTap, toggle_legend_js_x)
+            st.bokeh_chart(p, use_container_width=True)
+
+    if input_image2 and not is_pwr2:
+        with plotx2:
+            x = np.arange(-nx2//2, nx2//2)*apix2
+            ymax = np.max(data2, axis=0)
+            ymean = np.mean(data2, axis=0)
+
+            tools = 'box_zoom,crosshair,hover,pan,reset,save,wheel_zoom'
+            tooltips = [("X", "@x{0.0}Å")]
+            p = figure(x_axis_label="x (Å)", y_axis_label="pixel value", frame_height=ny2, tools=tools, tooltips=tooltips)
+            p.line(x, ymax, line_width=2, color='red', legend_label="max")
+            p.line(-x, ymax, line_width=2, color='red', line_dash="dashed", legend_label="max flipped")
+            p.line(x, ymean, line_width=2, color='blue', legend_label="mean")
+            p.line(-x, ymean, line_width=2, color='blue', line_dash="dashed", legend_label="mean flipped")
+            rmin_span = Span(location=-mask_radius2, dimension='height', line_color='green', line_dash='dashed', line_width=3)
+            rmax_span = Span(location=mask_radius2, dimension='height', line_color='green', line_dash='dashed', line_width=3)
+            p.add_layout(rmin_span)
+            p.add_layout(rmax_span)
+            p.legend.visible = False
+            p.legend.location = "top_right"
+            p.legend.click_policy="hide"
+            toggle_legend_js_x = CustomJS(args=dict(leg=p.legend[0]), code="""
+                if (leg.visible) {
+                    leg.visible = false
+                    }
+                else {
+                    leg.visible = true
+                }
+            """)
+            p.js_on_event(DoubleTap, toggle_legend_js_x)
             st.bokeh_chart(p, use_container_width=True)
 
     with col3:
@@ -227,12 +357,12 @@ def main(args):
                 st.markdown(f"*(pitch = {pitch:.2f} Å)*")
         show_pwr = st.checkbox(label="PS", value=True)
         if show_pwr:
-            if is_pwr:
-                show_phase = False
-                show_phase_diff = False
-            else:
+            if not is_pwr or (input_image2 and not is_pwr2):
                 show_phase = st.checkbox(label="Phase", value=False)
                 show_phase_diff = st.checkbox(label="PD", value=True)
+            else:
+                show_phase = False
+                show_phase_diff = False
             show_yprofile = st.checkbox(label="YP", value=False)
             show_pseudocolor = st.checkbox(label="Color", value=True)
             value=False if input_mode==0 or is_pwr else True
@@ -279,6 +409,19 @@ def main(args):
         else:
             pwr, phase = compute_power_spectra(data, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
                     output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
+        
+        if input_image2:
+            if is_pwr2:
+                pwr2 = resize_rescale_power_spectra(data2, nyquist_res=2*apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
+                        output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
+                phase2 = None
+            else:
+                pwr2, phase2 = compute_power_spectra(data2, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
+                        output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
+            if is_pwr:
+                if phase2 is not None: phase = phase2
+            else:
+                if pwr2 is not None: pwr = pwr2
 
         ny, nx = pwr.shape
         dsy = 1/(ny//2*cutoff_res_y)
@@ -291,7 +434,6 @@ def main(args):
         sx = sx.astype(np.float16)
         bessel = bessel_n_image(ny, nx, cutoff_res_x, cutoff_res_y, radius, tilt).astype(np.int16)
 
-        from bokeh.models import LinearColorMapper
         tools = 'box_zoom,pan,reset,save,wheel_zoom'
         fig = figure(title_location="below", frame_width=nx, frame_height=ny, 
             x_axis_label=None, y_axis_label=None, x_range=x_range, y_range=y_range, tools=tools)
@@ -303,20 +445,16 @@ def main(args):
 
         source_data = dict(image=[pwr.astype(np.float16)], x=[-nx//2*dsx], y=[-ny//2*dsy], dw=[nx*dsx], dh=[ny*dsy], bessel=[bessel])
         if show_phase: source_data["phase"] = [np.fmod(np.rad2deg(phase)+360, 360).astype(np.float16)]
-        from bokeh.models import LinearColorMapper
         palette = 'Viridis256' if show_pseudocolor else 'Greys256'
         color_mapper = LinearColorMapper(palette=palette)    # Greys256, Viridis256
         image = fig.image(source=source_data, image='image', color_mapper=color_mapper, x='x', y='y', dw='dw', dh='dh')
         # add hover tool only for the image
-        from bokeh.models.tools import HoverTool
         tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Amp', '@image')]
         if show_phase: tooltips.append(("Phase", "@phase °"))
         image_hover = HoverTool(renderers=[image], tooltips=tooltips, attachment="vertical")
         fig.add_tools(image_hover)
 
         # avoid the need for embedding resr/resy/resx image -> smaller fig object and less data to transfer
-        from bokeh.events import MouseMove
-        from bokeh.models import CustomJS
         mousemove_callback_code = """
         var x = cb_obj.x
         var y = cb_obj.y
@@ -331,7 +469,6 @@ def main(args):
         fig.js_on_event(MouseMove, mousemove_callback)
 
         # create a linked crosshair tool among the figures
-        from bokeh.models import CrosshairTool
         crosshair = CrosshairTool(dimensions="both")
         crosshair.line_color = 'red'
         fig.add_tools(crosshair)
@@ -755,9 +892,10 @@ def estimate_radial_range(data, thresh_ratio=0.1):
 
 @st.cache(persist=True, show_spinner=False)
 def auto_vertical_center(image):
-    background = np.mean(image[[0,1,2,-3,-2,-1],[0,1,2,-3,-2,-1]])
-    thresh = (image.max()-background) * 0.2 + background
-    image_work = (image-thresh)/(image.max()-thresh)
+    image_work = image * 1.0
+    background = np.mean(image_work[[0,1,2,-3,-2,-1],[0,1,2,-3,-2,-1]])
+    thresh = (image_work.max()-background) * 0.2 + background
+    image_work = (image_work-thresh)/(image_work.max()-thresh)
     image_work[image_work<0] = 0
 
     # rough estimate of rotation
