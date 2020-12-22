@@ -49,8 +49,10 @@ def main(args):
         value = int(query_params["csym"][0]) if "csym" in query_params else data_example.csym
         csym = st.number_input('Csym', value=value, min_value=1, max_value=16, step=1)
 
-        value = float(query_params["radius"][0]) if "radius" in query_params else max(1.0, radius_auto*apix, radius_auto2*apix)
-        if value<=0: value = 100
+        if input_image2: value = max(radius_auto*apix, radius_auto2*apix2)
+        else: value = radius_auto*apix
+        value = float(query_params["radius"][0]) if "radius" in query_params else value
+        if value<=1: value = 100.0
         radius = st.number_input('Radius (Å)', value=value, min_value=1.0, max_value=1000.0, step=10., format="%.1f")
         
         tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-90.0, max_value=90.0, step=1.0)
@@ -325,7 +327,7 @@ def obtain_input_image(column, args, query_params, counter):
             is_3d = True
         else:
             if input_mode == 0:  # "upload a mrc/mrcs file":
-                fileobj = st.file_uploader("Upload a mrc or mrcs file ", type=['mrc', 'mrcs', 'map', 'map.gz'], key=next_key())
+                fileobj = st.file_uploader("Upload a mrc or mrcs file ", type=['mrc', 'mrcs', 'map', 'map.gz', 'tnf'], key=next_key())
                 if fileobj is not None:
                     data_all, apix = get_2d_image_from_uploaded_file(fileobj)
                 else:
@@ -377,7 +379,7 @@ def obtain_input_image(column, args, query_params, counter):
         with st.beta_expander(label="Transpose/Rotate/Shift the image", expanded=False):
             is_pwr_auto = guess_if_is_power_spectra(data)
             is_pwr = st.checkbox(label="Input image is power spectra ", value=is_pwr_auto, key=next_key())
-            transpose_auto = nx > ny
+            transpose_auto = input_mode not in [2] and nx > ny
             transpose = st.checkbox(label='Transpose the image', value=transpose_auto, key=next_key())
             apix = st.number_input('Pixel size (Å/pixel)', value=apix, min_value=0.1, max_value=10., step=0.01, format="%.4f", key=next_key())
             if is_pwr or is_3d:
@@ -892,8 +894,15 @@ def get_2d_image_from_file(filename):
     with mrcfile.open(filename) as mrc:
         data = mrc.data * 1.0
         apix = mrc.voxel_size.x.item()
-    nz, ny, nx = data.shape
+    if data.dtype==np.dtype('complex64'):
+        data_complex = data
+        ny, nx = data_complex[0].shape
+        data = np.zeros((len(data_complex), ny, (nx-1)*2), dtype=np.float)
+        for i in range(len(data)):
+            tmp = np.abs(np.fft.fftshift(np.fft.fft(np.fft.irfft(data_complex[i])), axes=1))
+            data[i] = normalize(tmp, percentile=(0.1, 99.9))
     return data, apix
+
 class Data(object):
     def __init__(self, twist, rise, csym, diameter, apix, url=None):
         self.twist = twist
