@@ -4,6 +4,7 @@ from bokeh.plotting import figure
 from bokeh.models import CustomJS, Span, LinearColorMapper
 from bokeh.models import HoverTool, CrosshairTool
 from bokeh.events import MouseMove, DoubleTap
+from bokeh.layouts import gridplot
 
 def main(args):
     st.set_page_config(page_title="Helical Indexing", layout="wide")
@@ -53,7 +54,7 @@ def main(args):
         else: value = radius_auto*apix
         value = float(query_params["radius"][0]) if "radius" in query_params else value
         if value<=1: value = 100.0
-        radius = st.number_input('Radius (Å)', value=value, min_value=1.0, max_value=1000.0, step=10., format="%.1f")
+        helical_radius = st.number_input('Radius (Å)', value=value, min_value=1.0, max_value=1000.0, step=10., format="%.1f")
         
         tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-90.0, max_value=90.0, step=1.0)
         value = float(query_params["resx"][0]) if "resx" in query_params else round(3*apix, 0)
@@ -68,11 +69,13 @@ def main(args):
             pnx = st.number_input('FFT X-dim size (pixels)', value=max(min(nx,ny), 512), min_value=min(nx, 128), step=2)
             pny = st.number_input('FFT Y-dim size (pixels)', value=max(max(nx,ny), 1024), min_value=min(ny, 512), step=2)
         with st.beta_expander(label="Simulation", expanded=False):
-            ball_radius = st.number_input('Gaussian radius (Å)', value=0.0, min_value=0.0, max_value=radius, step=5.0, format="%.1f")
+            ball_radius = st.number_input('Gaussian radius (Å)', value=0.0, min_value=0.0, max_value=helical_radius, step=5.0, format="%.1f")
             show_simu = True if ball_radius > 0 else False
             if show_simu:
                 az = st.number_input('Azimuthal angle (°)', value=0, min_value=0, max_value=360, step=1, format="%.1f")
                 noise = st.number_input('Noise (sigma)', value=0., min_value=0., step=1., format="%.1f")
+                movie_frames = st.number_input('Tilt movie frame #', value=0, min_value=0, step=1000)
+                use_plot_size = st.checkbox('Use plot size', value=False)
 
     if is_pwr:
         pwr = resize_rescale_power_spectra(data, nyquist_res=2*apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
@@ -140,7 +143,7 @@ def main(args):
             value=False if input_mode==0 or is_pwr or (input_image2 and (input_mode2==0  or is_pwr2)) else True
             show_LL = st.checkbox(label="LL", value=value)
             if show_LL:
-                m_groups = compute_layer_line_positions(twist=twist, rise=rise, csym=csym, radius=radius, tilt=tilt, cutoff_res=cutoff_res_y)
+                m_groups = compute_layer_line_positions(twist=twist, rise=rise, csym=csym, radius=helical_radius, tilt=tilt, cutoff_res=cutoff_res_y)
                 ng = len(m_groups)
                 st.subheader("m=")
                 show_choices = {}
@@ -150,12 +153,14 @@ def main(args):
                     show_choices[lg] = st.checkbox(label=str(lg), value=value)
 
     if show_simu:
-        proj = simulate_helix(twist, rise, csym, helical_radius=radius, ball_radius=ball_radius, 
+        proj = simulate_helix(twist, rise, csym, helical_radius=helical_radius, ball_radius=ball_radius, 
                 ny=data.shape[0], nx=data.shape[1], apix=apix, tilt=tilt, az0=az)
         if noise>0:
             sigma = np.std(proj[np.nonzero(proj)])
             proj = proj + np.random.normal(loc=0.0, scale=noise*sigma, size=proj.shape)
-        proj = tapering(proj, fraction_start=[0.7, 0], fraction_slope=0.1)
+        fraction_x = mask_radius/(proj.shape[1]//2*apix)
+        tapering_image = generate_tapering_filter(image_size=proj.shape, fraction_start=[0.9, fraction_x], fraction_slope=0.1)
+        proj = proj * tapering_image
         with image_container:
             st.image([data, proj], use_column_width=True, caption=[image_label, "Simulated"], clamp=True)
 
@@ -166,7 +171,19 @@ def main(args):
                   (show_pwr2, pwr2, "Power Spectra - 2", show_phase2, show_phase_diff2, phase2, "Phase Diff Across Meridian - 2", show_yprofile2)
                 ]
         if show_simu and show_pwr:
-            proj_pwr, proj_phase = compute_power_spectra(proj, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
+            if use_plot_size:
+                apix_simu = min(cutoff_res_y, cutoff_res_x)/2
+                proj = simulate_helix(twist, rise, csym, helical_radius=helical_radius, ball_radius=ball_radius, 
+                        ny=pny, nx=pnx, apix=apix_simu, tilt=tilt, az0=az)
+                if noise>0:
+                    sigma = np.std(proj[np.nonzero(proj)])
+                    proj = proj + np.random.normal(loc=0.0, scale=noise*sigma, size=proj.shape)
+                fraction_x = mask_radius/(proj.shape[1]//2*apix_simu)
+                tapering_image = generate_tapering_filter(image_size=proj.shape, fraction_start=[0.9, fraction_x], fraction_slope=0.1)
+                proj = proj * tapering_image
+            else:
+                apix_simu = apix
+            proj_pwr, proj_phase = compute_power_spectra(proj, apix=apix_simu, cutoff_res=(cutoff_res_y, cutoff_res_x), 
                     output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
             items += [(show_pwr or show_pwr2, proj_pwr, "Simulated Power Spectra", show_phase or show_phase2, show_phase_diff or show_phase_diff2, proj_phase, "Simulated Phase Diff Across Meridian", show_yprofile or show_yprofile2)]
 
@@ -176,7 +193,7 @@ def main(args):
             show_pwr_work, pwr_work, title_pwr_work, show_phase_work, show_phase_diff_work, phase_work, title_phase_work, show_yprofile_work = item
             if show_pwr_work:
                 tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Amp', '@image')]
-                fig = create_image_figure(pwr_work, cutoff_res_x, cutoff_res_y, radius, tilt, phase=phase_work if show_phase_work else None, pseudocolor=show_pseudocolor, title=title_pwr_work, yaxis_visible=False, tooltips=tooltips)
+                fig = create_image_figure(pwr_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, pseudocolor=show_pseudocolor, title=title_pwr_work, yaxis_visible=False, tooltips=tooltips)
                 figs.append(fig)
 
             if show_yprofile_work:
@@ -207,7 +224,7 @@ def main(args):
                 phase_diff = np.rad2deg(np.arccos(np.cos(phase_diff)))   # set the range to [0, 180]. 0 -> even order, 180 - odd order
                 
                 tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Phase Diff', '@image °')]
-                fig = create_image_figure(phase_diff, cutoff_res_x, cutoff_res_y, radius, tilt, phase=phase_work if show_phase_work else None, pseudocolor=show_pseudocolor, title=title_phase_work, yaxis_visible=False, tooltips=tooltips)
+                fig = create_image_figure(phase_diff, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, pseudocolor=show_pseudocolor, title=title_phase_work, yaxis_visible=False, tooltips=tooltips)
                 figs.append(fig)
                 
         if figs and show_LL:
@@ -237,14 +254,24 @@ def main(args):
         figs[-1].yaxis.visible = True
         add_linked_crosshair_tool(figs)
 
-        from bokeh.layouts import gridplot
         all_figs = gridplot(children=[figs], toolbar_location='right')
         
         st.bokeh_chart(all_figs, use_container_width=False)
 
+        if show_simu and movie_frames>0:
+            with st.spinner(text="Generating movie of tilted power spectra/phases ..."):
+                if use_plot_size:
+                    ny, nx = pny, pnx
+                    apix_simu = min(cutoff_res_y, cutoff_res_x)/2
+                else:
+                    ny, nx = data.shape
+                    apix_simu = apix
+                movie_filename = create_simulation_movie(movie_frames, tilt, twist, rise, csym, helical_radius, ball_radius, az, noise, ny, nx, pny, pnx, apix_simu, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudocolor, log_xform, lp_fraction, hp_fraction)
+                st.video(movie_filename) # it always show the video using the entire column width
+       
     if input_mode in [2, 1]:
         params=dict(input_mode=input_mode)
-        if input_mode == 3:
+        if input_mode == 2:
             params["emdid"] = emdid
         elif input_mode == 1:
             params["url"] = url
@@ -253,20 +280,67 @@ def main(args):
             params["pitch"] = round(pitch,3)
         else:
             params["twist"] = round(twist,3)
-        params.update(dict(rise=round(rise,3), csym=csym, radius=round(radius,1), resx=round(cutoff_res_x,2), resy=round(cutoff_res_y,2)))
+        params.update(dict(rise=round(rise,3), csym=csym, radius=round(helical_radius,1), resx=round(cutoff_res_x,2), resy=round(cutoff_res_y,2)))
         if is_pwr: params["is_pwr"] = int(is_pwr)
     else:
         params = dict()
     st.experimental_set_query_params(**params)
 
-def create_image_figure(data, cutoff_res_x, cutoff_res_y, radius, tilt, phase=None, pseudocolor=True, title="", yaxis_visible=True, tooltips=None):
+@st.cache(persist=True, show_spinner=False, suppress_st_warning=True)
+def create_simulation_movie(movie_frames, tilt_max, twist, rise, csym, helical_radius, ball_radius, az, noise, ny, nx, pny, pnx, apix, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudocolor, log_xform, low_pass_fraction, high_pass_fraction):
+    tilt_step = tilt_max/movie_frames
+    fraction_x = mask_radius/(nx//2*apix)
+    tapering_image = generate_tapering_filter(image_size=(ny, nx), fraction_start=[0.9, fraction_x], fraction_slope=0.1)
+    image_filenames = []
+    from bokeh.io import export_png
+    progress_bar = st.empty()
+    progress_bar.progress(0.0)
+    for i in range(movie_frames+1):
+        tilt = tilt_step * i
+        proj = simulate_helix(twist, rise, csym, helical_radius=helical_radius, ball_radius=ball_radius, 
+                ny=ny, nx=nx, apix=apix, tilt=tilt, az0=az)
+        if noise>0:
+            sigma = np.std(proj[np.nonzero(proj)])
+            proj = proj + np.random.normal(loc=0.0, scale=noise*sigma, size=proj.shape)
+        proj = proj * tapering_image
+        proj_pwr, proj_phase = compute_power_spectra(proj, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
+            output_size=(pny, pnx), log=log_xform, low_pass_fraction=low_pass_fraction, high_pass_fraction=high_pass_fraction)
+        tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Amp', '@image')]
+        title = f"Simulated Power Spectra"
+        fig_pwr = create_image_figure(proj_pwr, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudocolor=show_pseudocolor, title=title, yaxis_visible=False, tooltips=tooltips)
+        if nx%2:
+            phase_diff = proj_phase - proj_phase[:, ::-1]
+        else:
+            phase_diff = proj_phase * 1.0
+            phase_diff[:, 0] = np.pi/2
+            phase_diff[:, 1:] -= phase_diff[:, 1:][:, ::-1]
+        phase_diff = np.rad2deg(np.arccos(np.cos(phase_diff)))   # set the range to [0, 180]. 0 -> even order, 180 - odd order
+        tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Phase Diff', '@image °')]
+        title = f"Phase Diff Across Meridian (tilt={tilt:.2f}°)"
+        fig_phase = create_image_figure(phase_diff, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudocolor=show_pseudocolor, title=title, yaxis_visible=False, tooltips=tooltips)
+        figs = gridplot(children=[[fig_pwr, fig_phase]], toolbar_location=None)
+        filename = f"image_{i:05d}.png"
+        image_filenames.append(filename)
+        export_png(figs, filename=filename)
+        progress_bar.progress((i+1)/(movie_frames+1)) 
+    from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
+    from moviepy.video.fx.all import resize
+    movie = ImageSequenceClip(image_filenames, fps=min(20, movie_frames/5))
+    movie_filename = "movie.mp4"
+    movie.write_videofile(movie_filename)
+    import os
+    for f in image_filenames: os.remove(f)
+    progress_bar.empty()
+    return movie_filename
+
+def create_image_figure(data, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudocolor=True, title="", yaxis_visible=True, tooltips=None):
     ny, nx = data.shape
     dsy = 1/(ny//2*cutoff_res_y)
     dsx = 1/(nx//2*cutoff_res_x)
     x_range = (-nx//2*dsx, nx//2*dsx)
     y_range = (-ny//2*dsy, ny//2*dsy)
 
-    bessel = bessel_n_image(ny, nx, cutoff_res_x, cutoff_res_y, radius, tilt).astype(np.int16)
+    bessel = bessel_n_image(ny, nx, cutoff_res_x, cutoff_res_y, helical_radius, tilt).astype(np.int16)
 
     tools = 'box_zoom,pan,reset,save,wheel_zoom'
     fig = figure(title_location="below", frame_width=nx, frame_height=ny, 
@@ -398,14 +472,13 @@ def obtain_input_image(column, args, query_params, counter):
 
         mask_radius = 0
         radius_auto = 0
-        plotx = None
-        ploty = None
         if not is_pwr:
             radius_auto, mask_radius_auto = estimate_radial_range(data, thresh_ratio=0.1)
             mask_radius = st.number_input('Mask radius (Å) ', value=mask_radius_auto*apix, min_value=1.0, max_value=nx/2*apix, step=1.0, format="%.1f", key=next_key())
 
             fraction_x = mask_radius/(nx//2*apix)
-            data = tapering(data, fraction_start=[0.9, fraction_x], fraction_slope=0.1)
+            tapering_image = generate_tapering_filter(image_size=data.shape, fraction_start=[0.9, fraction_x], fraction_slope=0.1)
+            data = data * tapering_image
             transformed = 1
 
             x = np.arange(-nx//2, nx//2)*apix
@@ -441,7 +514,8 @@ def obtain_input_image(column, args, query_params, counter):
             with transformed_image:
                 st.image(data, use_column_width=True, caption="Transformed image", clamp=True, key=next_key())
 
-        if not is_pwr:
+        #if not is_pwr:
+        if 0:
             y = np.arange(-ny//2, ny//2)*apix
             xmax = np.max(data, axis=1)
             xmean = np.mean(data, axis=1)
@@ -699,10 +773,10 @@ def low_high_pass_filter(data, low_pass_fraction=0, high_pass_fraction=0):
     return ret
 
 @st.cache(persist=True, show_spinner=False)
-def tapering(data, fraction_start=[0, 0], fraction_slope=0.1):
+def generate_tapering_filter(image_size, fraction_start=[0, 0], fraction_slope=0.1):
+    ny, nx = image_size
     fy, fx = fraction_start
-    if not (0<fy<1 and 0<fx<1): return data
-    ny, nx = data.shape
+    if not (0<fy<1 or 0<fx<1): return np.ones((ny, nx))
     Y, X = np.meshgrid(np.arange(0, ny, dtype=np.float32)-ny//2, np.arange(0, nx, dtype=np.float32)-nx//2, indexing='ij')
     filter = np.ones_like(Y)
     if 0<fy<1:
@@ -723,8 +797,7 @@ def tapering(data, fraction_start=[0, 0], fraction_slope=0.1):
         X[inner]=1
         X[outer]=0
         filter *= X
-    data2 = data * filter
-    return data2
+    return filter
 
 @st.cache(persist=True, show_spinner=False)
 def estimate_radial_range(data, thresh_ratio=0.1):
@@ -930,8 +1003,8 @@ def setup_anonymous_usage_tracking():
         os.chmod(index_file, stat.S_IRUSR|stat.S_IWUSR|stat.S_IROTH)
         with open(index_file, "r+") as fp:
             txt = fp.read()
-            if txt.find("gtag.js")==-1:
-                txt2 = txt.replace("<head>", '''<head><!-- Global site tag (gtag.js) - Google Analytics --><script async src="https://www.googletagmanager.com/gtag/js?id=G-8Z99BDVHTC"></script><script>window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());gtag('config', 'G-8Z99BDVHTC');</script>''')
+            if txt.find("gtag/js?")==-1:
+                txt2 = txt.replace("<head>", '''<head><script async src="https://www.googletagmanager.com/gtag/js?id=G-8Z99BDVHTC"></script><script>window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());gtag('config', 'G-8Z99BDVHTC');</script>''')
                 fp.seek(0)
                 fp.write(txt2)
                 fp.truncate()
