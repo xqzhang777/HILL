@@ -74,7 +74,7 @@ def main(args):
             if show_simu:
                 az = st.number_input('Azimuthal angle (°)', value=0, min_value=0, max_value=360, step=1, format="%.1f")
                 noise = st.number_input('Noise (sigma)', value=0., min_value=0., step=1., format="%.1f")
-                movie_frames = st.number_input('Tilt movie frame #', value=0, min_value=0, step=1000)
+                movie_frames = st.number_input('Tilt movie frame #', value=0, min_value=0, max_value=1000, step=1)
                 use_plot_size = st.checkbox('Use plot size', value=False)
 
     if is_pwr:
