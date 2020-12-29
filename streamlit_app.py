@@ -214,15 +214,7 @@ def main(args):
                 figs_skip_yprofile.append(fig)
 
             if show_phase_diff_work:
-                ny, nx = phase_work.shape
-                if nx%2:
-                    phase_diff = phase_work - phase_work[:, ::-1]
-                else:
-                    phase_diff = phase_work * 1.0
-                    phase_diff[:, 0] = np.pi/2
-                    phase_diff[:, 1:] -= phase_diff[:, 1:][:, ::-1]
-                phase_diff = np.rad2deg(np.arccos(np.cos(phase_diff)))   # set the range to [0, 180]. 0 -> even order, 180 - odd order
-                
+                phase_diff = compute_phase_difference_across_meridian(phase_work)                
                 tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Phase Diff', '@image °')]
                 fig = create_image_figure(phase_diff, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, pseudocolor=show_pseudocolor, title=title_phase_work, yaxis_visible=False, tooltips=tooltips)
                 figs.append(fig)
@@ -303,25 +295,30 @@ def create_simulation_movie(movie_frames, tilt_max, twist, rise, csym, helical_r
             sigma = np.std(proj[np.nonzero(proj)])
             proj = proj + np.random.normal(loc=0.0, scale=noise*sigma, size=proj.shape)
         proj = proj * tapering_image
+
+        figs = []
+        title = f"Projection"
+        fig_proj = create_image_figure(proj, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudocolor=show_pseudocolor, title=title, yaxis_visible=False, tooltips=None)
+        figs.append(fig_proj)
+
         proj_pwr, proj_phase = compute_power_spectra(proj, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
             output_size=(pny, pnx), log=log_xform, low_pass_fraction=low_pass_fraction, high_pass_fraction=high_pass_fraction)
-        tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Amp', '@image')]
-        title = f"Simulated Power Spectra"
-        fig_pwr = create_image_figure(proj_pwr, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudocolor=show_pseudocolor, title=title, yaxis_visible=False, tooltips=tooltips)
-        if nx%2:
-            phase_diff = proj_phase - proj_phase[:, ::-1]
-        else:
-            phase_diff = proj_phase * 1.0
-            phase_diff[:, 0] = np.pi/2
-            phase_diff[:, 1:] -= phase_diff[:, 1:][:, ::-1]
-        phase_diff = np.rad2deg(np.arccos(np.cos(phase_diff)))   # set the range to [0, 180]. 0 -> even order, 180 - odd order
-        tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Phase Diff', '@image °')]
-        title = f"Phase Diff Across Meridian (tilt={tilt:.2f}°)"
-        fig_phase = create_image_figure(phase_diff, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudocolor=show_pseudocolor, title=title, yaxis_visible=False, tooltips=tooltips)
-        figs = gridplot(children=[[fig_pwr, fig_phase]], toolbar_location=None)
+        title = f"Power Spectra"
+        fig_pwr = create_image_figure(proj_pwr, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudocolor=show_pseudocolor, title=title, yaxis_visible=False, tooltips=None)
+        from bokeh.models import Label
+        label = Label(x=0., y=0.9/cutoff_res_y, text=f"tilt = {tilt:.2f}°", text_align='center', text_color='white', text_font_size='30px', visible=True)
+        fig_pwr.add_layout(label)
+        figs.append(fig_pwr)
+
+        phase_diff = compute_phase_difference_across_meridian(proj_phase)
+        title = f"Phase Diff Across Meridian"
+        fig_phase = create_image_figure(phase_diff, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudocolor=show_pseudocolor, title=title, yaxis_visible=False, tooltips=None)
+        figs.append(fig_phase)
+
+        fig_all = gridplot(children=[figs], toolbar_location=None)
         filename = f"image_{i:05d}.png"
         image_filenames.append(filename)
-        export_png(figs, filename=filename)
+        export_png(fig_all, filename=filename)
         progress_bar.progress((i+1)/(movie_frames+1)) 
     from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
     from moviepy.video.fx.all import resize
@@ -696,6 +693,18 @@ def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m=
 
         m_groups[m[mi]] = d
     return m_groups
+
+@st.cache(persist=True, show_spinner=False)
+def compute_phase_difference_across_meridian(phase):
+    ny, nx = phase.shape
+    if nx%2:
+        phase_diff = phase - phase[:, ::-1]
+    else:
+        phase_diff = phase * 1.0
+        phase_diff[:, 0] = np.pi/2
+        phase_diff[:, 1:] -= phase_diff[:, 1:][:, ::-1]
+    phase_diff = np.rad2deg(np.arccos(np.cos(phase_diff)))   # set the range to [0, 180]. 0 -> even order, 180 - odd order
+    return phase_diff
 
 @st.cache(persist=True, show_spinner=False)
 def resize_rescale_power_spectra(data, nyquist_res, cutoff_res=None, output_size=None, log=True, low_pass_fraction=0, high_pass_fraction=0):
