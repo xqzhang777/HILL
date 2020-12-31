@@ -221,12 +221,8 @@ def main(args):
                 
         if figs and show_LL:
             if max(m_groups[0]["LL"][0])>0:
-                from bokeh.palettes import viridis, gray
-                if show_pseudocolor:
-                    ll_colors = gray(ng*2)[::-1]
-                else:
-                    ll_colors = viridis(ng*2)[::-1]
-                ll_colors = np.array(ll_colors)[distinct_sampling(ng)]                
+                color = 'white' if show_pseudocolor else 'red'
+                ll_line_dashes = 'solid dashed dotted dotdash dashdot'.split()             
                 x, y = m_groups[0]["LL"]
                 tmp_x = np.sort(np.unique(x))
                 width = np.mean(tmp_x[1:]-tmp_x[:-1])
@@ -235,10 +231,10 @@ def main(args):
                 for mi, m in enumerate(m_groups.keys()):
                     if not show_choices[m]: continue
                     x, y = m_groups[m]["LL"]
-                    color = ll_colors[mi]
+                    line_dash = ll_line_dashes[abs(m)%len(ll_line_dashes)]
                     for f in figs:
                         if f in figs_skip_yprofile: continue
-                        f.ellipse(x, y, width=width, height=height, line_width=4, line_color=color, fill_alpha=0)
+                        f.ellipse(x, y, width=width, height=height, line_width=4, line_color=color, line_dash=line_dash, fill_alpha=0)
             else:
                 st.warning(f"No off-equator layer lines to draw for Pitch={pitch:.2f} Csym={csym} combinations. Consider increasing Pitch or reducing Csym")
 
@@ -624,25 +620,6 @@ def simulate_helix(twist, rise, csym, helical_radius, ball_radius, ny, nx, apix,
     centers = helical_unit_positions(twist, rise, csym, helical_radius, height=ny*apix, tilt=tilt, az0=az0)
     projection = simulate_projection(centers, ball_radius, ny, nx, apix)
     return projection
-
-@st.cache(persist=True, show_spinner=False)
-def distinct_sampling(n):
-    assert(n>0)
-    if n==1: return [0]
-    all = list(range(1, n))
-    ret = [0]
-    while all:
-        ref = ret[-2:][0]
-        err_max = 0
-        val_max = None
-        for v in all:
-            err = abs(v-ref)
-            if err>err_max:
-                err_max = err
-                val_max = v
-        ret.append(val_max)
-        all.remove(val_max)
-    return ret
 
 @st.cache(persist=True, show_spinner=False)
 def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m=[]):
