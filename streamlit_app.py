@@ -15,9 +15,6 @@ def main(args):
     title = "Helical indexing using layer lines"
     st.title(title)
 
-    import itertools
-    counter = itertools.count() # to generate unique keys required by streamlit widgets
-
     col1, col2, col3, col4 = st.beta_columns((1., 0.5, 0.25, 3.0))
 
     with col1:
@@ -29,7 +26,7 @@ def main(args):
         # make radio display horizontal
         st.markdown('<style>div.Widget.row-widget.stRadio > div{flex-direction:row;}</style>', unsafe_allow_html=True)
 
-        data, apix, radius_auto, mask_radius, is_pwr, input_params, (image_container, image_label) = obtain_input_image(col1, args, query_params, counter)
+        data_all, data, apix, radius_auto, mask_radius, is_pwr, is_3d, input_params, (image_container, image_label) = obtain_input_image(col1, args, query_params)
         input_mode, (uploaded_filename, url, emdid) = input_params
 
         if is_pwr:
@@ -38,7 +35,7 @@ def main(args):
             label = f"Replace amplitudes with another image"
         input_image2 = st.checkbox(label=label, value=False)        
         if input_image2:
-            data2, apix2, radius_auto2, mask_radius2, is_pwr2, input_params2, _ = obtain_input_image(col1, args, query_params, counter)
+            data2, apix2, radius_auto2, mask_radius2, is_pwr2, input_params2, _ = obtain_input_image(col1, args, query_params)
             input_mode2, (uploaded_filename2, url2, emdid2) = input_params2
 
         st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to Wen Jiang (jiang12 at purdue.edu)*")
@@ -72,10 +69,24 @@ def main(args):
             ball_radius = st.number_input('Gaussian radius (Å)', value=0.0, min_value=0.0, max_value=helical_radius, step=5.0, format="%.1f")
             show_simu = True if ball_radius > 0 else False
             if show_simu:
-                az = st.number_input('Azimuthal angle (°)', value=0, min_value=0, max_value=360, step=1, format="%.1f")
-                noise = st.number_input('Noise (sigma)', value=0., min_value=0., step=1., format="%.1f")
-                movie_frames = st.number_input('Tilt movie frame #', value=0, min_value=0, max_value=1000, step=1)
+                az = st.number_input('Azimuthal angle (°)', value=0, min_value=0, max_value=360, step=1, format="%.2f")
+                noise = st.number_input('Noise (sigma)', value=0., min_value=0., step=1., format="%.2f", key=next_key())
                 use_plot_size = st.checkbox('Use plot size', value=False)
+        
+        movie_frames = 0
+        if is_3d or show_simu:
+            with st.beta_expander(label="Generate tilt movie", expanded=False):
+                movie_frames = st.number_input('Movie frame #', value=0, min_value=0, max_value=1000, step=1)
+                if movie_frames>0:
+                    if is_3d and show_simu:
+                        movie_modes = {0:"3D map", 1:"simulation"}
+                        movie_mode = st.radio(label="Tilt:", options=list(movie_modes.keys()), format_func=lambda i:movie_modes[i], index=0)
+                    elif is_3d:
+                        movie_mode = 0
+                    else:
+                        movie_mode = 1
+                    if movie_mode == 0:
+                        movie_noise = st.number_input('Noise (sigma)', value=0., min_value=0., step=1., format="%.2f", key=next_key())
 
     if is_pwr:
         pwr = resize_rescale_power_spectra(data, nyquist_res=2*apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
@@ -246,15 +257,19 @@ def main(args):
         
         st.bokeh_chart(all_figs, use_container_width=False)
 
-        if show_simu and movie_frames>0:
+        if movie_frames>0:
             with st.spinner(text="Generating movie of tilted power spectra/phases ..."):
-                if use_plot_size:
-                    ny, nx = pny, pnx
-                    apix_simu = min(cutoff_res_y, cutoff_res_x)/2
-                else:
-                    ny, nx = data.shape
-                    apix_simu = apix
-                movie_filename = create_simulation_movie(movie_frames, tilt, twist, rise, csym, helical_radius, ball_radius, az, noise, ny, nx, pny, pnx, apix_simu, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudocolor, log_xform, lp_fraction, hp_fraction)
+                if movie_mode==0:
+                    params = (movie_mode, data_all, movie_noise, apix)
+                if movie_mode==1:
+                    if use_plot_size:
+                        ny, nx = pny, pnx
+                        apix_simu = min(cutoff_res_y, cutoff_res_x)/2
+                    else:
+                        ny, nx = data.shape
+                        apix_simu = apix
+                    params = (movie_mode, twist, rise, csym, noise, helical_radius, ball_radius, az, ny, nx, apix_simu)
+                movie_filename = create_movie(movie_frames, tilt, params, pny, pnx, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudocolor, log_xform, lp_fraction, hp_fraction)
                 st.video(movie_filename) # it always show the video using the entire column width
        
     if input_mode in [2, 1]:
@@ -275,7 +290,13 @@ def main(args):
     st.experimental_set_query_params(**params)
 
 @st.cache(persist=True, show_spinner=False, suppress_st_warning=True)
-def create_simulation_movie(movie_frames, tilt_max, twist, rise, csym, helical_radius, ball_radius, az, noise, ny, nx, pny, pnx, apix, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudocolor, log_xform, low_pass_fraction, high_pass_fraction):
+def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudocolor, log_xform, lp_fraction, hp_fraction):
+    if movie_mode_params[0] == 0:
+        movie_mode, data_all, noise, apix = movie_mode_params
+        nz, ny, nx = data_all.shape
+        helical_radius = 0
+    else:
+        movie_mode, twist, rise, csym, noise, helical_radius, ball_radius, az, ny, nx, apix =movie_mode_params
     tilt_step = tilt_max/movie_frames
     fraction_x = mask_radius/(nx//2*apix)
     tapering_image = generate_tapering_filter(image_size=(ny, nx), fraction_start=[0.9, fraction_x], fraction_slope=0.1)
@@ -285,7 +306,10 @@ def create_simulation_movie(movie_frames, tilt_max, twist, rise, csym, helical_r
     progress_bar.progress(0.0)
     for i in range(movie_frames+1):
         tilt = tilt_step * i
-        proj = simulate_helix(twist, rise, csym, helical_radius=helical_radius, ball_radius=ball_radius, 
+        if movie_mode==0:
+            proj = generate_projection(data_all, az=0, tilt=tilt, output_size=(ny, nx))
+        else:
+            proj = simulate_helix(twist, rise, csym, helical_radius=helical_radius, ball_radius=ball_radius, 
                 ny=ny, nx=nx, apix=apix, tilt=tilt, az0=az)
         if noise>0:
             sigma = np.std(proj[np.nonzero(proj)])
@@ -298,7 +322,7 @@ def create_simulation_movie(movie_frames, tilt_max, twist, rise, csym, helical_r
         figs.append(fig_proj)
 
         proj_pwr, proj_phase = compute_power_spectra(proj, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
-            output_size=(pny, pnx), log=log_xform, low_pass_fraction=low_pass_fraction, high_pass_fraction=high_pass_fraction)
+            output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
         title = f"Power Spectra"
         fig_pwr = create_image_figure(proj_pwr, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudocolor=show_pseudocolor, title=title, yaxis_visible=False, tooltips=None)
         from bokeh.models import Label
@@ -378,9 +402,7 @@ def add_linked_crosshair_tool(figures):
     for fig in figures:
         fig.add_tools(crosshair)
 
-def obtain_input_image(column, args, query_params, counter):
-    def next_key():
-        return str(next(counter))
+def obtain_input_image(column, args, query_params):
     with column:
         input_modes = {0:"upload a mrc/mrcs file", 1:"url", 2:"emd-xxxx"}
         value = int(query_params["input_mode"][0]) if "input_mode" in query_params else args.input_mode
@@ -388,7 +410,7 @@ def obtain_input_image(column, args, query_params, counter):
         is_3d = False
         if input_mode == 2:  # "emd-xxxx":
             label = "Input an EMDB ID (emd-xxxx):"
-            value = query_params["emdid"][0] if "emdid" in query_params else "emd-2699"
+            value = query_params["emdid"][0] if "emdid" in query_params else "emd-3567"
             emdid = st.text_input(label=label, value=value, key=next_key())
             data_all, apix = get_emdb_map(emdid.strip())
             is_3d = True
@@ -545,7 +567,7 @@ def obtain_input_image(column, args, query_params, counter):
         input_params = (input_mode, (None, image_url, None))
     else:
         input_params = (input_mode, (fileobj, None, None))
-    return data, apix, radius_auto, mask_radius, is_pwr, input_params, (image_container, image_label)
+    return data_all, data, apix, radius_auto, mask_radius, is_pwr, is_3d, input_params, (image_container, image_label)
 
 @st.cache(persist=True, show_spinner=False)
 def bessel_n_image(ny, nx, nyquist_res_x, nyquist_res_y, radius, tilt):
@@ -878,7 +900,7 @@ def rotate_shift_image(data, angle=0, pre_shift=(0, 0), post_shift=(0, 0), rotat
     return ret
 
 @st.cache(persist=True, show_spinner=False)
-def generate_projection(data, az=0, tilt=0):
+def generate_projection(data, az=0, tilt=0, output_size=None):
     from scipy.spatial.transform import Rotation as R
     from scipy.ndimage import affine_transform
     # note the convention change
@@ -890,6 +912,16 @@ def generate_projection(data, az=0, tilt=0):
     offset = bcenter.T - np.dot(m, bcenter.T)
     tmp = affine_transform(data, matrix=m, offset=offset, mode='nearest')
     ret = tmp.sum(axis=1)   # integrate along y-axis
+    if output_size is not None:
+        ony, onx = output_size
+        ny, nx = ret.shape
+        if ony!=ny or onx!=nx:
+            top_bottom_mean = np.mean(ret[(0,-1),:])
+            ret2 = np.zeros((ony, onx), dtype=np.float32) + top_bottom_mean
+            y0 = ony//2 - ny//2
+            x0 = onx//2 - nx//2
+            ret2[y0:y0+ny, x0:x0+nx] = ret
+            ret = ret2 
     ret = normalize(ret)
     return ret
 
@@ -976,6 +1008,12 @@ data_examples = [
     Data(twist=29.40, rise=21.92, csym=6, diameter=138, apix=2.3438, url="https://tinyurl.com/y5tq9fqa")
 ]
 data_example = data_examples[0]
+
+# to generate unique keys required by streamlit widgets
+def next_key():
+    return str(next(next_key.counter))
+import itertools
+next_key.counter = itertools.count()
 
 @st.cache(suppress_st_warning=True)
 def show_initial_message(message=""):
