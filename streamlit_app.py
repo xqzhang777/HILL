@@ -6,7 +6,7 @@ from bokeh.models import HoverTool, CrosshairTool
 from bokeh.events import MouseMove, DoubleTap
 from bokeh.layouts import gridplot
 
-def main(args):
+def main(args, state):
     st.set_page_config(page_title="Helical Indexing", layout="wide")
     st.server.server_util.MESSAGE_SIZE_LIMIT = 2e8  # default is 5e7 (50MB)
 
@@ -41,9 +41,11 @@ def main(args):
         st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to Wen Jiang (jiang12 at purdue.edu)*")
 
     with col2:
-        pitch_or_twist = st.beta_container()
-        value = float(query_params["rise"][0]) if "rise" in query_params else data_example.rise
-        rise = st.number_input('Rise (Å)', value=value, min_value=-180.0, max_value=180.0, step=1.0, format="%.3f")
+        pitch_or_twist_number_input = st.empty()
+        pitch_or_twist_text = st.empty()
+        rise_empty = st.empty()
+        value = state.rise or (float(query_params["rise"][0]) if "rise" in query_params else data_example.rise)
+        rise = rise_empty.number_input('Rise (Å)', value=value, min_value=-180.0, max_value=180.0, step=1.0, format="%.3f")
         value = int(query_params["csym"][0]) if "csym" in query_params else data_example.csym
         csym = st.number_input('Csym', value=value, min_value=1, max_value=16, step=1)
 
@@ -112,20 +114,19 @@ def main(args):
         st.subheader("Display:")
         value = int(query_params["show_pitch"][0]) if "show_pitch" in query_params else True
         show_pitch = st.checkbox(label="Pitch", value=value)
-        with pitch_or_twist:
-            if show_pitch:
-                value = float(query_params["pitch"][0]) if "pitch" in query_params else data_example.pitch
-                pitch = st.number_input('Pitch (Å)', value=value, min_value=1.0, max_value=max(pny,pnx)*apix, step=1.0, format="%.2f")
-                if pitch < cutoff_res_y:
-                    st.warning(f"pitch is too small. it should be > {cutoff_res_y} (Limit FFT X-dim to resolution (Å))")
-                    return
-                twist = 360./(pitch/rise)
-                st.markdown(f"*(twist = {twist:.2f} °)*")
-            else:
-                value = float(query_params["twist"][0]) if "twist" in query_params else data_example.twist
-                twist = st.number_input('Twist (°)', value=value, min_value=-180.0, max_value=180.0, step=1.0, format="%.2f")
-                pitch = (360./twist)*rise
-                st.markdown(f"*(pitch = {pitch:.2f} Å)*")
+        if show_pitch:
+            value = state.pitch or (float(query_params["pitch"][0]) if "pitch" in query_params else data_example.pitch)
+            pitch = pitch_or_twist_number_input.number_input('Pitch (Å)', value=value, min_value=1.0, max_value=max(pny,pnx)*apix, step=1.0, format="%.2f")
+            if pitch < cutoff_res_y:
+                st.warning(f"pitch is too small. it should be > {cutoff_res_y} (Limit FFT X-dim to resolution (Å))")
+                return
+            twist = 360./(pitch/rise)
+            pitch_or_twist_text.markdown(f"*(twist = {twist:.2f} °)*")
+        else:
+            value = state.twist or (float(query_params["twist"][0]) if "twist" in query_params else data_example.twist)
+            twist = pitch_or_twist_number_input.number_input('Twist (°)', value=value, min_value=-180.0, max_value=180.0, step=1.0, format="%.2f")
+            pitch = (360./twist)*rise
+            pitch_or_twist_text.markdown(f"*(pitch = {pitch:.2f} Å)*")
 
         show_phase = False
         show_phase_diff = False
@@ -133,8 +134,8 @@ def main(args):
         show_pwr = st.checkbox(label="PS", value=True)
         if show_pwr:
             show_yprofile = st.checkbox(label="YP", value=False)
-        if not is_pwr:
             show_phase = st.checkbox(label="Phase", value=False)
+        if not is_pwr:
             show_phase_diff = st.checkbox(label="PD", value=True)
         
         show_pwr2 = False
@@ -146,10 +147,21 @@ def main(args):
             if show_pwr2:
                 show_yprofile2 = st.checkbox(label="YP2", value=False)
             if not is_pwr2:
-                show_phase2 = st.checkbox(label="Phase2", value=False)
+                if show_pwr2: show_phase2 = st.checkbox(label="Phase2", value=False)
                 show_phase_diff2 = st.checkbox(label="PD2", value=False if show_phase_diff else True)
 
-        if show_pwr or show_pwr2:
+        show_pwr_simu = False
+        show_phase_simu = False
+        show_phase_diff_simu = False
+        show_yprofile_simu = False
+        if show_simu:
+            show_pwr_simu = st.checkbox(label="PS_Simu", value=False if show_pwr else True)
+            if show_pwr_simu:
+                show_yprofile_simu = st.checkbox(label="YP_Simu", value=False)
+                show_phase_simu = st.checkbox(label="PhaseSimu", value=False)
+            show_phase_diff_simu = st.checkbox(label="PD_Simu", value=False if show_phase_diff else True)
+
+        if show_pwr or show_phase_diff or show_pwr2 or show_phase_diff2 or show_pwr_simu or show_phase_diff_simu:
             show_pseudocolor = st.checkbox(label="Color", value=True)
             value=False if input_mode==0 or is_pwr or (input_image2 and (input_mode2==0  or is_pwr2)) else True
             show_LL = st.checkbox(label="LL", value=value)
@@ -176,12 +188,12 @@ def main(args):
             st.image([data, proj], use_column_width=True, caption=[image_label, "Simulated"], clamp=True)
 
     with col4:
-        if not (show_pwr or show_pwr2): return
+        if not (show_pwr or show_phase_diff or show_pwr2 or show_phase_diff2 or show_pwr_simu or show_phase_diff_simu): return
 
         items = [ (show_pwr, pwr, "Power Spectra", show_phase, show_phase_diff, phase, "Phase Diff Across Meridian", show_yprofile), 
                   (show_pwr2, pwr2, "Power Spectra - 2", show_phase2, show_phase_diff2, phase2, "Phase Diff Across Meridian - 2", show_yprofile2)
                 ]
-        if show_simu and show_pwr:
+        if show_pwr_simu or show_phase_diff_simu:
             if use_plot_size:
                 apix_simu = min(cutoff_res_y, cutoff_res_x)/2
                 proj = simulate_helix(twist, rise, csym, helical_radius=helical_radius, ball_radius=ball_radius, 
@@ -196,7 +208,7 @@ def main(args):
                 apix_simu = apix
             proj_pwr, proj_phase = compute_power_spectra(proj, apix=apix_simu, cutoff_res=(cutoff_res_y, cutoff_res_x), 
                     output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
-            items += [(show_pwr or show_pwr2, proj_pwr, "Simulated Power Spectra", show_phase or show_phase2, show_phase_diff or show_phase_diff2, proj_phase, "Simulated Phase Diff Across Meridian", show_yprofile or show_yprofile2)]
+            items += [(show_pwr_simu, proj_pwr, "Simulated Power Spectra", show_phase_simu, show_phase_diff_simu, proj_phase, "Simulated Phase Diff Across Meridian", show_yprofile_simu)]
 
         figs = []
         figs_skip_yprofile = []
@@ -230,32 +242,91 @@ def main(args):
                 fig = create_image_figure(phase_diff, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, pseudocolor=show_pseudocolor, title=title_phase_work, yaxis_visible=False, tooltips=tooltips)
                 figs.append(fig)
                 
+        figs[-1].yaxis.fixed_location = figs[-1].x_range.end
+        figs[-1].yaxis.visible = True
+        add_linked_crosshair_tool(figs)
+
+        fig_ellipses = []
         if figs and show_LL:
             if max(m_groups[0]["LL"][0])>0:
                 color = 'white' if show_pseudocolor else 'red'
                 ll_line_dashes = 'solid dashed dotted dotdash dashdot'.split()             
-                x, y = m_groups[0]["LL"]
+                x, y, n = m_groups[0]["LL"]
                 tmp_x = np.sort(np.unique(x))
                 width = np.mean(tmp_x[1:]-tmp_x[:-1])
                 tmp_y = np.sort(np.unique(y))
                 height = np.mean(tmp_y[1:]-tmp_y[:-1])/3
                 for mi, m in enumerate(m_groups.keys()):
                     if not show_choices[m]: continue
-                    x, y = m_groups[m]["LL"]
+                    x, y, n = m_groups[m]["LL"]
+                    tags = [m, n]
                     line_dash = ll_line_dashes[abs(m)%len(ll_line_dashes)]
                     for f in figs:
                         if f in figs_skip_yprofile: continue
-                        f.ellipse(x, y, width=width, height=height, line_width=4, line_color=color, line_dash=line_dash, fill_alpha=0)
+                        ellipises = f.ellipse(x, y, width=width, height=height, line_width=4, line_color=color, line_dash=line_dash, fill_alpha=0)
+                        ellipises.tags = tags
+                        fig_ellipses.append(ellipises)
             else:
                 st.warning(f"No off-equator layer lines to draw for Pitch={pitch:.2f} Csym={csym} combinations. Consider increasing Pitch or reducing Csym")
 
-        figs[-1].yaxis.fixed_location = figs[-1].x_range.end
-        figs[-1].yaxis.visible = True
-        add_linked_crosshair_tool(figs)
+        if fig_ellipses:
+            from bokeh.models import Slider, CustomJS
+            slider_pitch = Slider(start=0.0, end=1000.0, value=pitch, step=.1, title="Pitch (Å)")
+            slider_rise = Slider(start=0.0, end=150.0, value=rise, step=.1, title="Rise (Å)")
+            callback_code = """
+                var pitch_inv = 1./slider_pitch.value
+                var rise_inv = 1./slider_rise.value
+                for (var fi = 0; fi < fig_ellipses.length; fi++) {
+                    var ellipses = fig_ellipses[fi]
+                    const m = ellipses.tags[0]
+                    const ns = ellipses.tags[1]
+                    var y = ellipses.data_source.data.y
+                    for (var i = 0; i < ns.length; i++) {
+                        const n = ns[i]
+                        y[i] = m * rise_inv + n * pitch_inv
+                    }
+                    ellipses.data_source.change.emit();
+                }
+                document.dispatchEvent(
+                    new CustomEvent("HelicalParametersChanged", {detail: {pitch: slider_pitch.value, rise: slider_rise.value}})
+                )
+            """
+            callback = CustomJS(args=dict(fig_ellipses=fig_ellipses, slider_pitch=slider_pitch, slider_rise=slider_rise), code=callback_code)
+            slider_pitch.js_on_change('value', callback)
+            slider_rise.js_on_change('value', callback)
+            figs = [[slider_pitch, slider_rise], figs]
+            figs_grid = gridplot(children=figs, toolbar_location='right')
 
-        all_figs = gridplot(children=[figs], toolbar_location='right')
-        
-        st.bokeh_chart(all_figs, use_container_width=False)
+            from streamlit_bokeh_events import streamlit_bokeh_events
+            bokeh_events = streamlit_bokeh_events(
+                bokeh_plot=figs_grid,
+                events="HelicalParametersChanged",
+                refresh_on_update=True,
+                override_height=pny+120,
+                debounce_time=2000,
+                key=next_key())
+            if bokeh_events:
+                if bokeh_events.get("HelicalParametersChanged"):
+                    pitch_new = float(bokeh_events.get("HelicalParametersChanged")["pitch"])
+                    rise_new = float(bokeh_events.get("HelicalParametersChanged")["rise"])
+                    twist_new = 360./(pitch_new/rise_new)
+                    if pitch_new != pitch or rise_new != rise:
+                        if twist_new != twist:
+                            if show_pitch:
+                                twist = twist_new
+                                pitch = pitch_or_twist_number_input.number_input('Pitch (Å)', value=pitch_new, min_value=1.0, max_value=max(pny,pnx)*apix, step=1.0, format="%.2f", key=next_key())
+                                pitch_or_twist_text.markdown(f"*(twist = {twist:.2f} °)*")
+                            else:
+                                pitch = pitch_new
+                                twist = pitch_or_twist_number_input.number_input('Twist (°)', value=twist_new, min_value=-180.0, max_value=180.0, step=1.0, format="%.2f")
+                                pitch_or_twist_text.markdown(f"*(pitch = {pitch:.2f} Å)*")
+                        if rise_new != rise:
+                            rise = rise_empty.number_input('Rise (Å)', value=rise_new, min_value=-180.0, max_value=180.0, step=1.0, format="%.3f", key=next_key())
+                        set_query_params(input_mode, url, emdid, is_pwr, show_pitch, pitch, twist, rise, csym, helical_radius, cutoff_res_x, cutoff_res_y)
+        else:
+            figs = [figs]
+            figs_grid = gridplot(children=figs, toolbar_location='right')
+            st.bokeh_chart(figs_grid, use_container_width=False)
 
         if movie_frames>0:
             with st.spinner(text="Generating movie of tilted power spectra/phases ..."):
@@ -271,22 +342,28 @@ def main(args):
                     params = (movie_mode, twist, rise, csym, noise, helical_radius, ball_radius, az, ny, nx, apix_simu)
                 movie_filename = create_movie(movie_frames, tilt, params, pny, pnx, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudocolor, log_xform, lp_fraction, hp_fraction)
                 st.video(movie_filename) # it always show the video using the entire column width
-       
+
+        state.pitch = pitch
+        state.twist = twist
+        state.rise = rise
+        state.csym = csym
+        set_query_params(input_mode, url, emdid, is_pwr, show_pitch, pitch, twist, rise, csym, helical_radius, cutoff_res_x, cutoff_res_y)
+
+def set_query_params(input_mode, url, emdid, is_pwr, show_pitch, pitch, twist, rise, csym, helical_radius, cutoff_res_x, cutoff_res_y):       
+    params=dict(input_mode=input_mode)
     if input_mode in [2, 1]:
-        params=dict(input_mode=input_mode)
         if input_mode == 2:
             params["emdid"] = emdid
         elif input_mode == 1:
             params["url"] = url
-        params["show_pitch"] = int(show_pitch)
-        if show_pitch:
-            params["pitch"] = round(pitch,3)
-        else:
-            params["twist"] = round(twist,3)
-        params.update(dict(rise=round(rise,3), csym=csym, radius=round(helical_radius,1), resx=round(cutoff_res_x,2), resy=round(cutoff_res_y,2)))
-        if is_pwr: params["is_pwr"] = int(is_pwr)
+    if is_pwr: 
+        params["is_pwr"] = int(is_pwr)
+    params["show_pitch"] = int(show_pitch)
+    if show_pitch:
+        params["pitch"] = round(pitch,3)
     else:
-        params = dict()
+        params["twist"] = round(twist,3)
+    params.update(dict(rise=round(rise,3), csym=csym, radius=round(helical_radius,1), resx=round(cutoff_res_x,2), resy=round(cutoff_res_y,2)))
     st.experimental_set_query_params(**params)
 
 @st.cache(persist=True, show_spinner=False, suppress_st_warning=True)
@@ -677,8 +754,8 @@ def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m=
         # first peak positions of each layer line
         p = pitch(twist, rise)
         ds_p = 1/p
-        ll_i_top = int((smax - sy0)/ds_p)
-        ll_i_bottom = -int(np.abs(-smax - sy0)/ds_p)
+        ll_i_top = int((smax - sy0)/ds_p) * 2
+        ll_i_bottom = -int(np.abs(-smax - sy0)/ds_p) * 2
         ll_i = np.array([i for i in range(ll_i_bottom, ll_i_top+1) if not i%csym], dtype=np.float32)
         sy = sy0 + ll_i * ds_p
         sx = peak_sx(bessel_order=ll_i, radius=radius)
@@ -688,7 +765,9 @@ def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m=
             sx[np.isnan(sx)] = 1e-6
         px  = list(sx) + list(-sx)
         py  = list(sy) + list(sy)
-        d["LL"] = (px, py)
+        n = list(ll_i) + list(ll_i)
+        d["LL"] = (px, py, n)
+        d["m"] = m
 
         m_groups[m[mi]] = d
     return m_groups
@@ -1035,6 +1114,133 @@ def setup_anonymous_usage_tracking():
     except:
         pass
 
+# start streamlit session state
+# from https://gist.github.com/ash2shukla/ff180d7fbe8ec3a0240f19f4452acde7
+
+from streamlit.report_thread import get_report_ctx
+from streamlit.hashing import _CodeHasher
+from streamlit.server.server import Server
+from prometheus_client.registry import REGISTRY
+from prometheus_client import Counter
+
+
+class _SessionState:
+    def __init__(self, session, hash_funcs):
+        """Initialize SessionState instance."""
+        self.__dict__["_state"] = {
+            "data": {},
+            "hash": None,
+            "hasher": _CodeHasher(hash_funcs),
+            "is_rerun": False,
+            "session": session,
+        }
+
+    def __call__(self, **kwargs):
+        """Initialize state data once."""
+        for item, value in kwargs.items():
+            if item not in self._state["data"]:
+                self._state["data"][item] = value
+
+    def __getitem__(self, item):
+        """Return a saved state value, None if item is undefined."""
+        return self._state["data"].get(item, None)
+
+    def __getattr__(self, item):
+        """Return a saved state value, None if item is undefined."""
+        return self._state["data"].get(item, None)
+
+    def __setitem__(self, item, value):
+        """Set state value."""
+        self._state["data"][item] = value
+
+    def __setattr__(self, item, value):
+        """Set state value."""
+        self._state["data"][item] = value
+
+    def clear(self):
+        """Clear session state and request a rerun."""
+        self._state["data"].clear()
+        self._state["session"].request_rerun()
+
+    def sync(self):
+        """Rerun the app with all state values up to date from the beginning to fix rollbacks."""
+
+        # Ensure to rerun only once to avoid infinite loops
+        # caused by a constantly changing state value at each run.
+        #
+        # Example: state.value += 1
+        if self._state["is_rerun"]:
+            self._state["is_rerun"] = False
+
+        elif self._state["hash"] is not None:
+            if self._state["hash"] != self._state["hasher"].to_bytes(
+                self._state["data"], None
+            ):
+                self._state["is_rerun"] = True
+                self._state["session"].request_rerun()
+
+        self._state["hash"] = self._state["hasher"].to_bytes(self._state["data"], None)
+
+
+def _get_session():
+    session_id = get_report_ctx().session_id
+    session_info = Server.get_current()._get_session_info(session_id)
+
+    if session_info is None:
+        raise RuntimeError("Couldn't get your Streamlit Session object.")
+
+    return session_info.session
+
+def get_state(hash_funcs=None):
+    session = _get_session()
+
+    if not hasattr(session, "_custom_session_state"):
+        session._custom_session_state = _SessionState(session, hash_funcs)
+    return session._custom_session_state
+
+
+def _get_names(collector_name, collector_type):
+        result = []
+        type_suffixes = {
+            'counter': ['_total', '_created'],
+            'summary': ['_sum', '_count', '_created'],
+            'histogram': ['_bucket', '_sum', '_count', '_created'],
+            'gaugehistogram': ['_bucket', '_gsum', '_gcount'],
+            'info': ['_info'],
+        }
+        for suffix in type_suffixes.get(collector_type, []):
+            result.append(collector_name + suffix)
+        return result
+
+
+def get_or_create_metric(metric_type, *, name, **kwargs):
+    names =  _get_names(name, metric_type.__name__.lower())
+    if any(name in REGISTRY._names_to_collectors for name in names):
+        return REGISTRY._names_to_collectors[names[0]]
+    else:
+        return metric_type(name=name, **kwargs)
+
+
+
+def provide_state(func):
+    def wrapper(*args, **kwargs):
+        state = get_state(hash_funcs={})
+        count_sessions()
+        return_value = func(state=state, *args, **kwargs)
+        state.sync()
+        return return_value
+
+    return wrapper
+
+def count_sessions():
+    state = get_state(hash_funcs={})
+    session_counter = get_or_create_metric(Counter, name='session_count', documentation='Unique Sessions')
+
+    if not state._is_session_reused:
+        session_counter.inc()
+        state._is_session_reused = True
+# end streamlit session state
+
 if __name__ == "__main__":
     setup_anonymous_usage_tracking()
     import argparse
@@ -1043,4 +1249,7 @@ if __name__ == "__main__":
     parser.add_argument("--input_is_power", metavar="<0|1>", choices=(0,1), type=int, help="if the input is power spectra. default: %(default)s", default=0)
     parser.add_argument("--message", metavar="<str>", type=str, help="initial message. default: %(default)s", default="")
     args = parser.parse_args()
-    main(args)
+
+    state = get_state(hash_funcs={})
+    main(args, state)
+    state.sync()
