@@ -155,11 +155,11 @@ def main(args, state):
         show_phase_diff_simu = False
         show_yprofile_simu = False
         if show_simu:
-            show_pwr_simu = st.checkbox(label="PS_Simu", value=False if show_pwr else True)
+            show_pwr_simu = st.checkbox(label="PS_Simu", value=show_pwr or show_pwr2)
             if show_pwr_simu:
-                show_yprofile_simu = st.checkbox(label="YP_Simu", value=False)
-                show_phase_simu = st.checkbox(label="PhaseSimu", value=False)
-            show_phase_diff_simu = st.checkbox(label="PD_Simu", value=False if show_phase_diff else True)
+                show_yprofile_simu = st.checkbox(label="YP_Simu", value=show_yprofile or show_yprofile2)
+                show_phase_simu = st.checkbox(label="PhaseSimu", value=show_phase or show_phase2)
+            show_phase_diff_simu = st.checkbox(label="PD_Simu", value=show_phase_diff or show_phase_diff2)
 
         if show_pwr or show_phase_diff or show_pwr2 or show_phase_diff2 or show_pwr_simu or show_phase_diff_simu:
             show_pseudocolor = st.checkbox(label="Color", value=True)
