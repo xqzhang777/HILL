@@ -15,7 +15,7 @@ def main(args, state):
     title = "Helical indexing using layer lines"
     st.title(title)
 
-    col1, col2, col3, col4 = st.beta_columns((1., 0.5, 0.25, 3.0))
+    col1, col2, col3, col4 = st.beta_columns((1., 0.6, 0.4, 4.0))
 
     with col1:
         with st.beta_expander(label="README", expanded=False):
@@ -77,7 +77,7 @@ def main(args, state):
         
         movie_frames = 0
         if is_3d or show_simu:
-            with st.beta_expander(label="Generate tilt movie", expanded=False):
+            with st.beta_expander(label="Tilt movie", expanded=False):
                 movie_frames = st.number_input('Movie frame #', value=0, min_value=0, max_value=1000, step=1)
                 if movie_frames>0:
                     if is_3d and show_simu:
@@ -271,8 +271,8 @@ def main(args, state):
 
         if fig_ellipses:
             from bokeh.models import Slider, CustomJS
-            slider_pitch = Slider(start=0.0, end=1000.0, value=pitch, step=.1, title="Pitch (Å)")
-            slider_rise = Slider(start=0.0, end=150.0, value=rise, step=.1, title="Rise (Å)")
+            slider_pitch = Slider(start=0.0, end=1000.0, value=pitch, step=.1, title="Pitch (Å)", width=pnx)
+            slider_rise = Slider(start=0.0, end=150.0, value=rise, step=.1, title="Rise (Å)", width=pnx)
             callback_code = """
                 var pitch_inv = 1./slider_pitch.value
                 var rise_inv = 1./slider_rise.value
@@ -294,15 +294,23 @@ def main(args, state):
             callback = CustomJS(args=dict(fig_ellipses=fig_ellipses, slider_pitch=slider_pitch, slider_rise=slider_rise), code=callback_code)
             slider_pitch.js_on_change('value', callback)
             slider_rise.js_on_change('value', callback)
-            figs = [[slider_pitch, slider_rise], figs]
-            figs_grid = gridplot(children=figs, toolbar_location='right')
+            if len(figs)==1:
+                from bokeh.layouts import column
+                figs[0].toolbar_location="right"
+                figs_grid = column(children=[slider_pitch, slider_rise, figs[0]])
+                override_height = pny+180
+            else:
+                from bokeh.layouts import layout
+                figs_row = gridplot(children=[figs], toolbar_location='right')
+                figs_grid = layout(children=[[slider_pitch, slider_rise], figs_row])
+                override_height = pny+120
 
             from streamlit_bokeh_events import streamlit_bokeh_events
             bokeh_events = streamlit_bokeh_events(
                 bokeh_plot=figs_grid,
                 events="HelicalParametersChanged",
                 refresh_on_update=True,
-                override_height=pny+120,
+                override_height=override_height,
                 debounce_time=2000,
                 key=next_key())
             if bokeh_events:
@@ -481,7 +489,7 @@ def add_linked_crosshair_tool(figures):
 
 def obtain_input_image(column, args, query_params):
     with column:
-        input_modes = {0:"upload a mrc/mrcs file", 1:"url", 2:"emd-xxxx"}
+        input_modes = {0:"upload", 1:"url", 2:"emd-xxxx"}
         value = int(query_params["input_mode"][0]) if "input_mode" in query_params else args.input_mode
         input_mode = st.radio(label="How to obtain the input image/map:", options=list(input_modes.keys()), format_func=lambda i:input_modes[i], index=value, key=next_key())
         is_3d = False
