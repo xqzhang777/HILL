@@ -35,7 +35,7 @@ def main(args, state):
             label = f"Replace amplitudes with another image"
         input_image2 = st.checkbox(label=label, value=False)        
         if input_image2:
-            data2, apix2, radius_auto2, mask_radius2, is_pwr2, input_params2, _ = obtain_input_image(col1, args, query_params)
+            _, data2, apix2, radius_auto2, mask_radius2, is_pwr2, is_3d2, input_params2, _ = obtain_input_image(col1, args, query_params)
             input_mode2, (uploaded_filename2, url2, emdid2) = input_params2
 
         st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to Wen Jiang (jiang12 at purdue.edu)*")
@@ -507,7 +507,7 @@ def obtain_input_image(column, args, query_params):
                 else:
                     st.stop()
             elif input_mode == 1:   # "url":
-                    label = "Input a url of 2D projection image(s) or a 3D map:"
+                    label = "Input a url of 2D image(s) or a 3D map:"
                     value = query_params["url"][0] if "url" in query_params else data_example.url
                     image_url = st.text_input(label=label, value=value, key=next_key())
                     data_all, apix = get_2d_image_from_url(image_url.strip())
@@ -550,9 +550,9 @@ def obtain_input_image(column, args, query_params):
         with original_image:
             st.image(data, use_column_width=True, caption=f"Orignal image ({nx}x{ny})", clamp=True, key=next_key())
 
-        with st.beta_expander(label="Transpose/Rotate/Shift the image", expanded=False):
+        with st.beta_expander(label="Transform the image", expanded=False):
             is_pwr_auto = guess_if_is_power_spectra(data)
-            is_pwr = st.checkbox(label="Input image is power spectra ", value=is_pwr_auto, key=next_key())
+            is_pwr = st.checkbox(label="Input is power spectra ", value=is_pwr_auto, key=next_key())
             transpose_auto = input_mode not in [2] and nx > ny
             transpose = st.checkbox(label='Transpose the image', value=transpose_auto, key=next_key())
             apix = st.number_input('Pixel size (Å/pixel)', value=apix, min_value=0.1, max_value=10., step=0.01, format="%.4f", key=next_key())
@@ -596,6 +596,7 @@ def obtain_input_image(column, args, query_params):
             rmax_span = Span(location=mask_radius, dimension='height', line_color='green', line_dash='dashed', line_width=3)
             p.add_layout(rmin_span)
             p.add_layout(rmax_span)
+            p.yaxis.visible = False
             p.legend.visible = False
             p.legend.location = "top_right"
             p.legend.click_policy="hide"
