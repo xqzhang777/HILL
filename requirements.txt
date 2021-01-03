@@ -7,4 +7,4 @@ mrcfile==1.1.2
 finufft==2.0.0
 moviepy==1.0.3
 selenium==3.141.0
-streamlit_bokeh_events=0.1.2
+streamlit_bokeh_events==0.1.2
