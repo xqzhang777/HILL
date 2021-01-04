@@ -12,7 +12,7 @@ def main(args, state):
 
     query_params = st.experimental_get_query_params()
 
-    title = "Helical indexing using layer lines"
+    title = "HILL: Helical Indexing using Layer Lines"
     st.title(title)
 
     col1, col2, col3, col4 = st.beta_columns((1., 0.6, 0.4, 4.0))
@@ -26,7 +26,7 @@ def main(args, state):
         # make radio display horizontal
         st.markdown('<style>div.Widget.row-widget.stRadio > div{flex-direction:row;}</style>', unsafe_allow_html=True)
 
-        data_all, data, apix, radius_auto, mask_radius, is_pwr, is_3d, input_params, (image_container, image_label) = obtain_input_image(col1, args, query_params)
+        data_all, image_index, data, apix, radius_auto, mask_radius, is_pwr, is_3d, input_params, (image_container, image_label) = obtain_input_image(col1, args, query_params)
         input_mode, (uploaded_filename, url, emdid) = input_params
 
         if is_pwr:
@@ -35,7 +35,7 @@ def main(args, state):
             label = f"Replace amplitudes with another image"
         input_image2 = st.checkbox(label=label, value=False)        
         if input_image2:
-            _, data2, apix2, radius_auto2, mask_radius2, is_pwr2, is_3d2, input_params2, _ = obtain_input_image(col1, args, query_params)
+            _, image_index2, data2, apix2, radius_auto2, mask_radius2, is_pwr2, is_3d2, input_params2, _ = obtain_input_image(col1, args, query_params)
             input_mode2, (uploaded_filename2, url2, emdid2) = input_params2
 
         st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to Wen Jiang (jiang12 at purdue.edu)*")
@@ -65,15 +65,22 @@ def main(args, state):
             hp_fraction = st.number_input('Fourier high-pass (%)', value=0.4, min_value=0.0, max_value=100.0, step=0.1, format="%.2f") / 100.0
             lp_fraction = st.number_input('Fourier low-pass (%)', value=0.0, min_value=0.0, max_value=100.0, step=10.0, format="%.2f") / 100.0
             ny, nx = data.shape
-            pnx = st.number_input('FFT X-dim size (pixels)', value=max(min(nx,ny), 512), min_value=min(nx, 128), step=2)
-            pny = st.number_input('FFT Y-dim size (pixels)', value=max(max(nx,ny), 1024), min_value=min(ny, 512), step=2)
+            value = int(query_params["nx"][0]) if "nx" in query_params else max(min(nx,ny), 512)
+            pnx = st.number_input('FFT X-dim size (pixels)', value=value, min_value=min(nx, 128), step=2)
+            value = int(query_params["ny"][0]) if "ny" in query_params else max(min(nx,ny), 1024)
+            pny = st.number_input('FFT Y-dim size (pixels)', value=value, min_value=min(ny, 512), step=2)
         with st.beta_expander(label="Simulation", expanded=False):
-            ball_radius = st.number_input('Gaussian radius (Å)', value=0.0, min_value=0.0, max_value=helical_radius, step=5.0, format="%.1f")
+            value = float(query_params["simuradius"][0]) if "simuradius" in query_params else 0.0
+            ball_radius = st.number_input('Gaussian radius (Å)', value=value, min_value=0.0, max_value=helical_radius, step=5.0, format="%.1f")
             show_simu = True if ball_radius > 0 else False
+            noise=0.0
+            use_plot_size=False
             if show_simu:
                 az = st.number_input('Azimuthal angle (°)', value=0, min_value=0, max_value=360, step=1, format="%.2f")
-                noise = st.number_input('Noise (sigma)', value=0., min_value=0., step=1., format="%.2f", key=next_key())
-                use_plot_size = st.checkbox('Use plot size', value=False)
+                value = float(query_params["simunoise"][0]) if "simunoise" in query_params else 0.0
+                noise = st.number_input('Noise (sigma)', value=value, min_value=0., step=1., format="%.2f", key=next_key())
+                value = bool(query_params["useplotsize"][0]) if "useplotsize" in query_params else False
+                use_plot_size = st.checkbox('Use plot size', value=value)
         
         movie_frames = 0
         if is_3d or show_simu:
@@ -166,6 +173,7 @@ def main(args, state):
             value=False if input_mode==0 or is_pwr or (input_image2 and (input_mode2==0  or is_pwr2)) else True
             show_LL = st.checkbox(label="LL", value=value)
             if show_LL:
+                bi_directional = st.checkbox(label="Bidirection", value=False)
                 m_groups = compute_layer_line_positions(twist=twist, rise=rise, csym=csym, radius=helical_radius, tilt=tilt, cutoff_res=cutoff_res_y)
                 ng = len(m_groups)
                 st.subheader("m=")
@@ -304,7 +312,11 @@ def main(args, state):
                 figs_row = gridplot(children=[figs], toolbar_location='right')
                 figs_grid = layout(children=[[slider_pitch, slider_rise], figs_row])
                 override_height = pny+120
+        else:
+            figs_grid = gridplot(children=[figs], toolbar_location='right')
+            override_height = pny+120
 
+        if show_LL and bi_directional:
             from streamlit_bokeh_events import streamlit_bokeh_events
             bokeh_events = streamlit_bokeh_events(
                 bokeh_plot=figs_grid,
@@ -332,8 +344,6 @@ def main(args, state):
                             rise = rise_empty.number_input('Rise (Å)', value=rise_new, min_value=-180.0, max_value=180.0, step=1.0, format="%.3f", key=next_key())
                         set_query_params(input_mode, url, emdid, is_pwr, show_pitch, pitch, twist, rise, csym, helical_radius, cutoff_res_x, cutoff_res_y)
         else:
-            figs = [figs]
-            figs_grid = gridplot(children=figs, toolbar_location='right')
             st.bokeh_chart(figs_grid, use_container_width=False)
 
         if movie_frames>0:
@@ -355,23 +365,26 @@ def main(args, state):
         state.twist = twist
         state.rise = rise
         state.csym = csym
-        set_query_params(input_mode, url, emdid, is_pwr, show_pitch, pitch, twist, rise, csym, helical_radius, cutoff_res_x, cutoff_res_y)
+        set_query_params(input_mode, url, image_index, emdid, is_pwr, show_pitch, pitch, twist, rise, csym, helical_radius, cutoff_res_x, cutoff_res_y, pnx, pny, ball_radius, noise, use_plot_size)
 
-def set_query_params(input_mode, url, emdid, is_pwr, show_pitch, pitch, twist, rise, csym, helical_radius, cutoff_res_x, cutoff_res_y):       
+def set_query_params(input_mode, url, image_index, emdid, is_pwr, show_pitch, pitch, twist, rise, csym, helical_radius, cutoff_res_x, cutoff_res_y, nx, ny, simuradius, simunoise, useplotsize):       
     params=dict(input_mode=input_mode)
     if input_mode in [2, 1]:
         if input_mode == 2:
             params["emdid"] = emdid
         elif input_mode == 1:
             params["url"] = url
-    if is_pwr: 
-        params["is_pwr"] = int(is_pwr)
+            params["i"] = image_index+1
+    if is_pwr: params["is_pwr"] = int(is_pwr)
     params["show_pitch"] = int(show_pitch)
     if show_pitch:
         params["pitch"] = round(pitch,3)
     else:
         params["twist"] = round(twist,3)
-    params.update(dict(rise=round(rise,3), csym=csym, radius=round(helical_radius,1), resx=round(cutoff_res_x,2), resy=round(cutoff_res_y,2)))
+    params.update(dict(rise=round(rise,3), csym=csym, helicalradius=round(helical_radius,1), resx=round(cutoff_res_x,2), resy=round(cutoff_res_y,2)), nx=nx, ny=ny)
+    if simuradius>0: params["simuradius"] = simuradius
+    if simunoise>0: params["simunoise"] = simunoise
+    if useplotsize>0: params["useplotsize"] = int(useplotsize)
     st.experimental_set_query_params(**params)
 
 @st.cache(persist=True, show_spinner=False, suppress_st_warning=True)
@@ -533,9 +546,11 @@ def obtain_input_image(column, args, query_params):
             nz, ny, nx = data_all.shape
             if nz>1:
                 if len(nonzeros)==nz:
-                    image_index = st.slider(label=f"Choose an image (out of {nz}):", min_value=1, max_value=nz, value=1, step=1, key=next_key())
+                    value = int(query_params["i"][0]) if "i" in query_params else 1
+                    image_index = st.slider(label=f"Choose an image (out of {nz}):", min_value=1, max_value=nz, value=value, step=1, key=next_key())
                 else:
-                    image_index = st.select_slider(label=f"Choose an image ({len(nonzeros)} non-zero images out of {nz}):", options=list(nonzeros+1), value=nonzeros[0]+1, key=next_key())
+                    value = int(query_params["i"][0]) if "i" in query_params else nonzeros[0]+1
+                    image_index = st.select_slider(label=f"Choose an image ({len(nonzeros)} non-zero images out of {nz}):", options=list(nonzeros+1), value=value, key=next_key())
                 image_index -= 1
             else:
                 image_index = 0
@@ -653,7 +668,7 @@ def obtain_input_image(column, args, query_params):
         input_params = (input_mode, (None, image_url, None))
     else:
         input_params = (input_mode, (fileobj, None, None))
-    return data_all, data, apix, radius_auto, mask_radius, is_pwr, is_3d, input_params, (image_container, image_label)
+    return data_all, image_index, data, apix, radius_auto, mask_radius, is_pwr, is_3d, input_params, (image_container, image_label)
 
 @st.cache(persist=True, show_spinner=False)
 def bessel_n_image(ny, nx, nyquist_res_x, nyquist_res_y, radius, tilt):
