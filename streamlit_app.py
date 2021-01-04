@@ -7,13 +7,13 @@ from bokeh.events import MouseMove, DoubleTap
 from bokeh.layouts import gridplot
 
 def main(args, state):
-    st.set_page_config(page_title="Helical Indexing", layout="wide")
+    title = "HILL: Helical Indexing using Layer Lines"
+    st.set_page_config(page_title=title, layout="wide")
+    st.title(title)
+
     st.server.server_util.MESSAGE_SIZE_LIMIT = 2e8  # default is 5e7 (50MB)
 
     query_params = st.experimental_get_query_params()
-
-    title = "HILL: Helical Indexing using Layer Lines"
-    st.title(title)
 
     col1, col2, col3, col4 = st.beta_columns((1., 0.6, 0.4, 4.0))
 
@@ -45,7 +45,8 @@ def main(args, state):
         pitch_or_twist_text = st.empty()
         rise_empty = st.empty()
         value = state.rise or (float(query_params["rise"][0]) if "rise" in query_params else data_example.rise)
-        rise = rise_empty.number_input('Rise (Å)', value=value, min_value=-180.0, max_value=180.0, step=1.0, format="%.3f")
+        state.rise = rise_empty.number_input('Rise (Å)', value=value, min_value=-180.0, max_value=180.0, step=1.0, format="%.3f")
+        rise = state.rise
         value = int(query_params["csym"][0]) if "csym" in query_params else data_example.csym
         csym = st.number_input('Csym', value=value, min_value=1, max_value=16, step=1)
 
@@ -56,9 +57,9 @@ def main(args, state):
         helical_radius = st.number_input('Radius (Å)', value=value, min_value=1.0, max_value=1000.0, step=10., format="%.1f")
         
         tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-90.0, max_value=90.0, step=1.0)
-        value = float(query_params["resx"][0]) if "resx" in query_params else round(3*apix, 0)
+        value = max(round(3*apix, 1), float(query_params["resx"][0]) if "resx" in query_params else round(3*apix, 1))
         cutoff_res_x = st.number_input('Resolution limit - X (Å)', value=value, min_value=2*apix, step=1.0)
-        value = float(query_params["resy"][0]) if "resy" in query_params else round(3*apix, 0)
+        value = max(round(3*apix, 1), float(query_params["resy"][0]) if "resy" in query_params else round(3*apix, 1))
         cutoff_res_y = st.number_input('Resolution limit - Y (Å)', value=value, min_value=2*apix, step=1.0)
         with st.beta_expander(label="Filters", expanded=False):
             log_xform = st.checkbox(label="Log(amplitude)", value=True)
@@ -97,6 +98,10 @@ def main(args, state):
                     if movie_mode == 0:
                         movie_noise = st.number_input('Noise (sigma)', value=0., min_value=0., step=1., format="%.2f", key=next_key())
 
+        with st.beta_expander(label="Other settings", expanded=False):
+            set_url = st.checkbox(label="Update Browser URL", value=False)
+            bi_directional_empty = st.empty()
+        
     if is_pwr:
         pwr = resize_rescale_power_spectra(data, nyquist_res=2*apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
                 output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
@@ -123,16 +128,20 @@ def main(args, state):
         show_pitch = st.checkbox(label="Pitch", value=value)
         if show_pitch:
             value = state.pitch or (float(query_params["pitch"][0]) if "pitch" in query_params else data_example.pitch)
-            pitch = pitch_or_twist_number_input.number_input('Pitch (Å)', value=value, min_value=1.0, max_value=max(pny,pnx)*apix, step=1.0, format="%.2f")
+            state.pitch = pitch_or_twist_number_input.number_input('Pitch (Å)', value=value, min_value=1.0, max_value=max(pny,pnx)*apix, step=1.0, format="%.2f")
+            pitch = state.pitch
             if pitch < cutoff_res_y:
                 st.warning(f"pitch is too small. it should be > {cutoff_res_y} (Limit FFT X-dim to resolution (Å))")
                 return
             twist = 360./(pitch/rise)
+            state.twist = twist
             pitch_or_twist_text.markdown(f"*(twist = {twist:.2f} °)*")
         else:
             value = state.twist or (float(query_params["twist"][0]) if "twist" in query_params else data_example.twist)
-            twist = pitch_or_twist_number_input.number_input('Twist (°)', value=value, min_value=-180.0, max_value=180.0, step=1.0, format="%.2f")
+            state.twist = pitch_or_twist_number_input.number_input('Twist (°)', value=value, min_value=-180.0, max_value=180.0, step=1.0, format="%.2f")
+            twist = state.twist
             pitch = (360./twist)*rise
+            state.pitch = pitch
             pitch_or_twist_text.markdown(f"*(pitch = {pitch:.2f} Å)*")
 
         show_phase = False
@@ -168,12 +177,15 @@ def main(args, state):
                 show_phase_simu = st.checkbox(label="PhaseSimu", value=show_phase or show_phase2)
             show_phase_diff_simu = st.checkbox(label="PD_Simu", value=show_phase_diff or show_phase_diff2)
 
+        show_LL_text = False
         if show_pwr or show_phase_diff or show_pwr2 or show_phase_diff2 or show_pwr_simu or show_phase_diff_simu:
             show_pseudocolor = st.checkbox(label="Color", value=True)
             value=False if input_mode==0 or is_pwr or (input_image2 and (input_mode2==0  or is_pwr2)) else True
             show_LL = st.checkbox(label="LL", value=value)
             if show_LL:
-                bi_directional = st.checkbox(label="Bidirection", value=False)
+                value = bool(query_params["lltext"][0]) if "lltext" in query_params else False
+                show_LL_text = st.checkbox(label="LL-Text", value=value)
+                bi_directional = bi_directional_empty.checkbox(label="Update pitch/rise from plot", value=True)
                 m_groups = compute_layer_line_positions(twist=twist, rise=rise, csym=csym, radius=helical_radius, tilt=tilt, cutoff_res=cutoff_res_y)
                 ng = len(m_groups)
                 st.subheader("m=")
@@ -266,21 +278,28 @@ def main(args, state):
                 height = np.mean(tmp_y[1:]-tmp_y[:-1])/3
                 for mi, m in enumerate(m_groups.keys()):
                     if not show_choices[m]: continue
-                    x, y, n = m_groups[m]["LL"]
-                    tags = [m, n]
+                    x, y, bessel_order = m_groups[m]["LL"]
+                    if show_LL_text:
+                        texts = [str(int(n)) for n in bessel_order]
+                    tags = [m, bessel_order]
                     line_dash = ll_line_dashes[abs(m)%len(ll_line_dashes)]
                     for f in figs:
                         if f in figs_skip_yprofile: continue
-                        ellipises = f.ellipse(x, y, width=width, height=height, line_width=4, line_color=color, line_dash=line_dash, fill_alpha=0)
-                        ellipises.tags = tags
-                        fig_ellipses.append(ellipises)
+                        if show_LL_text: 
+                            text_labels = f.text(x, y, text=texts, text_color="white", text_baseline="middle", text_align="center")
+                            text_labels.tags = tags
+                            fig_ellipses.append(text_labels)
+                        else:
+                            ellipses = f.ellipse(x, y, width=width, height=height, line_width=2, line_color=color, line_dash=line_dash, fill_alpha=0)
+                            ellipses.tags = tags
+                            fig_ellipses.append(ellipses)
             else:
                 st.warning(f"No off-equator layer lines to draw for Pitch={pitch:.2f} Csym={csym} combinations. Consider increasing Pitch or reducing Csym")
 
         if fig_ellipses:
             from bokeh.models import Slider, CustomJS
-            slider_pitch = Slider(start=0.0, end=1000.0, value=pitch, step=.1, title="Pitch (Å)", width=pnx)
-            slider_rise = Slider(start=0.0, end=150.0, value=rise, step=.1, title="Rise (Å)", width=pnx)
+            slider_pitch = Slider(start=0.0, end=pitch*2.0, value=pitch, step=.01, title="Pitch (Å)", width=pnx)
+            slider_rise = Slider(start=0.0, end=rise*2.0, value=rise, step=.01, title="Rise (Å)", width=pnx)
             callback_code = """
                 var pitch_inv = 1./slider_pitch.value
                 var rise_inv = 1./slider_rise.value
@@ -327,22 +346,12 @@ def main(args, state):
                 key=next_key())
             if bokeh_events:
                 if bokeh_events.get("HelicalParametersChanged"):
-                    pitch_new = float(bokeh_events.get("HelicalParametersChanged")["pitch"])
-                    rise_new = float(bokeh_events.get("HelicalParametersChanged")["rise"])
-                    twist_new = 360./(pitch_new/rise_new)
-                    if pitch_new != pitch or rise_new != rise:
-                        if twist_new != twist:
-                            if show_pitch:
-                                twist = twist_new
-                                pitch = pitch_or_twist_number_input.number_input('Pitch (Å)', value=pitch_new, min_value=1.0, max_value=max(pny,pnx)*apix, step=1.0, format="%.2f", key=next_key())
-                                pitch_or_twist_text.markdown(f"*(twist = {twist:.2f} °)*")
-                            else:
-                                pitch = pitch_new
-                                twist = pitch_or_twist_number_input.number_input('Twist (°)', value=twist_new, min_value=-180.0, max_value=180.0, step=1.0, format="%.2f")
-                                pitch_or_twist_text.markdown(f"*(pitch = {pitch:.2f} Å)*")
-                        if rise_new != rise:
-                            rise = rise_empty.number_input('Rise (Å)', value=rise_new, min_value=-180.0, max_value=180.0, step=1.0, format="%.3f", key=next_key())
-                        set_query_params(input_mode, url, emdid, is_pwr, show_pitch, pitch, twist, rise, csym, helical_radius, cutoff_res_x, cutoff_res_y)
+                    pitch = float(bokeh_events.get("HelicalParametersChanged")["pitch"])
+                    rise = float(bokeh_events.get("HelicalParametersChanged")["rise"])
+                    twist = 360./(pitch/rise)
+                    state.pitch = pitch
+                    state.twist = twist
+                    state.rise = rise
         else:
             st.bokeh_chart(figs_grid, use_container_width=False)
 
@@ -361,13 +370,12 @@ def main(args, state):
                 movie_filename = create_movie(movie_frames, tilt, params, pny, pnx, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudocolor, log_xform, lp_fraction, hp_fraction)
                 st.video(movie_filename) # it always show the video using the entire column width
 
-        state.pitch = pitch
-        state.twist = twist
-        state.rise = rise
-        state.csym = csym
-        set_query_params(input_mode, url, image_index, emdid, is_pwr, show_pitch, pitch, twist, rise, csym, helical_radius, cutoff_res_x, cutoff_res_y, pnx, pny, ball_radius, noise, use_plot_size)
+    if set_url:
+        set_query_params(input_mode, url, image_index, emdid, is_pwr, show_pitch, pitch, twist, rise, csym, helical_radius, show_LL_text, cutoff_res_x, cutoff_res_y, pnx, pny, ball_radius, noise, use_plot_size)
+    else:
+        st.experimental_set_query_params()
 
-def set_query_params(input_mode, url, image_index, emdid, is_pwr, show_pitch, pitch, twist, rise, csym, helical_radius, cutoff_res_x, cutoff_res_y, nx, ny, simuradius, simunoise, useplotsize):       
+def set_query_params(input_mode, url, image_index, emdid, is_pwr, show_pitch, pitch, twist, rise, csym, helical_radius, show_LL_text, cutoff_res_x, cutoff_res_y, nx, ny, simuradius, simunoise, useplotsize):       
     params=dict(input_mode=input_mode)
     if input_mode in [2, 1]:
         if input_mode == 2:
@@ -382,9 +390,10 @@ def set_query_params(input_mode, url, image_index, emdid, is_pwr, show_pitch, pi
     else:
         params["twist"] = round(twist,3)
     params.update(dict(rise=round(rise,3), csym=csym, helicalradius=round(helical_radius,1), resx=round(cutoff_res_x,2), resy=round(cutoff_res_y,2)), nx=nx, ny=ny)
+    if show_LL_text: params["lltext"] = 1
     if simuradius>0: params["simuradius"] = simuradius
     if simunoise>0: params["simunoise"] = simunoise
-    if useplotsize>0: params["useplotsize"] = int(useplotsize)
+    if useplotsize: params["useplotsize"] = 1
     st.experimental_set_query_params(**params)
 
 @st.cache(persist=True, show_spinner=False, suppress_st_warning=True)
@@ -525,9 +534,9 @@ def obtain_input_image(column, args, query_params):
                     image_url = st.text_input(label=label, value=value, key=next_key())
                     data_all, apix = get_2d_image_from_url(image_url.strip())
             nz, ny, nx = data_all.shape
-            if nx==ny and nz>nx//4:
-                is_3d_auto = True
-                is_3d = st.checkbox(label=f"The input ({nx}x{ny}x{nz}) is a 3D map", value=is_3d_auto, key=next_key())
+            if nx==ny and (nz>nx//4 and nz%4==0): is_3d_auto = True
+            else: is_3d_auto = False
+            is_3d = st.checkbox(label=f"The input ({nx}x{ny}x{nz}) is a 3D map", value=is_3d_auto, key=next_key())
         if is_3d:
             if not np.any(data_all):
                 st.warning("All voxels of the input 3D map have zero value")
@@ -550,6 +559,7 @@ def obtain_input_image(column, args, query_params):
                     image_index = st.slider(label=f"Choose an image (out of {nz}):", min_value=1, max_value=nz, value=value, step=1, key=next_key())
                 else:
                     value = int(query_params["i"][0]) if "i" in query_params else nonzeros[0]+1
+                    if value not in nonzeros: value = nonzeros[0]+1
                     image_index = st.select_slider(label=f"Choose an image ({len(nonzeros)} non-zero images out of {nz}):", options=list(nonzeros+1), value=value, key=next_key())
                 image_index -= 1
             else:
@@ -568,9 +578,12 @@ def obtain_input_image(column, args, query_params):
         with st.beta_expander(label="Transform the image", expanded=False):
             is_pwr_auto = guess_if_is_power_spectra(data)
             is_pwr = st.checkbox(label="Input is power spectra ", value=is_pwr_auto, key=next_key())
+            if is_pwr:
+                apix = 0.5 * st.number_input('Nyquist res (Å)', value=2*apix, min_value=0.1, max_value=10., step=0.01, format="%.4f", key=next_key())
+            else:
+                apix = st.number_input('Pixel size (Å/pixel)', value=apix, min_value=0.1, max_value=10., step=0.01, format="%.4f", key=next_key())
             transpose_auto = input_mode not in [2] and nx > ny
             transpose = st.checkbox(label='Transpose the image', value=transpose_auto, key=next_key())
-            apix = st.number_input('Pixel size (Å/pixel)', value=apix, min_value=0.1, max_value=10., step=0.01, format="%.4f", key=next_key())
             if is_pwr or is_3d:
                 angle_auto, dx_auto = 0., 0.
             else:
@@ -778,7 +791,7 @@ def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m=
         # first peak positions of each layer line
         p = pitch(twist, rise)
         ds_p = 1/p
-        ll_i_top = int((smax - sy0)/ds_p) * 2
+        ll_i_top = int(np.abs(smax - sy0)/ds_p) * 2
         ll_i_bottom = -int(np.abs(-smax - sy0)/ds_p) * 2
         ll_i = np.array([i for i in range(ll_i_bottom, ll_i_top+1) if not i%csym], dtype=np.float32)
         sy = sy0 + ll_i * ds_p
@@ -1036,12 +1049,13 @@ def normalize(data, percentile=(0, 100)):
     return data2
 
 @st.cache(persist=True, show_spinner=False)
-def nonzero_images(data):
+def nonzero_images(data, thresh_ratio=1e-3):
     assert(len(data.shape) == 3)
-    nonzeros = np.any(data, axis=(1,2))
-    n = np.count_nonzero(nonzeros)
-    if n>0: 
-        return np.nonzero(nonzeros)[0]
+    sigmas = np.std(data, axis=(1,2))
+    thresh = sigmas.max() * thresh_ratio
+    nonzeros = np.where(sigmas>thresh)[0]
+    if len(nonzeros)>0: 
+        return nonzeros
     else:
         None
 
