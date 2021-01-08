@@ -1,3 +1,27 @@
+""" 
+MIT License
+
+Copyright (c) 2020-2021 Wen Jiang
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+"""
+
 import streamlit as st
 import numpy as np
 from bokeh.plotting import figure
@@ -13,6 +37,7 @@ def main(args, state):
 
     st.server.server_util.MESSAGE_SIZE_LIMIT = 2e8  # default is 5e7 (50MB)
 
+    set_initial_query_params(query_string=args.query_string) # only excuted on the first run
     query_params = st.experimental_get_query_params()
 
     col1, col2, col3, col4 = st.beta_columns((1., 0.6, 0.4, 4.0))
@@ -21,22 +46,26 @@ def main(args, state):
         with st.beta_expander(label="README", expanded=False):
             st.write("This Web app considers a biological helical structure as the product of a continous helix and a set of parallel planes, and based on the covolution theory, the Fourier Transform (FT) of a helical structure would be the convolution of the FT of the continous helix and the FT of the planes.  \nThe FT of a continous helix consists of equally spaced layer planes (3D) or layerlines (2D projection) that can be described by Bessel functions of increasing orders (0, +/-1, +/-2, ...) from the Fourier origin (i.e. equator). The spacing between the layer planes/lines is determined by the helical pitch (i.e. the shift along the helical axis for a 360 ° turn of the helix). If the structure has additional cyclic symmetry (for example, C6) around the helical axis, only the layer plane/line orders of integer multiplier of the symmetry (e.g. 0, +/-6, +/-12, ...) are visible. The primary peaks of the layer lines in the power spectra form a pattern similar to a X symbol.  \nThe FT of the parallel planes consists of equally spaced points along the helical axis (i.e. meridian) with the spacing being determined by the helical rise.  \nThe convolution of these two components (X-shaped pattern of layer lines and points along the meridian) generates the layer line patterns seen in the power spectra of the projection images of helical structures. The helical indexing task is thus to identify the helical rise, pitch (or twist), and cyclic symmetry that would predict a layer line pattern to explain the observed the layer lines in the power spectra. This Web app allows you to interactively change the helical parameters and superimpose the predicted layer liines on the power spectra to complete the helical indexing task.  \n  \nPS: power spectra; PD: phase difference between the two sides of meridian; YP: Y-axis power spectra profile; LL: layer lines; m: indices of the X-patterns along the meridian; Jn: Bessel order")
         
-        show_initial_message(message=args.message) # only show once on the first run
-
         # make radio display horizontal
-        st.markdown('<style>div.Widget.row-widget.stRadio > div{flex-direction:row;}</style>', unsafe_allow_html=True)
+        st.markdown('<style>div.row-widget.stRadio > div{flex-direction:row;}</style>', unsafe_allow_html=True)
 
-        data_all, image_index, data, apix, radius_auto, mask_radius, is_pwr, is_3d, input_params, (image_container, image_label) = obtain_input_image(col1, args, query_params)
+        data_all, image_index, data, apix, radius_auto, mask_radius, input_type, is_3d, input_params, (image_container, image_label) = obtain_input_image(col1, query_params, param_i=0)
         input_mode, (uploaded_filename, url, emdid) = input_params
 
-        if is_pwr:
+        if input_type in ["image"]:
+            label = f"Replace amplitudes or phases with another image"
+        elif input_type in ["PS"]:
             label = f"Add phases from another image"
-        else:
-            label = f"Replace amplitudes with another image"
-        input_image2 = st.checkbox(label=label, value=False)        
+        elif input_type in ["PD"]:
+            label = f"Add amplitudes from another image"
+        value = True if "input_mode" in query_params and len(query_params["input_mode"])==2 else False
+        input_image2 = st.checkbox(label=label, value=value)        
         if input_image2:
-            _, image_index2, data2, apix2, radius_auto2, mask_radius2, is_pwr2, is_3d2, input_params2, _ = obtain_input_image(col1, args, query_params)
+            _, image_index2, data2, apix2, radius_auto2, mask_radius2, input_type2, is_3d2, input_params2, _ = obtain_input_image(col1, query_params, param_i=1)
             input_mode2, (uploaded_filename2, url2, emdid2) = input_params2
+        else:
+            image_index2, data2, apix2, radius_auto2, mask_radius2, input_type2, is_3d2 = [None] * 7
+            input_mode2, (uploaded_filename2, url2, emdid2) = None, (None, None, None)
 
         st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to Wen Jiang (jiang12 at purdue.edu)*")
 
@@ -99,28 +128,43 @@ def main(args, state):
                         movie_noise = st.number_input('Noise (sigma)', value=0., min_value=0., step=1., format="%.2f", key=next_key())
 
         with st.beta_expander(label="Other settings", expanded=False):
-            set_url = st.checkbox(label="Update Browser URL", value=False)
+            set_url = st.button(label="Update Browser URL")
             bi_directional_empty = st.empty()
         
-    if is_pwr:
+    if input_type in ["PS"]:
         pwr = resize_rescale_power_spectra(data, nyquist_res=2*apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
-                output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
+                output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction, norm=1)
         phase = None
+        phase_diff = None
+    elif input_type in ["PD"]:
+        pwr = None
+        phase = None
+        phase_diff = resize_rescale_power_spectra(data, nyquist_res=2*apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
+                output_size=(pny, pnx), log=0, low_pass_fraction=0, high_pass_fraction=0, norm=0)
     else:
         pwr, phase = compute_power_spectra(data, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
                 output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
+        phase_diff = compute_phase_difference_across_meridian(phase)                
     
     if input_image2:
-        if is_pwr2:
+        if input_type2 in ["PS"]:
             pwr2 = resize_rescale_power_spectra(data2, nyquist_res=2*apix2, cutoff_res=(cutoff_res_y, cutoff_res_x), 
-                    output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
+                    output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction, norm=1)
             phase2 = None
+            phase_diff2 = None
+        elif input_type2 in ["PD"]:
+            pwr2 = None
+            phase2 = None
+            phase_diff2 = resize_rescale_power_spectra(data2, nyquist_res=2*apix2, cutoff_res=(cutoff_res_y, cutoff_res_x), 
+                output_size=(pny, pnx), log=0, low_pass_fraction=0, high_pass_fraction=0, norm=0)
         else:
             pwr2, phase2 = compute_power_spectra(data2, apix=apix2, cutoff_res=(cutoff_res_y, cutoff_res_x), 
                     output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
+            phase_diff2 = compute_phase_difference_across_meridian(phase2)                
     else:
         pwr2 = None
         phase2 = None
+        phase_diff2 = None
 
     with col3:
         st.subheader("Display:")
@@ -144,14 +188,17 @@ def main(args, state):
             state.pitch = pitch
             pitch_or_twist_text.markdown(f"*(pitch = {pitch:.2f} Å)*")
 
+        show_pwr = False
         show_phase = False
         show_phase_diff = False
         show_yprofile = False
-        show_pwr = st.checkbox(label="PS", value=True)
+        if input_type in ["image", "PS"]:
+            show_pwr = st.checkbox(label="PS", value=True)
         if show_pwr:
             show_yprofile = st.checkbox(label="YP", value=False)
+        if input_type in ["image"]:
             show_phase = st.checkbox(label="Phase", value=False)
-        if not is_pwr:
+        if input_type in ["image", "PD"]:
             show_phase_diff = st.checkbox(label="PD", value=True)
         
         show_pwr2 = False
@@ -159,12 +206,18 @@ def main(args, state):
         show_phase_diff2 = False
         show_yprofile2 = False
         if input_image2:
-            show_pwr2 = st.checkbox(label="PS2", value=False if show_pwr else True)
+            if input_type2 in ["image", "PS"]:
+                if input_type2 in ["PS"]: value = True
+                else: value = not show_pwr
+                show_pwr2 = st.checkbox(label="PS2", value=value)
             if show_pwr2:
-                show_yprofile2 = st.checkbox(label="YP2", value=False)
-            if not is_pwr2:
+                show_yprofile2 = st.checkbox(label="YP2", value=show_yprofile)
+            if input_type2 in ["image"]:
                 if show_pwr2: show_phase2 = st.checkbox(label="Phase2", value=False)
-                show_phase_diff2 = st.checkbox(label="PD2", value=False if show_phase_diff else True)
+            if input_type2 in ["image", "PD"]:
+                if input_type2 in ["PD"]: value = True
+                else: value = not show_phase_diff
+                show_phase_diff2 = st.checkbox(label="PD2", value=value)
 
         show_pwr_simu = False
         show_phase_simu = False
@@ -180,8 +233,7 @@ def main(args, state):
         show_LL_text = False
         if show_pwr or show_phase_diff or show_pwr2 or show_phase_diff2 or show_pwr_simu or show_phase_diff_simu:
             show_pseudocolor = st.checkbox(label="Color", value=True)
-            value=False if input_mode==0 or is_pwr or (input_image2 and (input_mode2==0  or is_pwr2)) else True
-            show_LL = st.checkbox(label="LL", value=value)
+            show_LL = st.checkbox(label="LL", value=True)
             if show_LL:
                 value = bool(query_params["lltext"][0]) if "lltext" in query_params else False
                 show_LL_text = st.checkbox(label="LL-Text", value=value)
@@ -205,13 +257,13 @@ def main(args, state):
         tapering_image = generate_tapering_filter(image_size=proj.shape, fraction_start=[0.9, fraction_x], fraction_slope=0.1)
         proj = proj * tapering_image
         with image_container:
-            st.image([data, proj], use_column_width=True, caption=[image_label, "Simulated"], clamp=True)
+            st.image([normalize(data), normalize(proj)], use_column_width=True, caption=[image_label, "Simulated"])
 
     with col4:
         if not (show_pwr or show_phase_diff or show_pwr2 or show_phase_diff2 or show_pwr_simu or show_phase_diff_simu): return
 
-        items = [ (show_pwr, pwr, "Power Spectra", show_phase, show_phase_diff, phase, "Phase Diff Across Meridian", show_yprofile), 
-                  (show_pwr2, pwr2, "Power Spectra - 2", show_phase2, show_phase_diff2, phase2, "Phase Diff Across Meridian - 2", show_yprofile2)
+        items = [ (show_pwr, pwr, "Power Spectra", show_phase, phase, show_phase_diff, phase_diff, "Phase Diff Across Meridian", show_yprofile), 
+                  (show_pwr2, pwr2, "Power Spectra - 2", show_phase2, phase2, show_phase_diff2, phase_diff2, "Phase Diff Across Meridian - 2", show_yprofile2)
                 ]
         if show_pwr_simu or show_phase_diff_simu:
             if use_plot_size:
@@ -228,12 +280,12 @@ def main(args, state):
                 apix_simu = apix
             proj_pwr, proj_phase = compute_power_spectra(proj, apix=apix_simu, cutoff_res=(cutoff_res_y, cutoff_res_x), 
                     output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
-            items += [(show_pwr_simu, proj_pwr, "Simulated Power Spectra", show_phase_simu, show_phase_diff_simu, proj_phase, "Simulated Phase Diff Across Meridian", show_yprofile_simu)]
+            items += [(show_pwr_simu, proj_pwr, "Simulated Power Spectra", show_phase_simu, proj_phase, show_phase_diff_simu, proj_phase_diff, "Simulated Phase Diff Across Meridian", show_yprofile_simu)]
 
         figs = []
         figs_skip_yprofile = []
         for item in items:
-            show_pwr_work, pwr_work, title_pwr_work, show_phase_work, show_phase_diff_work, phase_work, title_phase_work, show_yprofile_work = item
+            show_pwr_work, pwr_work, title_pwr_work, show_phase_work, phase_work, show_phase_diff_work, phase_diff_work, title_phase_work, show_yprofile_work = item
             if show_pwr_work:
                 tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Amp', '@image')]
                 fig = create_image_figure(pwr_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, pseudocolor=show_pseudocolor, title=title_pwr_work, yaxis_visible=False, tooltips=tooltips)
@@ -257,9 +309,8 @@ def main(args, state):
                 figs_skip_yprofile.append(fig)
 
             if show_phase_diff_work:
-                phase_diff = compute_phase_difference_across_meridian(phase_work)                
                 tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Phase Diff', '@image °')]
-                fig = create_image_figure(phase_diff, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, pseudocolor=show_pseudocolor, title=title_phase_work, yaxis_visible=False, tooltips=tooltips)
+                fig = create_image_figure(phase_diff_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, pseudocolor=show_pseudocolor, title=title_phase_work, yaxis_visible=False, tooltips=tooltips)
                 figs.append(fig)
                 
         figs[-1].yaxis.fixed_location = figs[-1].x_range.end
@@ -371,19 +422,30 @@ def main(args, state):
                 st.video(movie_filename) # it always show the video using the entire column width
 
     if set_url:
-        set_query_params(input_mode, url, image_index, emdid, is_pwr, show_pitch, pitch, twist, rise, csym, helical_radius, show_LL_text, cutoff_res_x, cutoff_res_y, pnx, pny, ball_radius, noise, use_plot_size)
-    else:
-        st.experimental_set_query_params()
+        input = (input_mode, url, image_index, emdid, input_type)
+        input2 = (input_mode2, url2, image_index2, emdid2, input_type2)
+        set_query_params(input, input2, show_pitch, pitch, twist, rise, csym, helical_radius, show_LL_text, cutoff_res_x, cutoff_res_y, pnx, pny, ball_radius, noise, use_plot_size)
 
-def set_query_params(input_mode, url, image_index, emdid, is_pwr, show_pitch, pitch, twist, rise, csym, helical_radius, show_LL_text, cutoff_res_x, cutoff_res_y, nx, ny, simuradius, simunoise, useplotsize):       
-    params=dict(input_mode=input_mode)
-    if input_mode in [2, 1]:
+def set_query_params(input, input2, show_pitch, pitch, twist, rise, csym, helical_radius, show_LL_text, cutoff_res_x, cutoff_res_y, nx, ny, simuradius, simunoise, useplotsize):
+    input_mode, url, image_index, emdid, input_type = input
+    input_mode2, url2, image_index2, emdid2, input_type2 = input2
+    if input_mode2:
+        params=dict(input_mode=[input_mode, input_mode2])
+        if input_mode == 2:
+            params["emdid"] = [emdid, emdid2]
+        elif input_mode == 1:
+            params["url"] = [url, url2]
+            params["i"] = [image_index+1, image_index2+1 if image_index2 is not None else None]
+        if input_type in ["PS", "PD"] or input_type2 in ["PS", "PD"]:
+            params["inputtype"] = [input_type, input_type2]
+    else:
+        params=dict(input_mode=input_mode)        
         if input_mode == 2:
             params["emdid"] = emdid
         elif input_mode == 1:
             params["url"] = url
             params["i"] = image_index+1
-    if is_pwr: params["is_pwr"] = int(is_pwr)
+        if input_type in ["PS", "PD"]: params["inputtype"] = input_type
     params["show_pitch"] = int(show_pitch)
     if show_pitch:
         params["pitch"] = round(pitch,3)
@@ -509,17 +571,22 @@ def add_linked_crosshair_tool(figures):
     for fig in figures:
         fig.add_tools(crosshair)
 
-def obtain_input_image(column, args, query_params):
+def obtain_input_image(column, query_params, param_i=0):
+    from contextlib import suppress
+    supress_missing_values = suppress(KeyError, IndexError)
     with column:
         input_modes = {0:"upload", 1:"url", 2:"emd-xxxx"}
-        value = int(query_params["input_mode"][0]) if "input_mode" in query_params else args.input_mode
+        value = 1
+        with supress_missing_values: value = int(query_params["input_mode"][param_i])
         input_mode = st.radio(label="How to obtain the input image/map:", options=list(input_modes.keys()), format_func=lambda i:input_modes[i], index=value, key=next_key())
         is_3d = False
         if input_mode == 2:  # "emd-xxxx":
             label = "Input an EMDB ID (emd-xxxx):"
-            value = query_params["emdid"][0] if "emdid" in query_params else "emd-3567"
+            value = "emd-3567"
+            with supress_missing_values: value = query_params["emdid"][param_i]
             emdid = st.text_input(label=label, value=value, key=next_key())
             data_all, apix = get_emdb_map(emdid.strip())
+            image_index = 0
             is_3d = True
         else:
             if input_mode == 0:  # "upload a mrc/mrcs file":
@@ -530,13 +597,17 @@ def obtain_input_image(column, args, query_params):
                     st.stop()
             elif input_mode == 1:   # "url":
                     label = "Input a url of 2D image(s) or a 3D map:"
-                    value = query_params["url"][0] if "url" in query_params else data_example.url
+                    value = data_example.url
+                    with supress_missing_values: value = query_params["url"][param_i]
                     image_url = st.text_input(label=label, value=value, key=next_key())
                     data_all, apix = get_2d_image_from_url(image_url.strip())
             nz, ny, nx = data_all.shape
-            if nx==ny and (nz>nx//4 and nz%4==0): is_3d_auto = True
-            else: is_3d_auto = False
-            is_3d = st.checkbox(label=f"The input ({nx}x{ny}x{nz}) is a 3D map", value=is_3d_auto, key=next_key())
+            if nz==1:
+                is_3d = False
+            else:
+                if nx==ny and (nz>nx//4 and nz%4==0): is_3d_auto = True
+                else: is_3d_auto = False
+                is_3d = st.checkbox(label=f"The input ({nx}x{ny}x{nz}) is a 3D map", value=is_3d_auto, key=next_key())
         if is_3d:
             if not np.any(data_all):
                 st.warning("All voxels of the input 3D map have zero value")
@@ -555,10 +626,12 @@ def obtain_input_image(column, args, query_params):
             nz, ny, nx = data_all.shape
             if nz>1:
                 if len(nonzeros)==nz:
-                    value = int(query_params["i"][0]) if "i" in query_params else 1
+                    value = 1
+                    with supress_missing_values: value = int(query_params["i"][param_i])
                     image_index = st.slider(label=f"Choose an image (out of {nz}):", min_value=1, max_value=nz, value=value, step=1, key=next_key())
                 else:
-                    value = int(query_params["i"][0]) if "i" in query_params else nonzeros[0]+1
+                    value = nonzeros[0]+1
+                    with supress_missing_values: value = int(query_params["i"][param_i])
                     if value not in nonzeros: value = nonzeros[0]+1
                     image_index = st.select_slider(label=f"Choose an image ({len(nonzeros)} non-zero images out of {nz}):", options=list(nonzeros+1), value=value, key=next_key())
                 image_index -= 1
@@ -573,18 +646,30 @@ def obtain_input_image(column, args, query_params):
         ny, nx = data.shape
         original_image = st.empty()
         with original_image:
-            st.image(data, use_column_width=True, caption=f"Orignal image ({nx}x{ny})", clamp=True, key=next_key())
+            if is_3d:
+                image_label = f"Orignal image ({nx}x{ny})"
+            else:
+                image_label = f"Orignal image {image_index+1} ({nx}x{ny})"
+            st.image(normalize(data), use_column_width=True, caption=image_label, key=next_key())
 
         with st.beta_expander(label="Transform the image", expanded=False):
-            is_pwr_auto = guess_if_is_power_spectra(data)
-            is_pwr = st.checkbox(label="Input is power spectra ", value=is_pwr_auto, key=next_key())
-            if is_pwr:
-                apix = 0.5 * st.number_input('Nyquist res (Å)', value=2*apix, min_value=0.1, max_value=10., step=0.01, format="%.4f", key=next_key())
+            input_type_auto = None
+            with supress_missing_values: input_type_auto = query_params["inputtype"][param_i]
+            if input_type_auto is None:
+                is_pwr_auto = guess_if_is_power_spectra(data)
+                is_pd_auto = guess_if_is_phase_differences_across_meridian(data)
+                if is_pwr_auto: input_type_auto = "PS"
+                elif is_pd_auto: input_type_auto = "PD"
+                else: input_type_auto = "image"
+            mapping = {"image":0, "PS":1, "PD":2}
+            input_type = st.radio(label="Input is:", options="image PS PD".split(), index=mapping[input_type_auto], key=next_key())
+            if input_type in ["PS", "PD"]:
+                apix = 0.5 * st.number_input('Nyquist res (Å)', value=2*apix, min_value=0.1, max_value=30., step=0.01, format="%.4f", key=next_key())
             else:
-                apix = st.number_input('Pixel size (Å/pixel)', value=apix, min_value=0.1, max_value=10., step=0.01, format="%.4f", key=next_key())
+                apix = st.number_input('Pixel size (Å/pixel)', value=apix, min_value=0.1, max_value=30., step=0.01, format="%.4f", key=next_key())
             transpose_auto = input_mode not in [2] and nx > ny
             transpose = st.checkbox(label='Transpose the image', value=transpose_auto, key=next_key())
-            if is_pwr or is_3d:
+            if input_type in ["PS", "PD"] or is_3d:
                 angle_auto, dx_auto = 0., 0.
             else:
                 angle_auto, dx_auto = auto_vertical_center(data)
@@ -600,7 +685,7 @@ def obtain_input_image(column, args, query_params):
 
         mask_radius = 0
         radius_auto = 0
-        if not is_pwr:
+        if input_type in ["image"]:
             radius_auto, mask_radius_auto = estimate_radial_range(data, thresh_ratio=0.1)
             mask_radius = st.number_input('Mask radius (Å) ', value=mask_radius_auto*apix, min_value=1.0, max_value=nx/2*apix, step=1.0, format="%.1f", key=next_key())
 
@@ -641,9 +726,13 @@ def obtain_input_image(column, args, query_params):
         
         if transformed:
             with transformed_image:
-                st.image(data, use_column_width=True, caption="Transformed image", clamp=True, key=next_key())
+                if is_3d:
+                    image_label = f"Transformed image ({nx}x{ny})"
+                else:
+                    image_label = f"Transformed image {image_index+1} ({nx}x{ny})"
+                st.image(normalize(data), use_column_width=True, caption=image_label, key=next_key())
 
-        #if not is_pwr:
+        #if input_type in ["image"]:
         if 0:
             y = np.arange(-ny//2, ny//2)*apix
             xmax = np.max(data, axis=1)
@@ -670,10 +759,16 @@ def obtain_input_image(column, args, query_params):
 
     if transformed:
         image_container = transformed_image
-        image_label = "Transformed image"
+        if is_3d:
+            image_label = f"Transformed image"
+        else:
+            image_label = f"Transformed image {image_index}"
     else:
         image_container = original_image
-        image_label = "Original image"
+        if is_3d:
+            image_label = f"Original image"
+        else:
+            image_label = f"Original image {image_index}"
 
     if input_mode==2:
         input_params = (input_mode, (None, None, emdid))
@@ -681,7 +776,7 @@ def obtain_input_image(column, args, query_params):
         input_params = (input_mode, (None, image_url, None))
     else:
         input_params = (input_mode, (fileobj, None, None))
-    return data_all, image_index, data, apix, radius_auto, mask_radius, is_pwr, is_3d, input_params, (image_container, image_label)
+    return data_all, image_index, data, apix, radius_auto, mask_radius, input_type, is_3d, input_params, (image_container, image_label)
 
 @st.cache(persist=True, show_spinner=False)
 def bessel_n_image(ny, nx, nyquist_res_x, nyquist_res_y, radius, tilt):
@@ -775,7 +870,7 @@ def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m=
         return sx
 
     if not m:
-        m_max = int(np.floor(np.abs(rise/cutoff_res)))+2
+        m_max = int(np.floor(np.abs(rise/cutoff_res)))+3
         m = list(range(-m_max, m_max+1))
         m.sort(key=lambda x: (abs(x), x))   # 0, -1, 1, -2, 2, ...
     
@@ -811,18 +906,14 @@ def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m=
 
 @st.cache(persist=True, show_spinner=False)
 def compute_phase_difference_across_meridian(phase):
-    ny, nx = phase.shape
-    if nx%2:
-        phase_diff = phase - phase[:, ::-1]
-    else:
-        phase_diff = phase * 1.0
-        phase_diff[:, 0] = np.pi/2
-        phase_diff[:, 1:] -= phase_diff[:, 1:][:, ::-1]
+    # https://numpy.org/doc/stable/reference/generated/numpy.fft.fftfreq.html
+    phase_diff = phase * 0
+    phase_diff[..., 1:] = phase[..., 1:] - phase[..., 1:][..., ::-1]
     phase_diff = np.rad2deg(np.arccos(np.cos(phase_diff)))   # set the range to [0, 180]. 0 -> even order, 180 - odd order
     return phase_diff
 
 @st.cache(persist=True, show_spinner=False)
-def resize_rescale_power_spectra(data, nyquist_res, cutoff_res=None, output_size=None, log=True, low_pass_fraction=0, high_pass_fraction=0):
+def resize_rescale_power_spectra(data, nyquist_res, cutoff_res=None, output_size=None, log=True, low_pass_fraction=0, high_pass_fraction=0, norm=1):
     from scipy.ndimage.interpolation import map_coordinates
     ny, nx = data.shape
     ony, onx = output_size
@@ -834,7 +925,7 @@ def resize_rescale_power_spectra(data, nyquist_res, cutoff_res=None, output_size
     if log: pwr = np.log(np.abs(pwr))
     if 0<low_pass_fraction<1 or 0<high_pass_fraction<1:
         pwr = low_high_pass_filter(pwr, low_pass_fraction=low_pass_fraction, high_pass_fraction=high_pass_fraction)
-    pwr = normalize(pwr, percentile=(0, 100))
+    if norm: pwr = normalize(pwr, percentile=(0, 100))
     return pwr
 
 @st.cache(persist=True, show_spinner=False)
@@ -953,7 +1044,7 @@ def auto_vertical_center(image):
         err = -np.sum(y_values)
         return err
     from scipy.optimize import minimize_scalar
-    res = minimize_scalar(score_rotation, bounds=(-90, 90), method='bounded')
+    res = minimize_scalar(score_rotation, bounds=(-90, 90), method='bounded', options={'disp':0})
     angle = res.x
 
     # further refine rotation
@@ -971,7 +1062,7 @@ def auto_vertical_center(image):
         err /= len(tmps) * image_work.size
         return err
     from scipy.optimize import fmin
-    res = fmin(score_rotation_shift, x0=(angle, 0, 0), xtol=1e-2)
+    res = fmin(score_rotation_shift, x0=(angle, 0, 0), xtol=1e-2, disp=0)
     angle = res[0]  # dy, dx are not robust enough
 
     # refine dx 
@@ -991,7 +1082,7 @@ def auto_vertical_center(image):
         tmp = f(x_tmp)
         err = np.sum(np.abs(tmp-tmp[::-1]))
         return err
-    res = minimize_scalar(score_shift, bounds=(-max_shift, max_shift), method='bounded')
+    res = minimize_scalar(score_shift, bounds=(-max_shift, max_shift), method='bounded', options={'disp':0})
     dx = res.x + (0.0 if n%2 else 0.5)
     return angle, dx
 
@@ -1003,7 +1094,7 @@ def rotate_shift_image(data, angle=0, pre_shift=(0, 0), post_shift=(0, 0), rotat
     if rotation_center is None:
         rotation_center = np.array((ny//2, nx//2), dtype=np.float32)
     ang = np.deg2rad(angle)
-    m = np.array([[np.cos(ang), -np.sin(ang)], [np.sin(ang), np.cos(ang)]], dtype=np.float32)
+    m = np.array([[np.cos(ang), np.sin(ang)], [-np.sin(ang), np.cos(ang)]], dtype=np.float32)
     pre_dy, pre_dx = pre_shift    
     post_dy, post_dx = post_shift
 
@@ -1058,6 +1149,17 @@ def nonzero_images(data, thresh_ratio=1e-3):
         return nonzeros
     else:
         None
+
+@st.cache(persist=True, show_spinner=False)
+def guess_if_is_phase_differences_across_meridian(data, err=30):
+    if np.any(data[:, 0]):
+        return False
+    if not (data.min()==0 and (0<=180-data.max()<err)):
+        return False
+    sym_diff = data[:, 1:] - data[:, 1:][:, ::-1]
+    if np.any(sym_diff):
+        return False
+    return True
 
 @st.cache(persist=True, show_spinner=False)
 def guess_if_is_power_spectra(data, thresh=15):
@@ -1132,9 +1234,12 @@ def next_key():
 import itertools
 next_key.counter = itertools.count()
 
-@st.cache(suppress_st_warning=True)
-def show_initial_message(message=""):
-    if message: st.warning(body=message)
+@st.cache(persist=True, show_spinner=False)
+def set_initial_query_params(query_string):
+    if len(query_string)<1: return
+    from urllib.parse import parse_qs
+    d = parse_qs(query_string)
+    st.experimental_set_query_params(**d)
 
 @st.cache(persist=True, show_spinner=False)
 def setup_anonymous_usage_tracking():
@@ -1283,9 +1388,7 @@ if __name__ == "__main__":
     setup_anonymous_usage_tracking()
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input_mode", metavar="<n>", choices=(0,1,2), type=int, help="input mode (0, 1, 2). default: %(default)s", default=1)
-    parser.add_argument("--input_is_power", metavar="<0|1>", choices=(0,1), type=int, help="if the input is power spectra. default: %(default)s", default=0)
-    parser.add_argument("--message", metavar="<str>", type=str, help="initial message. default: %(default)s", default="")
+    parser.add_argument("--query_string", metavar="<str>", type=str, help="set initial url query params from this string. default: %(default)s", default="")
     args = parser.parse_args()
 
     state = get_state(hash_funcs={})
