@@ -1263,7 +1263,7 @@ def next_key():
 import itertools
 next_key.counter = itertools.count()
 
-@st.cache(persist=True, show_spinner=False)
+@st.cache(persist=False, show_spinner=False)
 def set_initial_query_params(query_string):
     if len(query_string)<1: return
     from urllib.parse import parse_qs
