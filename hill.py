@@ -22,6 +22,21 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
+def import_with_auto_install(packages, scope=locals()):
+    for package in packages:
+        if package.find(":")!=-1:
+            package_import_name, package_pip_name = package.split(":")
+        else:
+            package_import_name, package_pip_name = package, package
+        try:
+            scope[package_import_name] = __import__(package_import_name)
+        except ImportError:
+            import subprocess
+            subprocess.call(f'pip install {package_pip_name}', shell=True)
+            scope[package_import_name] =  __import__(package_import_name)
+required_packages = "streamlit numpy scipy bokeh skimage:scikit_image mrcfile finufft moviepy selenium streamlit_bokeh_events".split()
+import_with_auto_install(required_packages)
+
 import streamlit as st
 import numpy as np
 from bokeh.plotting import figure
@@ -61,7 +76,7 @@ def main(args, state):
         value = True if "input_mode" in query_params and len(query_params["input_mode"])==2 else False
         input_image2 = st.checkbox(label=label, value=value)        
         if input_image2:
-            _, image_index2, data2, apix2, radius_auto2, mask_radius2, input_type2, is_3d2, input_params2, _ = obtain_input_image(col1, query_params, param_i=1)
+            _, image_index2, data2, apix2, radius_auto2, mask_radius2, input_type2, is_3d2, input_params2, _ = obtain_input_image(col1, query_params, param_i=1, image_index_sync=image_index+1)
             input_mode2, (uploaded_filename2, url2, emdid2) = input_params2
         else:
             image_index2, data2, apix2, radius_auto2, mask_radius2, input_type2, is_3d2 = [None] * 7
@@ -86,9 +101,9 @@ def main(args, state):
         helical_radius = st.number_input('Radius (Å)', value=value, min_value=1.0, max_value=1000.0, step=10., format="%.1f")
         
         tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-90.0, max_value=90.0, step=1.0)
-        value = max(round(3*apix, 1), float(query_params["resx"][0]) if "resx" in query_params else round(3*apix, 1))
+        value = max(round(3*apix, 1), float(query_params["resx"][0]) if "resx" in query_params else round(8*apix, 1))
         cutoff_res_x = st.number_input('Resolution limit - X (Å)', value=value, min_value=2*apix, step=1.0)
-        value = max(round(3*apix, 1), float(query_params["resy"][0]) if "resy" in query_params else round(3*apix, 1))
+        value = max(round(3*apix, 1), float(query_params["resy"][0]) if "resy" in query_params else round(4*apix, 1))
         cutoff_res_y = st.number_input('Resolution limit - Y (Å)', value=value, min_value=2*apix, step=1.0)
         with st.beta_expander(label="Filters", expanded=False):
             log_xform = st.checkbox(label="Log(amplitude)", value=True)
@@ -571,7 +586,7 @@ def add_linked_crosshair_tool(figures):
     for fig in figures:
         fig.add_tools(crosshair)
 
-def obtain_input_image(column, query_params, param_i=0):
+def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
     from contextlib import suppress
     supress_missing_values = suppress(KeyError, IndexError)
     with column:
@@ -626,14 +641,28 @@ def obtain_input_image(column, query_params, param_i=0):
             nz, ny, nx = data_all.shape
             if nz>1:
                 if len(nonzeros)==nz:
-                    value = 1
-                    with supress_missing_values: value = int(query_params["i"][param_i])
-                    image_index = st.slider(label=f"Choose an image (out of {nz}):", min_value=1, max_value=nz, value=value, step=1, key=next_key())
+                    if param_i>0:
+                        value = 1
+                        with supress_missing_values: value = int(query_params["sync_i"][0])
+                        sync_i = st.checkbox(label=f"Sync image index", value=value, key=next_key())
+                    if param_i>0 and sync_i:
+                        image_index = image_index_sync
+                    else:
+                        value = 1
+                        with supress_missing_values: value = int(query_params["i"][param_i])
+                        image_index = st.slider(label=f"Choose an image (out of {nz}):", min_value=1, max_value=nz, value=value, step=1, key=next_key())
                 else:
-                    value = nonzeros[0]+1
-                    with supress_missing_values: value = int(query_params["i"][param_i])
-                    if value not in nonzeros: value = nonzeros[0]+1
-                    image_index = st.select_slider(label=f"Choose an image ({len(nonzeros)} non-zero images out of {nz}):", options=list(nonzeros+1), value=value, key=next_key())
+                    if param_i>0:
+                        value = 1
+                        with supress_missing_values: value = int(query_params["sync_i"][0])
+                        sync_i = st.checkbox(label=f"Sync image index", value=value, key=next_key())
+                    if param_i>0 and sync_i:
+                        image_index = image_index_sync
+                    else:
+                        value = nonzeros[0]+1
+                        with supress_missing_values: value = int(query_params["i"][param_i])
+                        if value not in nonzeros: value = nonzeros[0]+1
+                        image_index = st.select_slider(label=f"Choose an image ({len(nonzeros)} non-zero images out of {nz}):", options=list(nonzeros+1), value=value, key=next_key())
                 image_index -= 1
             else:
                 image_index = 0
@@ -654,7 +683,7 @@ def obtain_input_image(column, query_params, param_i=0):
 
         with st.beta_expander(label="Transform the image", expanded=False):
             input_type_auto = None
-            with supress_missing_values: input_type_auto = query_params["inputtype"][param_i]
+            with supress_missing_values: input_type_auto = query_params["input_type"][param_i]
             if input_type_auto is None:
                 is_pwr_auto = guess_if_is_power_spectra(data)
                 is_pd_auto = guess_if_is_phase_differences_across_meridian(data)
