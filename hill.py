@@ -538,8 +538,8 @@ def create_image_figure(data, cutoff_res_x, cutoff_res_y, helical_radius, tilt, 
     ny, nx = data.shape
     dsy = 1/(ny//2*cutoff_res_y)
     dsx = 1/(nx//2*cutoff_res_x)
-    x_range = (-nx//2*dsx, nx//2*dsx)
-    y_range = (-ny//2*dsy, ny//2*dsy)
+    x_range = (-(nx//2+0.5)*dsx, (nx//2-0.5)*dsx)
+    y_range = (-(ny//2+0.5)*dsy, (ny//2-0.5)*dsy)
 
     bessel = bessel_n_image(ny, nx, cutoff_res_x, cutoff_res_y, helical_radius, tilt).astype(np.int16)
 
@@ -947,9 +947,9 @@ def resize_rescale_power_spectra(data, nyquist_res, cutoff_res=None, output_size
     ny, nx = data.shape
     ony, onx = output_size
     res_y, res_x = cutoff_res
-    Y, X = np.meshgrid(np.arange(ony, dtype=np.float32)-ony//2, np.arange(onx, dtype=np.float32)-onx//2, indexing='ij')
-    Y = Y/(ony//2) * nyquist_res/res_y * ny//2 + ny//2
-    X = X/(onx//2) * nyquist_res/res_x * nx//2 + nx//2
+    Y, X = np.meshgrid(np.arange(ony, dtype=np.float32)-(ony//2+0.5), np.arange(onx, dtype=np.float32)-(onx//2+0.5), indexing='ij')
+    Y = Y/(ony//2+0.5) * nyquist_res/res_y * ny//2 + ny//2+0.5
+    X = X/(onx//2+0.5) * nyquist_res/res_x * nx//2 + nx//2+0.5
     pwr = map_coordinates(data, (Y.flatten(), X.flatten()), order=3, mode='constant').reshape(Y.shape)
     if log: pwr = np.log(np.abs(pwr))
     if 0<low_pass_fraction<1 or 0<high_pass_fraction<1:
