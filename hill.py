@@ -23,6 +23,7 @@ SOFTWARE.
 """
 
 def import_with_auto_install(packages, scope=locals()):
+    if isinstance(packages, str): packages=[packages]
     for package in packages:
         if package.find(":")!=-1:
             package_import_name, package_pip_name = package.split(":")
@@ -45,7 +46,7 @@ from bokeh.models import HoverTool, CrosshairTool
 from bokeh.events import MouseMove, DoubleTap
 from bokeh.layouts import gridplot
 
-def main(args, state):
+def main(args):
     title = "HILL: Helical Indexing using Layer Lines"
     st.set_page_config(page_title=title, layout="wide")
     st.title(title)
@@ -85,12 +86,15 @@ def main(args, state):
         st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to Wen Jiang (jiang12 at purdue.edu)*")
 
     with col2:
+        copy_pitch_rise = st.button(label="Copy pitch/rise from sliders")
         pitch_or_twist_number_input = st.empty()
         pitch_or_twist_text = st.empty()
         rise_empty = st.empty()
-        value = state.rise or (float(query_params["rise"][0]) if "rise" in query_params else data_example.rise)
-        state.rise = rise_empty.number_input('Rise (Å)', value=value, min_value=-180.0, max_value=180.0, step=1.0, format="%.3f")
-        rise = state.rise
+        ny, nx = data.shape
+        max_pitch = max(2000., max(ny, nx)*apix * 2.0)
+        max_rise = max_pitch
+        value = min(max_rise, float(query_params["rise"][0]) if "rise" in query_params else data_example.rise)
+        rise = rise_empty.number_input('Rise (Å)', value=value, min_value=-180.0, max_value=max_rise, step=1.0, format="%.3f")
         value = int(query_params["csym"][0]) if "csym" in query_params else data_example.csym
         csym = st.number_input('Csym', value=value, min_value=1, max_value=16, step=1)
 
@@ -101,15 +105,14 @@ def main(args, state):
         helical_radius = st.number_input('Radius (Å)', value=value, min_value=1.0, max_value=1000.0, step=10., format="%.1f")
         
         tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-90.0, max_value=90.0, step=1.0)
-        value = max(round(3*apix, 1), float(query_params["resx"][0]) if "resx" in query_params else round(8*apix, 1))
+        value = max(2*apix, float(query_params["resx"][0]) if "resx" in query_params else round(8*apix, 1))
         cutoff_res_x = st.number_input('Resolution limit - X (Å)', value=value, min_value=2*apix, step=1.0)
-        value = max(round(3*apix, 1), float(query_params["resy"][0]) if "resy" in query_params else round(4*apix, 1))
+        value = max(2*apix, float(query_params["resy"][0]) if "resy" in query_params else round(4*apix, 1))
         cutoff_res_y = st.number_input('Resolution limit - Y (Å)', value=value, min_value=2*apix, step=1.0)
         with st.beta_expander(label="Filters", expanded=False):
             log_xform = st.checkbox(label="Log(amplitude)", value=True)
             hp_fraction = st.number_input('Fourier high-pass (%)', value=0.4, min_value=0.0, max_value=100.0, step=0.1, format="%.2f") / 100.0
             lp_fraction = st.number_input('Fourier low-pass (%)', value=0.0, min_value=0.0, max_value=100.0, step=10.0, format="%.2f") / 100.0
-            ny, nx = data.shape
             value = int(query_params["nx"][0]) if "nx" in query_params else max(min(nx,ny), 512)
             pnx = st.number_input('FFT X-dim size (pixels)', value=value, min_value=min(nx, 128), step=2)
             value = int(query_params["ny"][0]) if "ny" in query_params else max(min(nx,ny), 1024)
@@ -141,10 +144,6 @@ def main(args, state):
                         movie_mode = 1
                     if movie_mode == 0:
                         movie_noise = st.number_input('Noise (sigma)', value=0., min_value=0., step=1., format="%.2f", key=next_key())
-
-        with st.beta_expander(label="Other settings", expanded=False):
-            set_url = st.button(label="Update Browser URL")
-            bi_directional_empty = st.empty()
         
     if input_type in ["PS"]:
         pwr = resize_rescale_power_spectra(data, nyquist_res=2*apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
@@ -186,21 +185,17 @@ def main(args, state):
         value = int(query_params["show_pitch"][0]) if "show_pitch" in query_params else True
         show_pitch = st.checkbox(label="Pitch", value=value)
         if show_pitch:
-            value = state.pitch or (float(query_params["pitch"][0]) if "pitch" in query_params else data_example.pitch)
-            state.pitch = pitch_or_twist_number_input.number_input('Pitch (Å)', value=value, min_value=1.0, max_value=max(pny,pnx)*apix, step=1.0, format="%.2f")
-            pitch = state.pitch
+            value = min(max_pitch, float(query_params["pitch"][0]) if "pitch" in query_params else data_example.pitch)
+            pitch = pitch_or_twist_number_input.number_input('Pitch (Å)', value=value, min_value=1.0, max_value=max_pitch, step=1.0, format="%.2f")
             if pitch < cutoff_res_y:
                 st.warning(f"pitch is too small. it should be > {cutoff_res_y} (Limit FFT X-dim to resolution (Å))")
                 return
             twist = 360./(pitch/rise)
-            state.twist = twist
             pitch_or_twist_text.markdown(f"*(twist = {twist:.2f} °)*")
         else:
-            value = state.twist or (float(query_params["twist"][0]) if "twist" in query_params else data_example.twist)
-            state.twist = pitch_or_twist_number_input.number_input('Twist (°)', value=value, min_value=-180.0, max_value=180.0, step=1.0, format="%.2f")
-            twist = state.twist
+            value = float(query_params["twist"][0]) if "twist" in query_params else data_example.twist
+            twist = pitch_or_twist_number_input.number_input('Twist (°)', value=value, min_value=-180.0, max_value=180.0, step=1.0, format="%.2f")
             pitch = (360./twist)*rise
-            state.pitch = pitch
             pitch_or_twist_text.markdown(f"*(pitch = {pitch:.2f} Å)*")
 
         show_pwr = False
@@ -250,9 +245,8 @@ def main(args, state):
             show_pseudocolor = st.checkbox(label="Color", value=True)
             show_LL = st.checkbox(label="LL", value=True)
             if show_LL:
-                value = bool(query_params["lltext"][0]) if "lltext" in query_params else False
+                value = bool(query_params["lltext"][0]) if "lltext" in query_params else True
                 show_LL_text = st.checkbox(label="LL-Text", value=value)
-                bi_directional = bi_directional_empty.checkbox(label="Update pitch/rise from plot", value=True)
                 m_groups = compute_layer_line_positions(twist=twist, rise=rise, csym=csym, radius=helical_radius, tilt=tilt, cutoff_res=cutoff_res_y)
                 ng = len(m_groups)
                 st.subheader("m=")
@@ -364,8 +358,8 @@ def main(args, state):
 
         if fig_ellipses:
             from bokeh.models import Slider, CustomJS
-            slider_pitch = Slider(start=0.0, end=pitch*2.0, value=pitch, step=.01, title="Pitch (Å)", width=pnx)
-            slider_rise = Slider(start=0.0, end=rise*2.0, value=rise, step=.01, title="Rise (Å)", width=pnx)
+            slider_pitch = Slider(start=0.0, end=min(max_pitch, pitch*2.0), value=pitch, step=.01, title="Pitch (Å)", width=pnx)
+            slider_rise = Slider(start=0.0, end=min(max_rise, rise*2.0), value=rise, step=.01, title="Rise (Å)", width=pnx)
             callback_code = """
                 var pitch_inv = 1./slider_pitch.value
                 var rise_inv = 1./slider_rise.value
@@ -378,15 +372,38 @@ def main(args, state):
                         const n = ns[i]
                         y[i] = m * rise_inv + n * pitch_inv
                     }
-                    ellipses.data_source.change.emit();
+                    ellipses.data_source.change.emit()
                 }
-                document.dispatchEvent(
-                    new CustomEvent("HelicalParametersChanged", {detail: {pitch: slider_pitch.value, rise: slider_rise.value}})
-                )
             """
             callback = CustomJS(args=dict(fig_ellipses=fig_ellipses, slider_pitch=slider_pitch, slider_rise=slider_rise), code=callback_code)
             slider_pitch.js_on_change('value', callback)
             slider_rise.js_on_change('value', callback)
+            callback_code = """
+                let url = new URL(document.location)
+                let params = url.searchParams
+                params.set("pitch", Math.round(slider_pitch.value*100.)/100.)
+                params.set("rise", Math.round(slider_rise.value*100.)/100.)
+                //document.location = url.href
+                history.replaceState({}, document.title, url.href)
+                if (reload) {
+                    var class_names = ["streamlit-button small-button primary-button ", "css-2trqyj edgvbvh1"]
+                    console.log(class_names)
+                    var i
+                    for (i=0; i<class_names.length; i++) {
+                        console.log(i, class_names[i])
+                        let reload_buttons = document.getElementsByClassName(class_names[i])
+                        console.log(reload_buttons)
+                        if (reload_buttons.length>0) {
+                            reload_buttons[0].click()
+                            break
+                        }
+                    }
+                }
+            """
+            reload = input_mode in [1, 2] and input_mode2 in [None, 1, 2]
+            callback = CustomJS(args=dict(slider_pitch=slider_pitch, slider_rise=slider_rise, reload=reload), code=callback_code)
+            slider_pitch.js_on_change('value_throttled', callback)
+            slider_rise.js_on_change('value_throttled', callback)
             if len(figs)==1:
                 from bokeh.layouts import column
                 figs[0].toolbar_location="right"
@@ -401,25 +418,7 @@ def main(args, state):
             figs_grid = gridplot(children=[figs], toolbar_location='right')
             override_height = pny+120
 
-        if show_LL and bi_directional:
-            from streamlit_bokeh_events import streamlit_bokeh_events
-            bokeh_events = streamlit_bokeh_events(
-                bokeh_plot=figs_grid,
-                events="HelicalParametersChanged",
-                refresh_on_update=True,
-                override_height=override_height,
-                debounce_time=2000,
-                key=next_key())
-            if bokeh_events:
-                if bokeh_events.get("HelicalParametersChanged"):
-                    pitch = float(bokeh_events.get("HelicalParametersChanged")["pitch"])
-                    rise = float(bokeh_events.get("HelicalParametersChanged")["rise"])
-                    twist = 360./(pitch/rise)
-                    state.pitch = pitch
-                    state.twist = twist
-                    state.rise = rise
-        else:
-            st.bokeh_chart(figs_grid, use_container_width=False)
+        st.bokeh_chart(figs_grid, use_container_width=False)
 
         if movie_frames>0:
             with st.spinner(text="Generating movie of tilted power spectra/phases ..."):
@@ -436,10 +435,9 @@ def main(args, state):
                 movie_filename = create_movie(movie_frames, tilt, params, pny, pnx, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudocolor, log_xform, lp_fraction, hp_fraction)
                 st.video(movie_filename) # it always show the video using the entire column width
 
-    if set_url:
-        input = (input_mode, url, image_index, emdid, input_type)
-        input2 = (input_mode2, url2, image_index2, emdid2, input_type2)
-        set_query_params(input, input2, show_pitch, pitch, twist, rise, csym, helical_radius, show_LL_text, cutoff_res_x, cutoff_res_y, pnx, pny, ball_radius, noise, use_plot_size)
+    input = (input_mode, url, image_index, emdid, input_type)
+    input2 = (input_mode2, url2, image_index2, emdid2, input_type2)
+    set_query_params(input, input2, show_pitch, pitch, twist, rise, csym, helical_radius, show_LL_text, cutoff_res_x, cutoff_res_y, pnx, pny, ball_radius, noise, use_plot_size)
 
 def set_query_params(input, input2, show_pitch, pitch, twist, rise, csym, helical_radius, show_LL_text, cutoff_res_x, cutoff_res_y, nx, ny, simuradius, simunoise, useplotsize):
     input_mode, url, image_index, emdid, input_type = input
@@ -452,7 +450,7 @@ def set_query_params(input, input2, show_pitch, pitch, twist, rise, csym, helica
             params["url"] = [url, url2]
             params["i"] = [image_index+1, image_index2+1 if image_index2 is not None else None]
         if input_type in ["PS", "PD"] or input_type2 in ["PS", "PD"]:
-            params["inputtype"] = [input_type, input_type2]
+            params["input_type"] = [input_type, input_type2]
     else:
         params=dict(input_mode=input_mode)        
         if input_mode == 2:
@@ -460,14 +458,14 @@ def set_query_params(input, input2, show_pitch, pitch, twist, rise, csym, helica
         elif input_mode == 1:
             params["url"] = url
             params["i"] = image_index+1
-        if input_type in ["PS", "PD"]: params["inputtype"] = input_type
+        if input_type in ["PS", "PD"]: params["input_type"] = input_type
     params["show_pitch"] = int(show_pitch)
     if show_pitch:
         params["pitch"] = round(pitch,3)
     else:
         params["twist"] = round(twist,3)
     params.update(dict(rise=round(rise,3), csym=csym, helicalradius=round(helical_radius,1), resx=round(cutoff_res_x,2), resy=round(cutoff_res_y,2)), nx=nx, ny=ny)
-    if show_LL_text: params["lltext"] = 1
+    if not show_LL_text: params["lltext"] = 0
     if simuradius>0: params["simuradius"] = simuradius
     if simunoise>0: params["simunoise"] = simunoise
     if useplotsize: params["useplotsize"] = 1
@@ -1286,133 +1284,6 @@ def setup_anonymous_usage_tracking():
     except:
         pass
 
-# start streamlit session state
-# from https://gist.github.com/ash2shukla/ff180d7fbe8ec3a0240f19f4452acde7
-
-from streamlit.report_thread import get_report_ctx
-from streamlit.hashing import _CodeHasher
-from streamlit.server.server import Server
-from prometheus_client.registry import REGISTRY
-from prometheus_client import Counter
-
-
-class _SessionState:
-    def __init__(self, session, hash_funcs):
-        """Initialize SessionState instance."""
-        self.__dict__["_state"] = {
-            "data": {},
-            "hash": None,
-            "hasher": _CodeHasher(hash_funcs),
-            "is_rerun": False,
-            "session": session,
-        }
-
-    def __call__(self, **kwargs):
-        """Initialize state data once."""
-        for item, value in kwargs.items():
-            if item not in self._state["data"]:
-                self._state["data"][item] = value
-
-    def __getitem__(self, item):
-        """Return a saved state value, None if item is undefined."""
-        return self._state["data"].get(item, None)
-
-    def __getattr__(self, item):
-        """Return a saved state value, None if item is undefined."""
-        return self._state["data"].get(item, None)
-
-    def __setitem__(self, item, value):
-        """Set state value."""
-        self._state["data"][item] = value
-
-    def __setattr__(self, item, value):
-        """Set state value."""
-        self._state["data"][item] = value
-
-    def clear(self):
-        """Clear session state and request a rerun."""
-        self._state["data"].clear()
-        self._state["session"].request_rerun()
-
-    def sync(self):
-        """Rerun the app with all state values up to date from the beginning to fix rollbacks."""
-
-        # Ensure to rerun only once to avoid infinite loops
-        # caused by a constantly changing state value at each run.
-        #
-        # Example: state.value += 1
-        if self._state["is_rerun"]:
-            self._state["is_rerun"] = False
-
-        elif self._state["hash"] is not None:
-            if self._state["hash"] != self._state["hasher"].to_bytes(
-                self._state["data"], None
-            ):
-                self._state["is_rerun"] = True
-                self._state["session"].request_rerun()
-
-        self._state["hash"] = self._state["hasher"].to_bytes(self._state["data"], None)
-
-
-def _get_session():
-    session_id = get_report_ctx().session_id
-    session_info = Server.get_current()._get_session_info(session_id)
-
-    if session_info is None:
-        raise RuntimeError("Couldn't get your Streamlit Session object.")
-
-    return session_info.session
-
-def get_state(hash_funcs=None):
-    session = _get_session()
-
-    if not hasattr(session, "_custom_session_state"):
-        session._custom_session_state = _SessionState(session, hash_funcs)
-    return session._custom_session_state
-
-
-def _get_names(collector_name, collector_type):
-        result = []
-        type_suffixes = {
-            'counter': ['_total', '_created'],
-            'summary': ['_sum', '_count', '_created'],
-            'histogram': ['_bucket', '_sum', '_count', '_created'],
-            'gaugehistogram': ['_bucket', '_gsum', '_gcount'],
-            'info': ['_info'],
-        }
-        for suffix in type_suffixes.get(collector_type, []):
-            result.append(collector_name + suffix)
-        return result
-
-
-def get_or_create_metric(metric_type, *, name, **kwargs):
-    names =  _get_names(name, metric_type.__name__.lower())
-    if any(name in REGISTRY._names_to_collectors for name in names):
-        return REGISTRY._names_to_collectors[names[0]]
-    else:
-        return metric_type(name=name, **kwargs)
-
-
-
-def provide_state(func):
-    def wrapper(*args, **kwargs):
-        state = get_state(hash_funcs={})
-        count_sessions()
-        return_value = func(state=state, *args, **kwargs)
-        state.sync()
-        return return_value
-
-    return wrapper
-
-def count_sessions():
-    state = get_state(hash_funcs={})
-    session_counter = get_or_create_metric(Counter, name='session_count', documentation='Unique Sessions')
-
-    if not state._is_session_reused:
-        session_counter.inc()
-        state._is_session_reused = True
-# end streamlit session state
-
 if __name__ == "__main__":
     setup_anonymous_usage_tracking()
     import argparse
@@ -1420,6 +1291,4 @@ if __name__ == "__main__":
     parser.add_argument("--query_string", metavar="<str>", type=str, help="set initial url query params from this string. default: %(default)s", default="")
     args = parser.parse_args()
 
-    state = get_state(hash_funcs={})
-    main(args, state)
-    state.sync()
+    main(args)
