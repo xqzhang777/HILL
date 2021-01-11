@@ -27,6 +27,7 @@ SOFTWARE.
 import sys, pathlib, math
 
 def import_with_auto_install(packages, scope=locals()):
+    if isinstance(packages, str): packages=[packages]
     for package in packages:
         if package.find(":")!=-1:
             package_import_name, package_pip_name = package.split(":")
@@ -52,8 +53,14 @@ def main():
     if "apix" not in data:
         with mrcfile.open(data["filename"].iloc[0], mode=u'r', header_only=True) as mrc:
             data.loc[:, "apix"] = mrc.voxel_size.x
-        if abs(args.verbose)>0:
-            print(f"Sampling: {data['apix'].iloc[0]:.4f} (from image header)")
+    args.apix = data['apix'].iloc[0]
+    if abs(args.verbose)>0:
+        print(f"Sampling: {args.apix:.4f}")
+
+    if args.cutoffRes < args.apix * 2.0:
+        args.cutoffRes = args.apix * 2.0
+    if abs(args.verbose)>0:
+        print(f"Cutoff resolution: {args.cutoffRes:.4f}")
 
     if not args.groupby:
         if "phi0" in data:
@@ -72,11 +79,6 @@ def main():
                 args.groupby.append("filename")
             required_attrs += ["phi0"]
         required_attrs += args.groupby
-    if args.cutoffRes < data["apix"].iloc[0] * 2.0:
-        args.cutoffRes = data["apix"].iloc[0] * 2.0
-        if abs(args.verbose)>0:
-            print(f"Cutoff resolution: set to {args.cutoffRes:.4f}")
-
     missing_attrs = [attr for attr in required_attrs if attr not in data]
     if missing_attrs:
         print(f"ERROR: parameters '{' '.join(missing_attrs)}'' are not available. available parameters are '{' '.join(data)}''")
@@ -121,10 +123,13 @@ def main():
 
     from joblib import Parallel, delayed
     fftavgs = Parallel(n_jobs=args.cpu, verbose=max(0, abs(args.verbose)-2), prefer="processes")(
-        delayed(averageOneBatch)(batch, group_id, compute_phase_differences, args.diameter, args.cutoffRes, args.padX, args.padY, args.align, args.verbose) for batch, group_id in particle_subsets(groups))
-
-    outputPrefix = args.outputPrefix
-    outputLstFile = outputPrefix+".lst"
+        delayed(averageOneBatch)(batch, group_id, compute_phase_differences, args.diameterMask, args.cutoffRes, args.fftX, args.fftY, args.align, args.verbose) for batch, group_id in particle_subsets(groups))
+    
+    if args.verbose>0 and len(fftavgs)>1:
+        print(f"Combining results of {len(fftavgs)} tasks")
+    
+    outputPrefix = args.outputPrefix or pathlib.Path(args.inputImage).stem
+    outputLstFile = outputPrefix+ (".ps-pd.lst" if compute_phase_differences else ".ps.lst")
     psFile = outputPrefix+".ps.mrcs"    # power spectra
 
     if compute_phase_differences:
@@ -132,10 +137,10 @@ def main():
     else:
         pdFile = None
 
-    mrc_ps = mrcfile.new_mmap(psFile, shape=(len(groups), args.padY, args.padX), mrc_mode=2, overwrite=True)
+    mrc_ps = mrcfile.new_mmap(psFile, shape=(len(groups), args.fftY, args.fftX), mrc_mode=2, overwrite=True)
     mrc_ps.voxel_size = args.cutoffRes/2
     if compute_phase_differences:
-        mrc_pd = mrcfile.new_mmap(pdFile, shape=(len(groups), args.padY, args.padX), mrc_mode=2, overwrite=True)
+        mrc_pd = mrcfile.new_mmap(pdFile, shape=(len(groups), args.fftY, args.fftX), mrc_mode=2, overwrite=True)
         mrc_pd.voxel_size = args.cutoffRes/2
     else:
         mrc_pd = None
@@ -185,7 +190,7 @@ def main():
             print(f"{len(groups)} power spectra images saved to {outputLstFile}")
 
     if args.showPlot:
-        params = {"sync_i":1}
+        params = {}
         if pdFile:
             params["input_mode"] = [1, 1]
             params["url"] = [pathlib.Path(pdFile).absolute(), pathlib.Path(psFile).absolute()]
@@ -194,6 +199,13 @@ def main():
             params["input_mode"] = [1]
             params["url"] = [pathlib.Path(psFile).absolute()]
             params["input_type"] = ["PS"]
+        params["sync_i"] = 1
+        if args.diameterMask>0:
+            params["radius"] = round(args.diameterMask/2 * 0.9)
+        if args.cutoffRes>args.apix*2:
+            params["resx"] = args.cutoffRes * 1.5
+            params["resy"] = args.cutoffRes
+
         query_string = get_query_string(params)
         code_path = pathlib.Path(__file__).parent / "hill.py"
         if code_path.exists():
@@ -206,7 +218,7 @@ def main():
         print(cmd)
         subprocess.call(cmd, shell=True)
 
-def averageOneBatch(mgraphs, group_id, compute_phase_differences, diameter, cutoff_res, pad_nx, pad_ny, align, verbose):
+def averageOneBatch(mgraphs, group_id, compute_phase_differences, diameterMask, cutoff_res, pad_nx, pad_ny, align, verbose):
     nPtcls = sum([len(m[1]) for m in mgraphs])
     if verbose>0:
         gi, bi, _, ng, nb = group_id
@@ -231,8 +243,8 @@ def averageOneBatch(mgraphs, group_id, compute_phase_differences, diameter, cuto
                 else:
                     data_in = data_orig
             if tapering_filter is None:
-                if diameter > 0:
-                    fraction_x = diameter/apix / nx
+                if diameterMask > 0:
+                    fraction_x = diameterMask/apix / nx
                 else:
                     fraction_x = 0.9
                 tapering_filter = generate_tapering_filter(image_size=(ny, nx), fraction_start=[0.9, fraction_x], fraction_slope=0.1)
@@ -244,26 +256,26 @@ def averageOneBatch(mgraphs, group_id, compute_phase_differences, diameter, cuto
                 data_orig[i0+i] = mrc.data[pids[i]]
         i0 += n
 
-    for pi in range(nPtcls):
-        d = data_orig[pi]
-        dphi = - phi0Angles[pi]
-        if dphi != 0:
-            d = rotate_shift_image(data=d, angle=dphi, pre_shift=(0, 0))
-        data_in[pi] = d * tapering_filter
-    
     if align:
-        ref = np.mean(data_in, axis=0)
-        ref = (ref + ref[::-1, :] + ref[:, ::-1] + ref[::-1, ::-1])/4
         da = np.zeros(nPtcls)
-        dx = np.zeros(nPtcls)
+        dxy = np.zeros(nPtcls)
         for pi in range(nPtcls):
             d = data_orig[pi]
             dphi = - phi0Angles[pi]
-            d_aligned, da[pi], dx[pi] = rotation_trans_x_align(moving_image=d, fixed_ref=ref, angle0=dphi, dx0=0, mask=tapering_filter)
+            d_aligned, da[pi], dxy[pi] = rotation_trans_align(image=d, angle0=dphi, dx0=0, dy0=0, mask=tapering_filter)
             data_in[pi] = d_aligned * tapering_filter
         if verbose>1:
             gi, bi, _, ng, nb = group_id
-            print(f"Group {gi+1}/{ng} - Batch {bi+1}/{nb}: mean rotation = {np.mean(np.abs(da)):.2f} °\t shift-x = {np.mean(np.abs(dx))*apix:.1f} Å")
+            print(f"Group {gi+1}/{ng} - Batch {bi+1}/{nb}: mean rotation = {np.mean(np.abs(da)):.2f}°\t shift = {np.mean(np.abs(dxy))*apix:.1f}Å")
+    else:
+        for pi in range(nPtcls):
+            d = data_orig[pi]
+            dphi = - phi0Angles[pi]
+            if dphi != 0:
+                d_rotated = rotate_shift_image(data=d, angle=dphi, post_shift=(0, 0))
+            else:
+                d_rotated = d
+            data_in[pi] = d_rotated * tapering_filter
 
     ps_avg = np.zeros((pad_ny, pad_nx), dtype=np.float32)
     if compute_phase_differences:
@@ -340,25 +352,29 @@ def fft_rescale(images, apix=1.0, cutoff_res=None, output_size=None):
     # now fft has the same layout and phase origin (i.e. np.fft.ifft2(fft) would obtain original image)
     return fft
 
-def rotation_trans_x_align(moving_image, fixed_ref, angle0, dx0=0, mask=None):
-    # further refine rotation
+def rotation_trans_align(image, angle0, dx0=0, dy0=0, mask=None):
+    # further refine rotation/shift
     def score_rotation_shift(x):
-        da, dx = x
+        da, dy, dx = x
         angle = angle0 + da
-        dy = 0
-        tmp1 = rotate_shift_image(data=moving_image, angle=angle, pre_shift=(dy, dx))
-        tmp2 = rotate_shift_image(data=moving_image, angle=angle+180, pre_shift=(dy, dx))
-        tmps = [tmp1, tmp2]
+        tmp = rotate_shift_image(data=image, angle=angle, pre_shift=(dy, dx))
+        tmps = [tmp, tmp[::-1, :], tmp[:, ::-1], tmp[::-1, ::-1]]
+        tmp = rotate_shift_image(data=image, angle=angle+180, pre_shift=(dy, dx))
+        tmps += [tmp, tmp[::-1, :], tmp[:, ::-1], tmp[::-1, ::-1]]
+        n = len(tmps)
+        tmp_mean = np.zeros_like(image)
+        for tmp in tmps: tmp_mean += tmp
+        tmp_mean /= n
         err = 0
         for tmp in tmps:
-            err += np.sum(np.abs((tmp - fixed_ref)*mask))
-        err /= len(tmps) * fixed_ref.size
+            err += np.sum(np.abs(tmp - tmp_mean)*mask)
+        err /= n * image.size
         return err
     from scipy.optimize import fmin
-    res = fmin(score_rotation_shift, x0=(0, 0), xtol=1e-4, disp=0)
-    da, dx = res
-    ret = rotate_shift_image(data=moving_image, angle=angle0+da, pre_shift=(0, dx))
-    return ret, da, dx
+    res = fmin(score_rotation_shift, x0=(0, dy0, dx0), xtol=1e-4, disp=0)
+    da, dy, dx = res
+    ret = rotate_shift_image(data=image, angle=angle0+da, pre_shift=(dy, dx))
+    return ret, da, np.hypot(dy, dx)
 
 def rotate_shift_image(data, angle=0, pre_shift=(0, 0), post_shift=(0, 0), rotation_center=None, order=1):
     # pre_shift/rotation_center/post_shift: [y, x]
@@ -584,18 +600,18 @@ def parse_command_line():
 
     parser = argparse.ArgumentParser(description=description, epilog=epilog)
     parser.add_argument('inputImage', help='input particle lst/star/cs/mrcs file')
-    parser.add_argument('--outputPrefix', metavar="<str>", type=str, help="prefix of output files. default: %(default)s", default="power_spectra")
-    parser.add_argument("--groupby", metavar="<attr>", type=str, nargs="+", help="group particles by these parameters (class, helicaltube etc). disabled by default", default=[])
+    parser.add_argument('--outputPrefix', metavar="<str>", type=str, help="prefix of output files", default="")
+    parser.add_argument("--groupby", metavar="<attr>", type=str, nargs="+", help="group particles by these parameters (class, helicaltube etc)", default=[])
     parser.add_argument("--batchSize", metavar="<n>", type=int, help="maximal number of particles per batch. default: %(default)s", default=100)
-    parser.add_argument("--apix", metavar="<Angstrom>", type=float, help="pixel size of input image. disabled by default", default=0)
-    parser.add_argument("--diameter", metavar="<Angstrom>", type=float, help="masking with this filament/tube diameter (in Angstrom). disabled by default", default=0)
+    parser.add_argument("--apix", metavar="<Å/pixel>", type=float, help="pixel size of input image", default=0)
+    parser.add_argument("--diameterMask", metavar="<Å>", type=float, help="masking with this filament/tube diameter (in Angstrom). disabled by default", default=0)
     parser.add_argument("--cutoffRes", metavar="<float>", type=float, help="compute power spectra up to this resolution. default to 2*apix", default=0)
-    parser.add_argument("--padX", metavar="<nx>", type=int, help="pad the (binned) images before computing power spectra. default: %(default)s", default=512)
-    parser.add_argument("--padY", metavar="<ny>", type=int, help="pad the (binned) images before computing power spectra. default: %(default)s", default=1024)
-    parser.add_argument("--align", metavar="<0|1>", type=int, help="align each particle to the average. default: %(default)s", default=0)
+    parser.add_argument("--fftX", metavar="<nx>", type=int, help="set FFT x-dimenstion to this size. default: %(default)s", default=512)
+    parser.add_argument("--fftY", metavar="<ny>", type=int, help="set FFT y-dimenstion to this size. default: %(default)s", default=1024)
+    parser.add_argument("--align", metavar="<0|1>", type=int, help="center each particle and rotate it to the vertical direction. default: %(default)s", default=0)
     parser.add_argument("--forcePhaseDiff", metavar="<0|1>", type=int, help="compute phase differences across meridian even if in-plane angles are not avilable. default: %(default)s", default=0)
-    parser.add_argument("--showPlot", metavar="<0|1>", type=int, help="display plot. default: %(default)s", default=1)
-    parser.add_argument("--cpu", metavar="<n>", type=int, help="set number of cpu/core to use. default: %(default)s", default=1)
+    parser.add_argument("--showPlot", metavar="<0|1>", type=int, help="display power spectra for indexing. default: %(default)s", default=1)
+    parser.add_argument("--cpu", metavar="<n>", type=int, help="use this number of cpus/cores. default: %(default)s", default=1)
     parser.add_argument("--verbose", metavar="<n>", type=int, help="verbose level. default: %(default)s", default=1)
     
     args = parser.parse_args()
