@@ -35,7 +35,7 @@ def import_with_auto_install(packages, scope=locals()):
             import subprocess
             subprocess.call(f'pip install {package_pip_name}', shell=True)
             scope[package_import_name] =  __import__(package_import_name)
-required_packages = "streamlit numpy scipy bokeh skimage:scikit_image mrcfile finufft moviepy selenium streamlit_bokeh_events".split()
+required_packages = "streamlit numpy scipy bokeh skimage:scikit_image mrcfile finufft moviepy selenium".split()
 import_with_auto_install(required_packages)
 
 import streamlit as st
@@ -87,16 +87,41 @@ def main(args):
 
     with col2:
         copy_pitch_rise = st.button(label="Copy pitch/rise from sliders")
+        pitch_or_twist_choices = ["pitch", "twist"]
+        value = int(query_params["use_pitch"][0]) if "use_pitch" in query_params else 1
+        value = 0 if value else 1
+        pitch_or_twist = st.radio(label="", options=pitch_or_twist_choices, index=value, key=next_key())
+        use_pitch = 1 if pitch_or_twist=="pitch" else 0
+
         pitch_or_twist_number_input = st.empty()
         pitch_or_twist_text = st.empty()
         rise_empty = st.empty()
+
         ny, nx = data.shape
-        max_pitch = max(2000., max(ny, nx)*apix * 2.0)
-        max_rise = max_pitch
-        value = min(max_rise, float(query_params["rise"][0]) if "rise" in query_params else data_example.rise)
-        rise = rise_empty.number_input('Rise (Å)', value=value, min_value=-180.0, max_value=max_rise, step=1.0, format="%.3f")
+        max_rise = max(2000., max(ny, nx)*apix * 2.0)
+        min_rise = 0.0
+        value = float(query_params["rise"][0]) if "rise" in query_params else data_example.rise
+        value = max(min_rise, min(max_rise, value))
+        rise = rise_empty.number_input('Rise (Å)', value=value, min_value=min_rise, max_value=max_rise, step=1.0, format="%.3f")
+
+        if use_pitch:
+            min_pitch = abs(rise)
+            value = float(query_params["pitch"][0]) if "pitch" in query_params else data_example.pitch
+            value = max(min_pitch, value)
+            pitch = pitch_or_twist_number_input.number_input('Pitch (Å)', value=value, min_value=min_pitch, step=1.0, format="%.2f", key="pitch")
+            twist = round(360./(pitch/rise), 2)
+            pitch_or_twist_text.markdown(f"*(twist = {twist:.2f} °)*")
+        else:
+            if "twist" in query_params: value = float(query_params["twist"][0])
+            elif "pitch" in query_params: value = round(360./(float(query_params["pitch"][0])/rise), 2)
+            else: value = data_example.twist
+            value = min(180., max(0., value))
+            twist = pitch_or_twist_number_input.number_input('Twist (°)', value=value, min_value=0.0, max_value=180.0, step=1.0, format="%.2f")
+            pitch = abs(round((360./twist)*rise, 2))
+            pitch_or_twist_text.markdown(f"*(pitch = {pitch:.2f} Å)*")
+
         value = int(query_params["csym"][0]) if "csym" in query_params else data_example.csym
-        csym = st.number_input('Csym', value=value, min_value=1, max_value=16, step=1)
+        csym = st.number_input('Csym', value=value, min_value=1, step=1)
 
         if input_image2: value = max(radius_auto*apix, radius_auto2*apix2)
         else: value = radius_auto*apix
@@ -182,22 +207,6 @@ def main(args):
 
     with col3:
         st.subheader("Display:")
-        value = int(query_params["show_pitch"][0]) if "show_pitch" in query_params else True
-        show_pitch = st.checkbox(label="Pitch", value=value)
-        if show_pitch:
-            value = min(max_pitch, float(query_params["pitch"][0]) if "pitch" in query_params else data_example.pitch)
-            pitch = pitch_or_twist_number_input.number_input('Pitch (Å)', value=value, min_value=1.0, max_value=max_pitch, step=1.0, format="%.2f")
-            if pitch < cutoff_res_y:
-                st.warning(f"pitch is too small. it should be > {cutoff_res_y} (Limit FFT X-dim to resolution (Å))")
-                return
-            twist = 360./(pitch/rise)
-            pitch_or_twist_text.markdown(f"*(twist = {twist:.2f} °)*")
-        else:
-            value = float(query_params["twist"][0]) if "twist" in query_params else data_example.twist
-            twist = pitch_or_twist_number_input.number_input('Twist (°)', value=value, min_value=-180.0, max_value=180.0, step=1.0, format="%.2f")
-            pitch = (360./twist)*rise
-            pitch_or_twist_text.markdown(f"*(pitch = {pitch:.2f} Å)*")
-
         show_pwr = False
         show_phase = False
         show_phase_diff = False
@@ -289,16 +298,18 @@ def main(args):
                 apix_simu = apix
             proj_pwr, proj_phase = compute_power_spectra(proj, apix=apix_simu, cutoff_res=(cutoff_res_y, cutoff_res_x), 
                     output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
+            proj_phase_diff = compute_phase_difference_across_meridian(proj_phase)                
             items += [(show_pwr_simu, proj_pwr, "Simulated Power Spectra", show_phase_simu, proj_phase, show_phase_diff_simu, proj_phase_diff, "Simulated Phase Diff Across Meridian", show_yprofile_simu)]
 
         figs = []
-        figs_skip_yprofile = []
+        figs_image = []
         for item in items:
             show_pwr_work, pwr_work, title_pwr_work, show_phase_work, phase_work, show_phase_diff_work, phase_diff_work, title_phase_work, show_yprofile_work = item
             if show_pwr_work:
                 tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Amp', '@image')]
                 fig = create_image_figure(pwr_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, pseudocolor=show_pseudocolor, title=title_pwr_work, yaxis_visible=False, tooltips=tooltips)
                 figs.append(fig)
+                figs_image.append(fig)
 
             if show_yprofile_work:
                 ny, nx = pwr_work.shape
@@ -315,19 +326,20 @@ def main(args):
                 fig.yaxis.visible = False
                 fig.hover[0].attachment="vertical"
                 figs.append(fig)
-                figs_skip_yprofile.append(fig)
 
             if show_phase_diff_work:
                 tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Phase Diff', '@image °')]
                 fig = create_image_figure(phase_diff_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, pseudocolor=show_pseudocolor, title=title_phase_work, yaxis_visible=False, tooltips=tooltips)
                 figs.append(fig)
+                figs_image.append(fig)
                 
         figs[-1].yaxis.fixed_location = figs[-1].x_range.end
         figs[-1].yaxis.visible = True
-        add_linked_crosshair_tool(figs)
+        add_linked_crosshair_tool(figs, dimensions="width")
+        add_linked_crosshair_tool(figs_image, dimensions="both")
 
         fig_ellipses = []
-        if figs and show_LL:
+        if figs_image and show_LL:
             if max(m_groups[0]["LL"][0])>0:
                 color = 'white' if show_pseudocolor else 'red'
                 ll_line_dashes = 'solid dashed dotted dotdash dashdot'.split()             
@@ -343,8 +355,7 @@ def main(args):
                         texts = [str(int(n)) for n in bessel_order]
                     tags = [m, bessel_order]
                     line_dash = ll_line_dashes[abs(m)%len(ll_line_dashes)]
-                    for f in figs:
-                        if f in figs_skip_yprofile: continue
+                    for f in figs_image:
                         if show_LL_text: 
                             text_labels = f.text(x, y, text=texts, text_color="white", text_baseline="middle", text_align="center")
                             text_labels.tags = tags
@@ -358,7 +369,7 @@ def main(args):
 
         if fig_ellipses:
             from bokeh.models import Slider, CustomJS
-            slider_pitch = Slider(start=0.0, end=min(max_pitch, pitch*2.0), value=pitch, step=.01, title="Pitch (Å)", width=pnx)
+            slider_pitch = Slider(start=0.0, end=pitch*2.0, value=pitch, step=.01, title="Pitch (Å)", width=pnx)
             slider_rise = Slider(start=0.0, end=min(max_rise, rise*2.0), value=rise, step=.01, title="Rise (Å)", width=pnx)
             callback_code = """
                 var pitch_inv = 1./slider_pitch.value
@@ -437,9 +448,9 @@ def main(args):
 
     input = (input_mode, url, image_index, emdid, input_type)
     input2 = (input_mode2, url2, image_index2, emdid2, input_type2)
-    set_query_params(input, input2, show_pitch, pitch, twist, rise, csym, helical_radius, show_LL_text, cutoff_res_x, cutoff_res_y, pnx, pny, ball_radius, noise, use_plot_size)
+    set_query_params(input, input2, use_pitch, pitch, twist, rise, csym, helical_radius, show_LL_text, cutoff_res_x, cutoff_res_y, pnx, pny, ball_radius, noise, use_plot_size)
 
-def set_query_params(input, input2, show_pitch, pitch, twist, rise, csym, helical_radius, show_LL_text, cutoff_res_x, cutoff_res_y, nx, ny, simuradius, simunoise, useplotsize):
+def set_query_params(input, input2, use_pitch, pitch, twist, rise, csym, helical_radius, show_LL_text, cutoff_res_x, cutoff_res_y, nx, ny, simuradius, simunoise, useplotsize):
     input_mode, url, image_index, emdid, input_type = input
     input_mode2, url2, image_index2, emdid2, input_type2 = input2
     if input_mode2:
@@ -459,8 +470,8 @@ def set_query_params(input, input2, show_pitch, pitch, twist, rise, csym, helica
             params["url"] = url
             params["i"] = image_index+1
         if input_type in ["PS", "PD"]: params["input_type"] = input_type
-    params["show_pitch"] = int(show_pitch)
-    if show_pitch:
+    params["use_pitch"] = int(use_pitch)
+    if use_pitch:
         params["pitch"] = round(pitch,3)
     else:
         params["twist"] = round(twist,3)
@@ -577,9 +588,9 @@ def create_image_figure(data, cutoff_res_x, cutoff_res_y, helical_radius, tilt, 
     
     return fig
 
-def add_linked_crosshair_tool(figures):
+def add_linked_crosshair_tool(figures, dimensions="both"):
     # create a linked crosshair tool among the figures
-    crosshair = CrosshairTool(dimensions="both")
+    crosshair = CrosshairTool(dimensions=dimensions)
     crosshair.line_color = 'red'
     for fig in figures:
         fig.add_tools(crosshair)
