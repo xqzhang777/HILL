@@ -131,6 +131,8 @@ def main():
         print(f"Combining results of {len(fftavgs)} tasks")
     
     outputPrefix = args.outputPrefix or pathlib.Path(args.inputImage).stem
+    if args.groupby != ["pid"]: outputPrefix += f".groupby-{'-'.join(args.groupby)}"
+    if args.align: outputPrefix += ".algined"
     outputLstFile = outputPrefix+ (".ps-pd.lst" if compute_phase_differences else ".ps.lst")
     psFile = outputPrefix+".ps.mrcs"    # power spectra
 

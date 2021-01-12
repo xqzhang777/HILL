@@ -1230,13 +1230,19 @@ def get_emdb_map(emdid):
         apix = mrc.voxel_size.x.item()
     return data, apix
 
-@st.cache(persist=True, show_spinner=False)
+def hash_filename(filename):
+    import pathlib
+    f = pathlib.Path(filename)
+    if f.exists(): return (filename, f.lstat())
+    else: return filename
+
+@st.cache(persist=True, show_spinner=False, hash_funcs={str: hash_filename})
 def get_2d_image_from_url(url):
     ds = np.DataSource(None)
     fp=ds.open(url)
     return get_2d_image_from_file(fp.name)
 
-@st.cache(persist=True, show_spinner=False)
+@st.cache(persist=True, show_spinner=False, hash_funcs={str: hash_filename})
 def get_2d_image_from_file(filename):
     import mrcfile
     with mrcfile.open(filename) as mrc:
