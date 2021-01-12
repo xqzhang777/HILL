@@ -63,6 +63,8 @@ def main():
         print(f"Cutoff resolution: {args.cutoffRes:.4f}")
 
     if not args.groupby:
+        if abs(args.verbose)>0:
+            print(f"Availabe parameters for --groupby: {data.columns.values}")
         if "phi0" in data:
             if "class" in data: args.groupby = ["class"]
             elif "helicaltube" in data: args.groupby = ["filename", "helicaltube"]
@@ -76,7 +78,7 @@ def main():
     if args.groupby:
         if "helicaltube" in args.groupby:
             if "filename" not in args.groupby:
-                args.groupby.append("filename")
+                args.groupby = ["filename"] + args.groupby
             required_attrs += ["phi0"]
         required_attrs += args.groupby
     missing_attrs = [attr for attr in required_attrs if attr not in data]
@@ -481,14 +483,16 @@ def cs2dataframe(csFile):
             cs = np.load(passthrough_file)
             extra_data = pd.DataFrame.from_records(cs.tolist(), columns=cs.dtype.names)
             data = pd.concat([data, extra_data], axis=1)
-    mapping = {"blob/idx":"pid", "blob/path":"filename", "blob/psize_A":"apix", "filament/filament_uid":"helicaltube"}
+    mapping = {"blob/idx":"pid", "blob/psize_A":"apix", "filament/filament_uid":"helicaltube"}
     for key in mapping:
         if key in data:
             data.loc[:, mapping[key]] = data[key]
-    if "filament/filament_pose" in data:
-        data.loc[:, "phi0"] = np.rad2deg(data["filament/filament_pose"])
+    if "filament/filament_pose" in data:    # = - rlnAnglePsiPrior
+        data.loc[:, "phi0"] = -np.rad2deg(data["filament/filament_pose"]) - 90
     if "alignments2D/class" in data:
         data.loc[:, "class"] = data["alignments2D/class"]-1
+    if "blob/path" in data:
+        data.loc[:, "filename"] = data["blob/path"].str.decode("utf-8")
     return data
 
 def lst2dataframe(lstFile):
@@ -535,6 +539,9 @@ def image2dataframe(inputFile):
         print("ERROR: {inputFile} is in a unsupported format")
         sys.exit(-1)
     
+    cols = [c for c in "pid filename apix class helicaltube phi0".split() if c in p]
+    p = p.loc[:, cols]
+
     int_types = "pid helicaltube".split()
     float_types = "apix phi0".split()
     for i in int_types:
@@ -547,15 +554,15 @@ def image2dataframe(inputFile):
     for f in p["filename"].unique():
         if f in mapping: continue
         fp = pathlib.Path(f)
-        if fp.exists():
-            mapping[f] = f
-        else:
-            fp2 = dir0 / fp
-            if fp2.exists():
-                mapping[f] = fp2.as_posix()
+        name = fp.name
+        choices = [fp, dir0/name, dir0/".."/name, dir0/"../.."/name, dir0/".."/fp, dir0/"../.."/fp]
+        for choice in choices:
+            if choice.exists():
+                mapping[f] = choice.resolve().as_posix()
+                break
         if f in mapping:
-            fp3 = pathlib.Path(mapping[f])
-            for fo in fp3.parent.glob("*"+fp.suffix):
+            fp2 = pathlib.Path(mapping[f])
+            for fo in fp2.parent.glob("*"+fp.suffix):
                 ftmp = (fp.parent / fo.name).as_posix()
                 mapping[ftmp] = fo.as_posix()
     for f in p["filename"].unique():
