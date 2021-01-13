@@ -357,7 +357,7 @@ def main(args):
                     line_dash = ll_line_dashes[abs(m)%len(ll_line_dashes)]
                     for f in figs_image:
                         if show_LL_text: 
-                            text_labels = f.text(x, y, text=texts, text_color="white", text_baseline="middle", text_align="center")
+                            text_labels = f.text(x, y, y_offset=2, text=texts, text_color="white", text_baseline="middle", text_align="center")
                             text_labels.tags = tags
                             fig_ellipses.append(text_labels)
                         else:
@@ -1230,11 +1230,11 @@ def get_emdb_map(emdid):
         apix = mrc.voxel_size.x.item()
     return data, apix
 
-def hash_filename(filename):
+def hash_filename(url):
     import pathlib
-    f = pathlib.Path(filename)
-    if f.exists(): return (filename, f.lstat())
-    else: return filename
+    f = pathlib.Path(url)
+    if f.exists(): return (url, f.lstat())
+    return url
 
 @st.cache(persist=True, show_spinner=False, hash_funcs={str: hash_filename})
 def get_2d_image_from_url(url):
