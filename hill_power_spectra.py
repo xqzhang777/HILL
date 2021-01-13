@@ -73,6 +73,8 @@ def main():
                 nx, ny, nz = mrc.header.nx, mrc.header.ny, mrc.header.nz
             if nx==ny and nz!=nx and nz<=500 and "helicaltube" not in data:
                 args.groupby = ["pid"]
+    
+    if args.groupby == ["None"]: args.groupby = []
 
     required_attrs = "apix".split()
     if args.groupby:
@@ -97,6 +99,17 @@ def main():
         groups = data.groupby(args.groupby, sort=True)
         if args.verbose:
             print(f"{len(groups)} groups based on {args.groupby}")
+        if args.minCount>0:
+            groups, groups_all = [], groups
+            for gi, g in enumerate(groups_all):
+                n = len(g[1])
+                if n<args.minCount:
+                    if args.verbose>0:
+                        print(f"\tGroup {gi+1}/{len(groups)} - {g[0]}: skipped as it has only {n} particles (<{args.minCount})")
+                    continue
+                groups.append(g)
+            if args.verbose:
+                print(f"{len(groups)} groups after removing small groups (<{args.minCount} particles)")
     else:
         groups = [("all_particles", data)]
 
@@ -106,9 +119,11 @@ def main():
         for gi, g in enumerate(groups):
             group_name, group_particles = g
             if len(args.groupby)>1:
-                group_name=tuple(("%s=%s" % (attr, group_name[ai]) for ai, attr in enumerate(args.groupby)))
+                group_name=tuple(["%s=%s" % (attr, group_name[ai]) for ai, attr in enumerate(args.groupby)])
             elif len(args.groupby)==1:
-                group_name = "%s=%s" % (args.groupby[0], group_name)
+                group_name=tuple(["%s=%s" % (args.groupby[0], group_name)])
+            else:
+                group_name=None
 
             mgraphs = list(group_particles.groupby(["filename"], sort=True))
             nptcls = [len(m[1]) for m in mgraphs]
@@ -131,7 +146,7 @@ def main():
         print(f"Combining results of {len(fftavgs)} tasks")
     
     outputPrefix = args.outputPrefix or pathlib.Path(args.inputImage).stem
-    if args.groupby != ["pid"]: outputPrefix += f".groupby-{'-'.join(args.groupby)}"
+    if args.groupby: outputPrefix += f".groupby-{'-'.join(args.groupby)}"
     if args.align: outputPrefix += ".algined"
     outputLstFile = outputPrefix+ (".ps-pd.lst" if compute_phase_differences else ".ps.lst")
     psFile = outputPrefix+".ps.mrcs"    # power spectra
@@ -170,7 +185,9 @@ def main():
     for group_id in results:
         gi, _, group_name, _, _ = group_id
         data_output.loc[gi, "pid"] = gi
-        data_output.loc[gi, "group"] = ":".join(str(group_name).split())
+        data_output.loc[gi, "count"] = results[group_id]["count"]
+        if group_name:
+            data_output.loc[gi, "group"] = str(group_name)
         ps_avg = results[group_id]["ps_avg"] / results[group_id]["count"]
         ps_avg = np.fft.fftshift(ps_avg)
         mrc_ps.data[gi] = ps_avg
@@ -185,13 +202,15 @@ def main():
     data_output.loc[:, "filename"] = psFile
     if pdFile: data_output.loc[:, "pdfile"] = pdFile
 
+    cols = [c for c in "pid filename group count pdfile".split() if c in data_output]
+    data_output = data_output.loc[:, cols]
     dataframe2lst(data_output, outputLstFile)
     
     if args.verbose:
         if pdFile:
-            print(f"{len(groups)} power spectra/phase differences across meridian images saved to {outputLstFile}")
+            print(f"{len(data_output)} power spectra/phase differences across meridian images saved to {outputLstFile}")
         else:
-            print(f"{len(groups)} power spectra images saved to {outputLstFile}")
+            print(f"{len(data_output)} power spectra images saved to {outputLstFile}")
 
     if args.showPlot:
         params = {}
@@ -575,6 +594,13 @@ def image2dataframe(inputFile):
     return p
 
 def dataframe2lst(data, lstFile):
+    int_types = "pid count".split()
+    float_types = "apix".split()
+    for i in int_types:
+        if i in data: data.loc[:, i] = data.loc[:, i].astype(int)
+    for f in float_types:
+        if f in data: data.loc[:, f] = data.loc[:, f].astype(float)
+
     keys = list(data)
     keys.remove("pid")
     keys.remove("filename")
@@ -611,6 +637,7 @@ def parse_command_line():
     parser.add_argument('inputImage', help='input particle lst/star/cs/mrcs file')
     parser.add_argument('--outputPrefix', metavar="<str>", type=str, help="prefix of output files", default="")
     parser.add_argument("--groupby", metavar="<attr>", type=str, nargs="+", help="group particles by these parameters (class, helicaltube etc)", default=[])
+    parser.add_argument("--minCount", metavar="<n>", type=int, help="ignore groups of fewer particles than this minimal count. default: %(default)s", default=-1)
     parser.add_argument("--batchSize", metavar="<n>", type=int, help="maximal number of particles per batch. default: %(default)s", default=100)
     parser.add_argument("--apix", metavar="<Å/pixel>", type=float, help="pixel size of input image", default=0)
     parser.add_argument("--diameterMask", metavar="<Å>", type=float, help="masking with this filament/tube diameter (in Angstrom). disabled by default", default=0)
