@@ -47,7 +47,14 @@ def main():
     args =  parse_command_line()
 
     data = image2dataframe(args.inputImage)
-    
+
+    if args.verbose:
+        if "helicaltube" in data:
+            helices = data.groupby(["filename", "helicaltube"])
+            print(f'Read {len(data)} segments/particles in {len(helices)} helices in {len(data["filename"].unique())} micrographs from {args.inputImage}')
+        else:
+            print(f'Read {len(data)} particles in {len(data["filename"].unique())} micrographs from {args.inputImage}')
+
     if args.apix>0:
         data.loc[:, "apix"] = args.apix
     if "apix" not in data:
@@ -88,13 +95,6 @@ def main():
         print(f"ERROR: parameters '{' '.join(missing_attrs)}'' are not available. available parameters are '{' '.join(data)}''")
         sys.exit(-1)
 
-    if args.verbose:
-        if "helicaltube" in data:
-            helices = data.groupby(["filename", "helicaltube"])
-            print(f'Read {len(data)} segments/particles in {len(helices)} helices in {len(data["filename"].unique())} micrographs from {args.inputImage}')
-        else:
-            print(f'Read {len(data)} particles in {len(data["filename"].unique())} micrographs from {args.inputImage}')
-
     if args.groupby:
         groups = data.groupby(args.groupby, sort=True)
         if args.verbose:
@@ -105,11 +105,14 @@ def main():
                 n = len(g[1])
                 if n<args.minCount:
                     if args.verbose>0:
-                        print(f"\tGroup {gi+1}/{len(groups)} - {g[0]}: skipped as it has only {n} particles (<{args.minCount})")
+                        print(f"\tGroup {gi+1}/{len(groups_all)} - {g[0]}: skipped as it has only {n} particles (<{args.minCount})")
                     continue
+                else:
+                    if args.verbose>1:
+                        print(f"\tGroup {gi+1}/{len(groups_all)} - {g[0]}: retained as it has {n} particles (>={args.minCount})")
                 groups.append(g)
-            if args.verbose:
-                print(f"{len(groups)} groups after removing small groups (<{args.minCount} particles)")
+            if args.verbose and len(groups)<len(groups_all):
+                print(f"{len(groups)} groups after removing {len(groups_all)-len(groups)} small groups (<{args.minCount} particles)")
     else:
         groups = [("all_particles", data)]
 
@@ -155,6 +158,10 @@ def main():
         pdFile = outputPrefix+".pd.mrcs"    # phase differences across meridian
     else:
         pdFile = None
+    if args.verbose>10:
+        imageAvgFile = outputPrefix+".avg.mrcs" # realspace average
+    else:
+        imageAvgFile = None
 
     mrc_ps = mrcfile.new_mmap(psFile, shape=(len(groups), args.fftY, args.fftX), mrc_mode=2, overwrite=True)
     mrc_ps.voxel_size = args.cutoffRes/2
@@ -163,6 +170,12 @@ def main():
         mrc_pd.voxel_size = args.cutoffRes/2
     else:
         mrc_pd = None
+    if args.verbose>10:
+        ny, nx = fftavgs[0][2].shape
+        mrc_image = mrcfile.new_mmap(imageAvgFile, shape=(len(groups), ny, nx), mrc_mode=2, overwrite=True)
+        mrc_image.voxel_size = args.apix
+    else:
+        mrc_image = None
 
     import pandas as pd
     data_output = pd.DataFrame(index=list(range(len(groups))), columns="pid filename".split())
@@ -170,16 +183,19 @@ def main():
 
     results = {}    
     for i in range(len(fftavgs)):
-        ps_avg, pd_avg, count, group_id = fftavgs[i]
+        ps_avg, pd_avg, image_avg, count, group_id = fftavgs[i]
         if group_id not in results:
             d = {}
             d["ps_avg"] = np.zeros_like(ps_avg)
             if pd_avg is not None:
                 d["pd_avg"] = np.zeros_like(pd_avg)
+            if image_avg is not None:
+                d["image_avg"] = np.zeros_like(image_avg)
             d["count"] = 0
             results[group_id] = d
         results[group_id]["ps_avg"] += ps_avg
         if pd_avg is not None: results[group_id]["pd_avg"] += pd_avg
+        if image_avg is not None: results[group_id]["image_avg"] += image_avg
         results[group_id]["count"] += count
 
     for group_id in results:
@@ -196,13 +212,18 @@ def main():
             pd_avg = np.rad2deg(np.arccos(pd_avg))
             pd_avg = np.fft.fftshift(pd_avg)
             mrc_pd.data[gi] = pd_avg
+        if "image_avg" in results[group_id]:
+            image_avg = results[group_id]["image_avg"] / results[group_id]["count"]
+            mrc_image.data[gi] = image_avg
     mrc_ps.close()
     if mrc_pd is not None: mrc_pd.close() 
+    if mrc_image is not None: mrc_image.close() 
 
     data_output.loc[:, "filename"] = psFile
-    if pdFile: data_output.loc[:, "pdfile"] = pdFile
+    if pdFile: data_output.loc[:, "pd"] = pdFile
+    if imageAvgFile: data_output.loc[:, "avg"] = imageAvgFile
 
-    cols = [c for c in "pid filename group count pdfile".split() if c in data_output]
+    cols = [c for c in "pid filename group count avg pd".split() if c in data_output]
     data_output = data_output.loc[:, cols]
     dataframe2lst(data_output, outputLstFile)
     
@@ -246,7 +267,7 @@ def averageOneBatch(mgraphs, group_id, compute_phase_differences, diameterMask, 
     if verbose>0:
         gi, bi, _, ng, nb = group_id
         print(f"Group {gi+1}/{ng} - Batch {bi+1}/{nb}: {nPtcls} particles from {len(mgraphs)} micrographs")
-    phi0Angles = np.array([90]*nPtcls)
+    phi0Angles = np.array([0.0]*nPtcls)
     apix = mgraphs[0][1]["apix"].iloc[0]
     tapering_filter = None
     data_orig = None
@@ -303,6 +324,9 @@ def averageOneBatch(mgraphs, group_id, compute_phase_differences, diameterMask, 
     ps_avg = np.zeros((pad_ny, pad_nx), dtype=np.float32)
     if compute_phase_differences:
         pd_avg = np.zeros((pad_ny, pad_nx), dtype=np.float32)
+    if verbose>10:
+        _, ny, nx = data_in.shape
+        image_avg = np.zeros((ny, nx), dtype=np.float32)
     
     data_fft = fft_rescale(images=data_in, apix=apix, cutoff_res=(cutoff_res, cutoff_res), output_size=(pad_ny, pad_nx))
     amp = np.abs(data_fft)
@@ -316,7 +340,12 @@ def averageOneBatch(mgraphs, group_id, compute_phase_differences, diameterMask, 
     else:
         pd_avg = None
 
-    return (ps_avg, pd_avg, nPtcls, group_id)
+    if verbose>10:
+        image_avg = np.sum(data_in, axis=0)
+    else:
+        image_avg = None
+
+    return (ps_avg, pd_avg, image_avg, nPtcls, group_id)
 
 def compute_phase_difference_across_meridian(phase, compute_cosine=False):
     # https://numpy.org/doc/stable/reference/generated/numpy.fft.fftfreq.html
@@ -498,12 +527,15 @@ def cs2dataframe(csFile):
     import pandas as pd
     data = pd.DataFrame.from_records(cs.tolist(), columns=cs.dtype.names)
     if csFile.find("passthrough_particles") == -1:
-        ptf = sorted(pathlib.Path(csFile).parent.glob("*passthrough_particles*.cs"))
-        if ptf:
-            passthrough_file = ptf[0].as_posix()
-            cs = np.load(passthrough_file)
-            extra_data = pd.DataFrame.from_records(cs.tolist(), columns=cs.dtype.names)
-            data = pd.concat([data, extra_data], axis=1)
+        ptfs = sorted(pathlib.Path(csFile).parent.glob("*passthrough_particles*.cs"))
+        if ptfs:
+            extra_data = []
+            for ptf in ptfs:
+                passthrough_file = ptf.as_posix()
+                cs = np.load(passthrough_file)
+                if len(cs) != len(data): continue                    
+                extra_data += [ pd.DataFrame.from_records(cs.tolist(), columns=cs.dtype.names) ]
+            data = pd.concat([data] + extra_data, axis=1)
     mapping = {"blob/idx":"pid", "blob/psize_A":"apix", "filament/filament_uid":"helicaltube"}
     for key in mapping:
         if key in data:
@@ -550,7 +582,7 @@ def image2dataframe(inputFile):
         sys.exit(-1)
     if inputFile.endswith(".star"):    # relion
         p = star2dataframe(inputFile)
-    elif inputFile.endswith(".cs"):  # cryosparc v2.x
+    elif inputFile.endswith(".cs"):  # cryosparc
         p = cs2dataframe(inputFile)
     elif inputFile.endswith(".lst"):    # jspr
         p = lst2dataframe(inputFile)
