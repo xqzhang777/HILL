@@ -624,7 +624,7 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                     value = data_example.url
                     with supress_missing_values: value = query_params["url"][param_i]
                     image_url = st.text_input(label=label, value=value, key=next_key())
-                    data_all, apix = get_2d_image_from_url(image_url.strip())
+                    data_all, apix = get_2d_image_from_url(URL(image_url.strip()))
             nz, ny, nx = data_all.shape
             if nz==1:
                 is_3d = False
@@ -641,6 +641,7 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                 az = st.number_input(label=f"Rotation around the helical axis (°):", min_value=0.0, max_value=360., value=0.0, step=1.0, key=next_key())
                 tilt = st.number_input(label=f"Tilt (°):", min_value=-180.0, max_value=180., value=0.0, step=1.0, key=next_key())
                 data = generate_projection(data_all, az=az, tilt=tilt)
+                image_index = 0
         else:
             nonzeros = nonzero_images(data_all)
             if nonzeros is None:
@@ -659,7 +660,10 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                     else:
                         value = 1
                         with supress_missing_values: value = int(query_params["i"][param_i])
-                        image_index = st.slider(label=f"Choose an image (out of {nz}):", min_value=1, max_value=nz, value=value, step=1, key=next_key())
+                        if nz>10:
+                            image_index = st.number_input(label=f"Choose an image (out of {nz}):", min_value=1, max_value=nz, value=value, step=1, key=next_key())
+                        else:
+                            image_index = st.slider(label=f"Choose an image (out of {nz}):", min_value=1, max_value=nz, value=value, step=1, key=next_key())
                 else:
                     if param_i>0:
                         value = 1
@@ -671,7 +675,12 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                         value = nonzeros[0]+1
                         with supress_missing_values: value = int(query_params["i"][param_i])
                         if value not in nonzeros: value = nonzeros[0]+1
-                        image_index = st.select_slider(label=f"Choose an image ({len(nonzeros)} non-zero images out of {nz}):", options=list(nonzeros+1), value=value, key=next_key())
+                        if len(nonzeros)>10:
+                            nonzeros = list(nonzeros+1)
+                            index = nonzeros.index(value)
+                            image_index = st.selectbox(label=f"Choose an image ({len(nonzeros)} non-zero images out of {nz}):", options=nonzeros, index=index, key=next_key())
+                        else:
+                            image_index = st.select_slider(label=f"Choose an image ({len(nonzeros)} non-zero images out of {nz}):", options=list(nonzeros+1), value=value, key=next_key())
                 image_index -= 1
             else:
                 image_index = 0
@@ -1207,6 +1216,25 @@ def guess_if_is_power_spectra(data, thresh=15):
     if (max-median)>thresh*sigma: return True
     else: return False
 
+class FILENAME:
+    def __init__(self, filename):
+        self.filename = filename
+
+def hash_FILENAME(filename):
+    import pathlib
+    f = pathlib.Path(filename.filename)
+    if f.exists(): return (filename.filename, f.lstat())
+    return filename.filename
+class URL:
+    def __init__(self, url):
+        self.url = url
+
+def hash_URL(url):
+    import pathlib
+    f = pathlib.Path(url.url)
+    if f.exists(): return (url.url, f.lstat())
+    return url.url
+
 @st.cache(persist=True, show_spinner=False)
 def get_2d_image_from_uploaded_file(fileobj):
     import os, tempfile
@@ -1214,11 +1242,11 @@ def get_2d_image_from_uploaded_file(fileobj):
     suffix = os.path.splitext(orignal_filename)[-1]
     with tempfile.NamedTemporaryFile(suffix=suffix) as temp:
         temp.write(fileobj.read())
-        data, apix = get_2d_image_from_file(temp.name)
+        data, apix = get_2d_image_from_file(FILENAME(temp.name))
     return data, apix
 
 @st.cache(persist=True, show_spinner=False)
-def get_emdb_map(emdid):
+def get_emdb_map(emdid: str):
     emdid_number = emdid.lower().split("emd-")[-1]
     url = f"ftp://ftp.ebi.ac.uk/pub/databases/emdb/structures/EMD-{emdid_number}/map/emd_{emdid_number}.map.gz"
     ds = np.DataSource(None)
@@ -1230,22 +1258,16 @@ def get_emdb_map(emdid):
         apix = mrc.voxel_size.x.item()
     return data, apix
 
-def hash_filename(url):
-    import pathlib
-    f = pathlib.Path(url)
-    if f.exists(): return (url, f.lstat())
-    return url
-
-@st.cache(persist=True, show_spinner=False, hash_funcs={str: hash_filename})
-def get_2d_image_from_url(url):
+@st.cache(persist=True, show_spinner=False, hash_funcs={URL: hash_URL})
+def get_2d_image_from_url(url: URL):
     ds = np.DataSource(None)
-    fp=ds.open(url)
-    return get_2d_image_from_file(fp.name)
+    fp=ds.open(url.url)
+    return get_2d_image_from_file(FILENAME(fp.name))
 
-@st.cache(persist=True, show_spinner=False, hash_funcs={str: hash_filename})
-def get_2d_image_from_file(filename):
+@st.cache(persist=True, show_spinner=False, hash_funcs={FILENAME: hash_FILENAME})
+def get_2d_image_from_file(filename: FILENAME):
     import mrcfile
-    with mrcfile.open(filename) as mrc:
+    with mrcfile.open(filename.filename) as mrc:
         data = mrc.data * 1.0
         apix = mrc.voxel_size.x.item()
     if data.dtype==np.dtype('complex64'):
@@ -1257,7 +1279,7 @@ def get_2d_image_from_file(filename):
             data[i] = normalize(tmp, percentile=(0.1, 99.9))
     return data, apix
 
-class Data(object):
+class Data:
     def __init__(self, twist, rise, csym, diameter, apix, url=None):
         self.twist = twist
         self.rise = rise
