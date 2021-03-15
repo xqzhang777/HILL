@@ -608,7 +608,7 @@ def image2dataframe(inputFile):
         if f in mapping: continue
         fp = pathlib.Path(f)
         name = fp.name
-        choices = [fp, dir0/name, dir0/".."/name, dir0/"../.."/name, dir0/".."/fp, dir0/"../.."/fp]
+        choices = [fp, dir0/fp, dir0/".."/fp, dir0/"../.."/fp, dir0/name, dir0/".."/name, dir0/"../.."/name]
         for choice in choices:
             if choice.exists():
                 mapping[f] = choice.resolve().as_posix()
