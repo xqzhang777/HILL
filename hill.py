@@ -71,9 +71,9 @@ def main(args):
         if input_type in ["image"]:
             label = f"Replace amplitudes or phases with another image"
         elif input_type in ["PS"]:
-            label = f"Add phases from another image"
+            label = f"Load phases from another image"
         elif input_type in ["PD"]:
-            label = f"Add amplitudes from another image"
+            label = f"Load amplitudes from another image"
         value = True if "input_mode" in query_params and len(query_params["input_mode"])==2 else False
         input_image2 = st.checkbox(label=label, value=value)        
         if input_image2:
@@ -86,7 +86,7 @@ def main(args):
         st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to Wen Jiang (jiang12 at purdue.edu)*")
 
     with col2:
-        copy_pitch_rise = st.button(label="Copy pitch/rise from sliders")
+        copy_pitch_rise = st.button(label="Copy pitch/rise", help="Update the pitch/rise values below using the pitch/rise values from the sliders at the top the plots")
         pitch_or_twist_choices = ["pitch", "twist"]
         value = int(query_params["use_pitch"][0]) if "use_pitch" in query_params else 1
         value = 0 if value else 1
@@ -108,7 +108,7 @@ def main(args):
             min_pitch = abs(rise)
             value = float(query_params["pitch"][0]) if "pitch" in query_params else data_example.pitch
             value = max(min_pitch, value)
-            pitch = pitch_or_twist_number_input.number_input('Pitch (Å)', value=value, min_value=min_pitch, step=1.0, format="%.2f", key="pitch")
+            pitch = pitch_or_twist_number_input.number_input('Pitch (Å)', value=value, min_value=min_pitch, step=1.0, format="%.2f", key="pitch", help="twist = 360 / (pitch/rise)")
             twist = round(360./(pitch/rise), 2)
             pitch_or_twist_text.markdown(f"*(twist = {twist:.2f} °)*")
         else:
@@ -116,59 +116,59 @@ def main(args):
             elif "pitch" in query_params: value = round(360./(float(query_params["pitch"][0])/rise), 2)
             else: value = data_example.twist
             value = min(180., max(0., value))
-            twist = pitch_or_twist_number_input.number_input('Twist (°)', value=value, min_value=0.0, max_value=180.0, step=1.0, format="%.2f")
+            twist = pitch_or_twist_number_input.number_input('Twist (°)', value=value, min_value=0.0, max_value=180.0, step=1.0, format="%.2f", help="pitch = 360/twist * rise")
             pitch = abs(round((360./twist)*rise, 2))
             pitch_or_twist_text.markdown(f"*(pitch = {pitch:.2f} Å)*")
 
         value = int(query_params["csym"][0]) if "csym" in query_params else data_example.csym
-        csym = st.number_input('Csym', value=value, min_value=1, step=1)
+        csym = st.number_input('Csym', value=value, min_value=1, step=1, help="Cyclic symmetry around the helical axis")
 
         if input_image2: value = max(radius_auto*apix, radius_auto2*apix2)
         else: value = radius_auto*apix
         value = float(query_params["radius"][0]) if "radius" in query_params else value
         if value<=1: value = 100.0
-        helical_radius = st.number_input('Radius (Å)', value=value, min_value=1.0, max_value=1000.0, step=10., format="%.1f")
+        helical_radius = st.number_input('Radius (Å)', value=value, min_value=1.0, max_value=1000.0, step=10., format="%.1f", help="Mean radius of the tube/filament density from the helical axis")
         
-        tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-90.0, max_value=90.0, step=1.0)
+        tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-90.0, max_value=90.0, step=1.0, help="Only used to compute the layerline positions and to simulate the helix. Will not change the power spectra and phase differences across meridian of the input image(s)")
         value = max(2*apix, float(query_params["resx"][0]) if "resx" in query_params else round(8*apix, 1))
-        cutoff_res_x = st.number_input('Resolution limit - X (Å)', value=value, min_value=2*apix, step=1.0)
+        cutoff_res_x = st.number_input('Resolution limit - X (Å)', value=value, min_value=2*apix, step=1.0, help="Set the highest resolution to be displayed in the X-direction")
         value = max(2*apix, float(query_params["resy"][0]) if "resy" in query_params else round(4*apix, 1))
-        cutoff_res_y = st.number_input('Resolution limit - Y (Å)', value=value, min_value=2*apix, step=1.0)
+        cutoff_res_y = st.number_input('Resolution limit - Y (Å)', value=value, min_value=2*apix, step=1.0, help="Set the highest resolution to be displayed in the Y-direction")
         with st.beta_expander(label="Filters", expanded=False):
-            log_xform = st.checkbox(label="Log(amplitude)", value=True)
-            hp_fraction = st.number_input('Fourier high-pass (%)', value=0.4, min_value=0.0, max_value=100.0, step=0.1, format="%.2f") / 100.0
-            lp_fraction = st.number_input('Fourier low-pass (%)', value=0.0, min_value=0.0, max_value=100.0, step=10.0, format="%.2f") / 100.0
+            log_xform = st.checkbox(label="Log(amplitude)", value=True, help="Perform log transform of the power spectra to allow clear display of layerlines at low and high resolutions")
+            hp_fraction = st.number_input('Fourier high-pass (%)', value=0.4, min_value=0.0, max_value=100.0, step=0.1, format="%.2f", help="Perform high-pass Fourier filtering of the power spectra with filter=0.5 at this percentage of the Nyquist resolution") / 100.0
+            lp_fraction = st.number_input('Fourier low-pass (%)', value=0.0, min_value=0.0, max_value=100.0, step=10.0, format="%.2f", help="Perform low-pass Fourier filtering of the power spectra with filter=0.5 at this percentage of the Nyquist resolution") / 100.0
             value = int(query_params["nx"][0]) if "nx" in query_params else max(min(nx,ny), 512)
-            pnx = st.number_input('FFT X-dim size (pixels)', value=value, min_value=min(nx, 128), step=2)
+            pnx = st.number_input('FFT X-dim size (pixels)', value=value, min_value=min(nx, 128), step=2, help="Set the size of FFT in X-dimension to this number of pixels")
             value = int(query_params["ny"][0]) if "ny" in query_params else max(min(nx,ny), 1024)
-            pny = st.number_input('FFT Y-dim size (pixels)', value=value, min_value=min(ny, 512), step=2)
+            pny = st.number_input('FFT Y-dim size (pixels)', value=value, min_value=min(ny, 512), step=2, help="Set the size of FFT in Y-dimension to this number of pixels")
         with st.beta_expander(label="Simulation", expanded=False):
             value = float(query_params["simuradius"][0]) if "simuradius" in query_params else 0.0
-            ball_radius = st.number_input('Gaussian radius (Å)', value=value, min_value=0.0, max_value=helical_radius, step=5.0, format="%.1f")
+            ball_radius = st.number_input('Gaussian radius (Å)', value=value, min_value=0.0, max_value=helical_radius, step=5.0, format="%.1f", help="A 3-D Gaussian function will be used to reprsent each subunit in the simulated helix. The Gaussian function will fall off from 1 to 0.5 at this radius. A value <=0 will disable the simulation")
             show_simu = True if ball_radius > 0 else False
             noise=0.0
             use_plot_size=False
             if show_simu:
-                az = st.number_input('Azimuthal angle (°)', value=0, min_value=0, max_value=360, step=1, format="%.2f")
+                az = st.number_input('Azimuthal angle (°)', value=0.0, min_value=0.0, max_value=360.0, step=1.0, format="%.2f", help="Position the Gaussian in the central Z-section at this azimuthal angle")
                 value = float(query_params["simunoise"][0]) if "simunoise" in query_params else 0.0
-                noise = st.number_input('Noise (sigma)', value=value, min_value=0., step=1., format="%.2f", key=next_key())
+                noise = st.number_input('Noise (sigma)', value=value, min_value=0., step=1., format="%.2f", key=next_key(), help="Add random noise to the simulated helix image")
                 value = bool(query_params["useplotsize"][0]) if "useplotsize" in query_params else False
-                use_plot_size = st.checkbox('Use plot size', value=value)
+                use_plot_size = st.checkbox('Use plot size', value=value, help="If checked, the simulated helix image will use the image size of the displayed power spectra instead of the size of the input image")
         
         movie_frames = 0
         if is_3d or show_simu:
             with st.beta_expander(label="Tilt movie", expanded=False):
-                movie_frames = st.number_input('Movie frame #', value=0, min_value=0, max_value=1000, step=1)
+                movie_frames = st.number_input('Movie frame #', value=0, min_value=0, max_value=1000, step=1, help="Set the number of movies frames that will be generated to show the morphing of the power spectra and phase differences across meridian images of the simulated helix at different tilt angles in the range from 0 to the value specified in the *Out-of-plane tilt (°)* input box. A value <=0 will not generate a movie")
                 if movie_frames>0:
                     if is_3d and show_simu:
                         movie_modes = {0:"3D map", 1:"simulation"}
-                        movie_mode = st.radio(label="Tilt:", options=list(movie_modes.keys()), format_func=lambda i:movie_modes[i], index=0)
+                        movie_mode = st.radio(label="Tilt:", options=list(movie_modes.keys()), format_func=lambda i:movie_modes[i], index=0, help="Tilt the input 3D map to different angles instead of simulating a helix at different tilt angles")
                     elif is_3d:
                         movie_mode = 0
                     else:
                         movie_mode = 1
                     if movie_mode == 0:
-                        movie_noise = st.number_input('Noise (sigma)', value=0., min_value=0., step=1., format="%.2f", key=next_key())
+                        movie_noise = st.number_input('Noise (sigma)', value=0., min_value=0., step=1., format="%.2f", key=next_key(), help="Add random noise to the projection images")
         
     if input_type in ["PS"]:
         pwr = resize_rescale_power_spectra(data, nyquist_res=2*apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
@@ -212,13 +212,13 @@ def main(args):
         show_phase_diff = False
         show_yprofile = False
         if input_type in ["image", "PS"]:
-            show_pwr = st.checkbox(label="PS", value=True)
+            show_pwr = st.checkbox(label="PS", value=True, help="Show the power spectra")
         if show_pwr:
-            show_yprofile = st.checkbox(label="YP", value=False)
+            show_yprofile = st.checkbox(label="YP", value=False, help="Show the Y-profile of the power spectra (i.e. horizontal projection of the power spectra")
         if input_type in ["image"]:
-            show_phase = st.checkbox(label="Phase", value=False)
+            show_phase = st.checkbox(label="Phase", value=False, help="Show the phase values in the hover tooltips of the displayed power spectra and phase differences across meridian")
         if input_type in ["image", "PD"]:
-            show_phase_diff = st.checkbox(label="PD", value=True)
+            show_phase_diff = st.checkbox(label="PD", value=True, help="Show the phase differences across meridian")
         
         show_pwr2 = False
         show_phase2 = False
@@ -228,34 +228,34 @@ def main(args):
             if input_type2 in ["image", "PS"]:
                 if input_type2 in ["PS"]: value = True
                 else: value = not show_pwr
-                show_pwr2 = st.checkbox(label="PS2", value=value)
+                show_pwr2 = st.checkbox(label="PS2", value=value, help="Show the power spectra of the 2nd input image")
             if show_pwr2:
-                show_yprofile2 = st.checkbox(label="YP2", value=show_yprofile)
+                show_yprofile2 = st.checkbox(label="YP2", value=show_yprofile, help="Show the Y-profile of the power spectra of the 2nd input image (i.e. horizontal projection of the power spectra")
             if input_type2 in ["image"]:
                 if show_pwr2: show_phase2 = st.checkbox(label="Phase2", value=False)
             if input_type2 in ["image", "PD"]:
                 if input_type2 in ["PD"]: value = True
                 else: value = not show_phase_diff
-                show_phase_diff2 = st.checkbox(label="PD2", value=value)
+                show_phase_diff2 = st.checkbox(label="PD2", value=value, help="Show the phase differences across meridian of the 2nd input image")
 
         show_pwr_simu = False
         show_phase_simu = False
         show_phase_diff_simu = False
         show_yprofile_simu = False
         if show_simu:
-            show_pwr_simu = st.checkbox(label="PS_Simu", value=show_pwr or show_pwr2)
+            show_pwr_simu = st.checkbox(label="PSSimu", value=show_pwr or show_pwr2)
             if show_pwr_simu:
-                show_yprofile_simu = st.checkbox(label="YP_Simu", value=show_yprofile or show_yprofile2)
+                show_yprofile_simu = st.checkbox(label="YPSimu", value=show_yprofile or show_yprofile2)
                 show_phase_simu = st.checkbox(label="PhaseSimu", value=show_phase or show_phase2)
-            show_phase_diff_simu = st.checkbox(label="PD_Simu", value=show_phase_diff or show_phase_diff2)
+            show_phase_diff_simu = st.checkbox(label="PDSimu", value=show_phase_diff or show_phase_diff2)
 
         show_LL_text = False
         if show_pwr or show_phase_diff or show_pwr2 or show_phase_diff2 or show_pwr_simu or show_phase_diff_simu:
-            show_pseudocolor = st.checkbox(label="Color", value=True)
-            show_LL = st.checkbox(label="LL", value=True)
+            show_pseudocolor = st.checkbox(label="Color", value=True, help="Show the power spectra in pseudo color instead of grey scale")
+            show_LL = st.checkbox(label="LL", value=True, help="Show the layer lines at positions computed from the current values of pitch/twist, rise, csym, radius, and tilt")
             if show_LL:
                 value = bool(query_params["lltext"][0]) if "lltext" in query_params else True
-                show_LL_text = st.checkbox(label="LL-Text", value=value)
+                show_LL_text = st.checkbox(label="LLText", value=value, help="Show the layer lines using integer numbers for the Bessel orders instead of ellipses")
                 m_groups = compute_layer_line_positions(twist=twist, rise=rise, csym=csym, radius=helical_radius, tilt=tilt, cutoff_res=cutoff_res_y)
                 ng = len(m_groups)
                 st.subheader("m=")
@@ -263,7 +263,7 @@ def main(args):
                 lgs = sorted(m_groups.keys())[::-1]
                 for lgi, lg in enumerate(lgs):
                     value = True if lg in [0, 1] else False
-                    show_choices[lg] = st.checkbox(label=str(lg), value=value)
+                    show_choices[lg] = st.checkbox(label=str(lg), value=value, help=f"Show the layer lines in group m={lg}")
 
     if show_simu:
         proj = simulate_helix(twist, rise, csym, helical_radius=helical_radius, ball_radius=ball_radius, 
@@ -599,13 +599,13 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
     from contextlib import suppress
     supress_missing_values = suppress(KeyError, IndexError)
     with column:
-        input_modes = {0:"upload", 1:"url", 2:"emd-xxxx"}
+        input_modes = {0:"upload", 1:"url", 2:"emd-xxxxx"}
         value = 1
         with supress_missing_values: value = int(query_params["input_mode"][param_i])
-        input_mode = st.radio(label="How to obtain the input image/map:", options=list(input_modes.keys()), format_func=lambda i:input_modes[i], index=value, key=next_key())
+        input_mode = st.radio(label="How to obtain the input image/map:", options=list(input_modes.keys()), format_func=lambda i:input_modes[i], index=value, key=next_key(), help="Only 2D images in MRC (*\*.mrcs*) and 3D maps in MRC (*\*.mrc*) or CCP4 (*\*.map*) format are supported. Compressed maps (*\*.gz*) will be automatically decompressed")
         is_3d = False
-        if input_mode == 2:  # "emd-xxxx":
-            label = "Input an EMDB ID (emd-xxxx):"
+        if input_mode == 2:  # "emd-xxxxx":
+            label = "Input an EMDB ID (emd-xxxxx):"
             value = "emd-3567"
             with supress_missing_values: value = query_params["emdid"][param_i]
             emdid = st.text_input(label=label, value=value, key=next_key())
@@ -623,7 +623,7 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                     label = "Input a url of 2D image(s) or a 3D map:"
                     value = data_example.url
                     with supress_missing_values: value = query_params["url"][param_i]
-                    image_url = st.text_input(label=label, value=value, key=next_key())
+                    image_url = st.text_input(label=label, value=value, key=next_key(), help="An online url (http:// or ftp://) or a local file path (/path/to/your/structure.mrc)")
                     data_all, apix = get_2d_image_from_url(URL(image_url.strip()))
             nz, ny, nx = data_all.shape
             if nz==1:
@@ -631,7 +631,7 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
             else:
                 if nx==ny and (nz>nx//4 and nz%4==0): is_3d_auto = True
                 else: is_3d_auto = False
-                is_3d = st.checkbox(label=f"The input ({nx}x{ny}x{nz}) is a 3D map", value=is_3d_auto, key=next_key())
+                is_3d = st.checkbox(label=f"The input ({nx}x{ny}x{nz}) is a 3D map", value=is_3d_auto, key=next_key(), help="The app thinks the input image contains a stack of 2D images. Check this box to inform the app that the input is a 3D map")
         if is_3d:
             if not np.any(data_all):
                 st.warning("All voxels of the input 3D map have zero value")
@@ -654,7 +654,7 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                     if param_i>0:
                         value = 1
                         with supress_missing_values: value = int(query_params["sync_i"][0])
-                        sync_i = st.checkbox(label=f"Sync image index", value=value, key=next_key())
+                        sync_i = st.checkbox(label=f"Sync image index", value=value, key=next_key(), help="Sync the index of the displayed image when two image stacks are used as inputs, for example, power spectra from one image stack and phase differences across meridian from the other image stack")
                     if param_i>0 and sync_i:
                         image_index = image_index_sync
                     else:
@@ -697,7 +697,7 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                 image_label = f"Orignal image ({nx}x{ny})"
             else:
                 image_label = f"Orignal image {image_index+1} ({nx}x{ny})"
-            st.image(normalize(data), use_column_width=True, caption=image_label, key=next_key())
+            st.image(normalize(data), use_column_width=True, caption=image_label)
 
         with st.beta_expander(label="Transform the image", expanded=False):
             input_type_auto = None
@@ -709,7 +709,7 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                 elif is_pd_auto: input_type_auto = "PD"
                 else: input_type_auto = "image"
             mapping = {"image":0, "PS":1, "PD":2}
-            input_type = st.radio(label="Input is:", options="image PS PD".split(), index=mapping[input_type_auto], key=next_key())
+            input_type = st.radio(label="Input is:", options="image PS PD".split(), index=mapping[input_type_auto], key=next_key(), help="image: real space image; PS: power spectra; PD: phage differences across meridian")
             if input_type in ["PS", "PD"]:
                 apix = 0.5 * st.number_input('Nyquist res (Å)', value=2*apix, min_value=0.1, max_value=30., step=0.01, format="%.4f", key=next_key())
             else:
@@ -777,7 +777,7 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                     image_label = f"Transformed image ({nx}x{ny})"
                 else:
                     image_label = f"Transformed image {image_index+1} ({nx}x{ny})"
-                st.image(normalize(data), use_column_width=True, caption=image_label, key=next_key())
+                st.image(normalize(data), use_column_width=True, caption=image_label)
 
         #if input_type in ["image"]:
         if 0:
@@ -1248,7 +1248,7 @@ def get_2d_image_from_uploaded_file(fileobj):
 @st.cache(persist=True, show_spinner=False)
 def get_emdb_map(emdid: str):
     emdid_number = emdid.lower().split("emd-")[-1]
-    url = f"ftp://ftp.ebi.ac.uk/pub/databases/emdb/structures/EMD-{emdid_number}/map/emd_{emdid_number}.map.gz"
+    url = f"http://ftp.ebi.ac.uk/pub/databases/emdb/structures/EMD-{emdid_number}/map/emd_{emdid_number}.map.gz"
     ds = np.DataSource(None)
     fp = ds.open(url)
     import mrcfile
