@@ -453,7 +453,7 @@ def main(args):
 def set_query_params(input, input2, use_pitch, pitch, twist, rise, csym, helical_radius, show_LL_text, cutoff_res_x, cutoff_res_y, nx, ny, simuradius, simunoise, useplotsize):
     input_mode, url, image_index, emdid, input_type = input
     input_mode2, url2, image_index2, emdid2, input_type2 = input2
-    if input_mode2:
+    if input_mode2 is not None:
         params=dict(input_mode=[input_mode, input_mode2])
         if input_mode == 2:
             params["emdid"] = [emdid, emdid2]
@@ -601,9 +601,12 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
     with column:
         input_modes = {0:"upload", 1:"url", 2:"emd-xxxxx"}
         value = 1
+        with supress_missing_values: value = int(query_params["input_mode"][0])
         with supress_missing_values: value = int(query_params["input_mode"][param_i])
-        input_mode = st.radio(label="How to obtain the input image/map:", options=list(input_modes.keys()), format_func=lambda i:input_modes[i], index=value, key=next_key(), help="Only 2D images in MRC (*\*.mrcs*) and 3D maps in MRC (*\*.mrc*) or CCP4 (*\*.map*) format are supported. Compressed maps (*\*.gz*) will be automatically decompressed")
+        input_mode = st.radio(label="How to obtain the input image/map:", options=list(input_modes.keys()), format_func=lambda i:input_modes[i], index=value, key=next_key(), help="Only 2D images in MRC (*.mrcs*) and 3D maps in MRC (*.mrc*) or CCP4 (*.map*) format are supported. Compressed maps (*.gz*) will be automatically decompressed")
         is_3d = False
+        is_pwr_auto = None
+        is_pd_auto = None
         if input_mode == 2:  # "emd-xxxxx":
             label = "Input an EMDB ID (emd-xxxxx):"
             value = "emd-3567"
@@ -612,10 +615,14 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
             data_all, apix = get_emdb_map(emdid.strip())
             image_index = 0
             is_3d = True
+            is_pwr_auto = False
+            is_pd_auto = False
         else:
             if input_mode == 0:  # "upload a mrc/mrcs file":
                 fileobj = st.file_uploader("Upload a mrc or mrcs file ", type=['mrc', 'mrcs', 'map', 'map.gz', 'tnf'], key=next_key())
                 if fileobj is not None:
+                    is_pwr_auto = fileobj.name.find("ps.mrcs")!=-1
+                    is_pd_auto = fileobj.name.find("pd.mrcs")!=-1
                     data_all, apix = get_2d_image_from_uploaded_file(fileobj)
                 else:
                     st.stop()
@@ -623,8 +630,10 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                     label = "Input a url of 2D image(s) or a 3D map:"
                     value = data_example.url
                     with supress_missing_values: value = query_params["url"][param_i]
-                    image_url = st.text_input(label=label, value=value, key=next_key(), help="An online url (http:// or ftp://) or a local file path (/path/to/your/structure.mrc)")
-                    data_all, apix = get_2d_image_from_url(URL(image_url.strip()))
+                    image_url = st.text_input(label=label, value=value, key=next_key(), help="An online url (http:// or ftp://) or a local file path (/path/to/your/structure.mrc)").strip()
+                    is_pwr_auto = image_url.find("ps.mrcs")!=-1
+                    is_pd_auto = image_url.find("pd.mrcs")!=-1
+                    data_all, apix = get_2d_image_from_url(URL(image_url))
             nz, ny, nx = data_all.shape
             if nz==1:
                 is_3d = False
@@ -697,31 +706,32 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                 image_label = f"Orignal image ({nx}x{ny})"
             else:
                 image_label = f"Orignal image {image_index+1} ({nx}x{ny})"
+            if param_i>0: image_label += f" - {param_i+1}"
             st.image(normalize(data), use_column_width=True, caption=image_label)
 
         with st.beta_expander(label="Transform the image", expanded=False):
             input_type_auto = None
             with supress_missing_values: input_type_auto = query_params["input_type"][param_i]
             if input_type_auto is None:
-                is_pwr_auto = guess_if_is_power_spectra(data)
-                is_pd_auto = guess_if_is_phase_differences_across_meridian(data)
+                if is_pwr_auto is None: is_pwr_auto = guess_if_is_power_spectra(data)
+                if is_pd_auto is None: is_pd_auto = guess_if_is_phase_differences_across_meridian(data)
                 if is_pwr_auto: input_type_auto = "PS"
                 elif is_pd_auto: input_type_auto = "PD"
                 else: input_type_auto = "image"
             mapping = {"image":0, "PS":1, "PD":2}
             input_type = st.radio(label="Input is:", options="image PS PD".split(), index=mapping[input_type_auto], key=next_key(), help="image: real space image; PS: power spectra; PD: phage differences across meridian")
             if input_type in ["PS", "PD"]:
-                apix = 0.5 * st.number_input('Nyquist res (Å)', value=2*apix, min_value=0.1, max_value=30., step=0.01, format="%.4f", key=next_key())
+                apix = 0.5 * st.number_input('Nyquist res (Å)', value=2*apix, min_value=0.1, max_value=30., step=0.01, format="%.5g", key=next_key())
             else:
-                apix = st.number_input('Pixel size (Å/pixel)', value=apix, min_value=0.1, max_value=30., step=0.01, format="%.4f", key=next_key())
+                apix = st.number_input('Pixel size (Å/pixel)', value=apix, min_value=0.1, max_value=30., step=0.01, format="%.5g", key=next_key())
             transpose_auto = input_mode not in [2] and nx > ny
             transpose = st.checkbox(label='Transpose the image', value=transpose_auto, key=next_key())
             if input_type in ["PS", "PD"] or is_3d:
                 angle_auto, dx_auto = 0., 0.
             else:
                 angle_auto, dx_auto = auto_vertical_center(data)
-            angle = st.number_input('Rotate (°) ', value=-angle_auto, min_value=-180., max_value=180., step=1.0, key=next_key())
-            dx = st.number_input('Shift along X-dim (Å) ', value=dx_auto*apix, min_value=-nx*apix, max_value=nx*apix, step=1.0, key=next_key())
+            angle = st.number_input('Rotate (°) ', value=-angle_auto, min_value=-180., max_value=180., step=1.0, format="%f", key=next_key())
+            dx = st.number_input('Shift along X-dim (Å) ', value=dx_auto*apix, min_value=-nx*apix, max_value=nx*apix, step=1.0, format="%f", key=next_key())
         
         transformed_image = st.empty()
         transformed = transpose or angle or dx
@@ -777,6 +787,7 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                     image_label = f"Transformed image ({nx}x{ny})"
                 else:
                     image_label = f"Transformed image {image_index+1} ({nx}x{ny})"
+                if param_i>0: image_label += f" - {param_i+1}"
                 st.image(normalize(data), use_column_width=True, caption=image_label)
 
         #if input_type in ["image"]:
@@ -1005,7 +1016,7 @@ def fft_rescale(image, apix=1.0, cutoff_res=None, output_size=None):
     X = (2*np.pi * X).flatten(order='C')
 
     from finufft import nufft2d2
-    fft = nufft2d2(x=Y, y=X, f=image.astype(np.complex), eps=1e-6)
+    fft = nufft2d2(x=Y, y=X, f=image.astype(np.complex128), eps=1e-6)
     fft = fft.reshape((ony, onx))
 
     # phase shifts for real-space shifts by half of the image box in both directions
@@ -1162,7 +1173,7 @@ def generate_projection(data, az=0, tilt=0, output_size=None):
     rot = R.from_euler('zx', [tilt, az], degrees=True)  # order: right to left
     m = rot.as_matrix()
     nx, ny, nz = data.shape
-    bcenter = np.array((nx//2, ny//2, nz//2), dtype=np.float)
+    bcenter = np.array((nx//2, ny//2, nz//2), dtype=np.float32)
     offset = bcenter.T - np.dot(m, bcenter.T)
     tmp = affine_transform(data, matrix=m, offset=offset, mode='nearest')
     ret = tmp.sum(axis=1)   # integrate along y-axis
@@ -1273,7 +1284,7 @@ def get_2d_image_from_file(filename: FILENAME):
     if data.dtype==np.dtype('complex64'):
         data_complex = data
         ny, nx = data_complex[0].shape
-        data = np.zeros((len(data_complex), ny, (nx-1)*2), dtype=np.float)
+        data = np.zeros((len(data_complex), ny, (nx-1)*2), dtype=np.float32)
         for i in range(len(data)):
             tmp = np.abs(np.fft.fftshift(np.fft.fft(np.fft.irfft(data_complex[i])), axes=1))
             data[i] = normalize(tmp, percentile=(0.1, 99.9))
