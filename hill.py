@@ -705,11 +705,10 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
             if is_3d:
                 image_label = f"Orignal image ({nx}x{ny})"
             else:
-                image_label = f"Orignal image {image_index+1} ({nx}x{ny})"
-            if param_i>0: image_label += f" - {param_i+1}"
+                image_label = f"Orignal image {image_index+1}/{nz} ({nx}x{ny})"
             st.image(normalize(data), use_column_width=True, caption=image_label)
 
-        with st.beta_expander(label="Transform the image", expanded=False):
+        with st.beta_expander(label="Image parameters", expanded=False):
             input_type_auto = None
             with supress_missing_values: input_type_auto = query_params["input_type"][param_i]
             if input_type_auto is None:
@@ -730,8 +729,8 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                 angle_auto, dx_auto = 0., 0.
             else:
                 angle_auto, dx_auto = auto_vertical_center(data)
-            angle = st.number_input('Rotate (°) ', value=-angle_auto, min_value=-180., max_value=180., step=1.0, format="%f", key=next_key())
-            dx = st.number_input('Shift along X-dim (Å) ', value=dx_auto*apix, min_value=-nx*apix, max_value=nx*apix, step=1.0, format="%f", key=next_key())
+            angle = st.number_input('Rotate (°) ', value=-angle_auto, min_value=-180., max_value=180., step=1.0, format="%.4g", key=next_key())
+            dx = st.number_input('Shift along X-dim (Å) ', value=dx_auto*apix, min_value=-nx*apix, max_value=nx*apix, step=1.0, format="%.3g", key=next_key())
         
         transformed_image = st.empty()
         transformed = transpose or angle or dx
@@ -786,8 +785,7 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                 if is_3d:
                     image_label = f"Transformed image ({nx}x{ny})"
                 else:
-                    image_label = f"Transformed image {image_index+1} ({nx}x{ny})"
-                if param_i>0: image_label += f" - {param_i+1}"
+                    image_label = f"Transformed image {image_index+1}/{nz} ({nx}x{ny})"
                 st.image(normalize(data), use_column_width=True, caption=image_label)
 
         #if input_type in ["image"]:
@@ -820,13 +818,13 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
         if is_3d:
             image_label = f"Transformed image"
         else:
-            image_label = f"Transformed image {image_index}"
+            image_label = f"Transformed image {image_index+1}"
     else:
         image_container = original_image
         if is_3d:
             image_label = f"Original image"
         else:
-            image_label = f"Original image {image_index}"
+            image_label = f"Original image {image_index+1}"
 
     if input_mode==2:
         input_params = (input_mode, (None, None, emdid))
