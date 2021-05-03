@@ -86,7 +86,7 @@ def main(args):
         st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to Wen Jiang (jiang12 at purdue.edu)*")
 
     with col2:
-        copy_pitch_rise = st.button(label="Copy pitch/rise", help="Update the pitch/rise values below using the pitch/rise values from the sliders at the top the plots")
+        copy_pitch_rise = st.button(label="Copy pitch/rise⤺", help="Update the pitch/rise values below using the pitch/rise values from the sliders at the top the plots")
         pitch_or_twist_choices = ["pitch", "twist"]
         value = int(query_params["use_pitch"][0]) if "use_pitch" in query_params else 1
         value = 0 if value else 1
@@ -612,6 +612,7 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
             value = "emd-3567"
             with supress_missing_values: value = query_params["emdid"][param_i]
             emdid = st.text_input(label=label, value=value, key=next_key())
+            st.markdown(f'[{emdid.upper()}](https://www.ebi.ac.uk/pdbe/entry/emdb/{emdid.upper()})')
             data_all, apix = get_emdb_map(emdid.strip())
             image_index = 0
             is_3d = True
