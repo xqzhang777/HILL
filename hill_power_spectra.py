@@ -99,20 +99,20 @@ def main():
         groups = data.groupby(args.groupby, sort=True)
         if args.verbose:
             print(f"{len(groups)} groups based on {args.groupby}")
-        if args.minCount>0:
+        if args.minParticles>0:
             groups, groups_all = [], groups
             for gi, g in enumerate(groups_all):
                 n = len(g[1])
-                if n<args.minCount:
-                    if args.verbose>0:
-                        print(f"\tGroup {gi+1}/{len(groups_all)} - {g[0]}: skipped as it has only {n} particles (<{args.minCount})")
+                if n<args.minParticles:
+                    if args.verbose>1:
+                        print(f"\tGroup {gi+1}/{len(groups_all)} - {g[0]}: skipped as it has only {n} particles (<{args.minParticles})")
                     continue
                 else:
-                    if args.verbose>1:
-                        print(f"\tGroup {gi+1}/{len(groups_all)} - {g[0]}: retained as it has {n} particles (>={args.minCount})")
+                    if args.verbose>0:
+                        print(f"\tGroup {gi+1}/{len(groups_all)} - {g[0]}: retained as it has {n} particles (>={args.minParticles})")
                 groups.append(g)
             if args.verbose and len(groups)<len(groups_all):
-                print(f"{len(groups)} groups after removing {len(groups_all)-len(groups)} small groups (<{args.minCount} particles)")
+                print(f"{len(groups)} groups after removing {len(groups_all)-len(groups)} small groups (<{args.minParticles} particles)")
     else:
         groups = [("all_particles", data)]
 
@@ -183,37 +183,39 @@ def main():
 
     results = {}    
     for i in range(len(fftavgs)):
-        ps_avg, pd_avg, image_avg, count, group_id = fftavgs[i]
-        if group_id not in results:
+        ps_avg, pd_avg, image_avg, nptcls, group_id = fftavgs[i]
+        gi, _, group_name, _, _ = group_id
+        if group_name not in results:
             d = {}
+            d["gi"] = gi
             d["ps_avg"] = np.zeros_like(ps_avg)
             if pd_avg is not None:
                 d["pd_avg"] = np.zeros_like(pd_avg)
             if image_avg is not None:
                 d["image_avg"] = np.zeros_like(image_avg)
-            d["count"] = 0
-            results[group_id] = d
-        results[group_id]["ps_avg"] += ps_avg
-        if pd_avg is not None: results[group_id]["pd_avg"] += pd_avg
-        if image_avg is not None: results[group_id]["image_avg"] += image_avg
-        results[group_id]["count"] += count
+            d["nptcls"] = 0
+            results[group_name] = d
+        results[group_name]["ps_avg"] += ps_avg
+        if pd_avg is not None: results[group_name]["pd_avg"] += pd_avg
+        if image_avg is not None: results[group_name]["image_avg"] += image_avg
+        results[group_name]["nptcls"] += nptcls
 
-    for group_id in results:
-        gi, _, group_name, _, _ = group_id
+    for group_name in results:
+        gi = results[group_name]["gi"]
         data_output.loc[gi, "pid"] = gi
-        data_output.loc[gi, "count"] = results[group_id]["count"]
+        data_output.loc[gi, "nptcls"] = results[group_name]["nptcls"]
         if group_name:
-            data_output.loc[gi, "group"] = str(group_name)
-        ps_avg = results[group_id]["ps_avg"] / results[group_id]["count"]
+            data_output.loc[gi, "group"] = f"'{','.join(group_name)}'"
+        ps_avg = results[group_name]["ps_avg"] / results[group_name]["nptcls"]
         ps_avg = np.fft.fftshift(ps_avg)
         mrc_ps.data[gi] = ps_avg
-        if "pd_avg" in results[group_id]:
-            pd_avg = results[group_id]["pd_avg"] / results[group_id]["count"]
+        if "pd_avg" in results[group_name]:
+            pd_avg = results[group_name]["pd_avg"] / results[group_name]["nptcls"]
             pd_avg = np.rad2deg(np.arccos(pd_avg))
             pd_avg = np.fft.fftshift(pd_avg)
             mrc_pd.data[gi] = pd_avg
-        if "image_avg" in results[group_id]:
-            image_avg = results[group_id]["image_avg"] / results[group_id]["count"]
+        if "image_avg" in results[group_name]:
+            image_avg = results[group_name]["image_avg"] / results[group_name]["nptcls"]
             mrc_image.data[gi] = image_avg
     mrc_ps.close()
     if mrc_pd is not None: mrc_pd.close() 
@@ -223,7 +225,7 @@ def main():
     if pdFile: data_output.loc[:, "pd"] = pdFile
     if imageAvgFile: data_output.loc[:, "avg"] = imageAvgFile
 
-    cols = [c for c in "pid filename group count avg pd".split() if c in data_output]
+    cols = [c for c in "pid filename group nptcls avg pd".split() if c in data_output]
     data_output = data_output.loc[:, cols]
     dataframe2lst(data_output, outputLstFile)
     
@@ -626,7 +628,7 @@ def image2dataframe(inputFile):
     return p
 
 def dataframe2lst(data, lstFile):
-    int_types = "pid count".split()
+    int_types = "pid nptcls".split()
     float_types = "apix".split()
     for i in int_types:
         if i in data: data.loc[:, i] = data.loc[:, i].astype(int)
@@ -669,7 +671,7 @@ def parse_command_line():
     parser.add_argument('inputImage', help='input particle lst/star/cs/mrcs file')
     parser.add_argument('--outputPrefix', metavar="<str>", type=str, help="prefix of output files", default="")
     parser.add_argument("--groupby", metavar="<attr>", type=str, nargs="+", help="group particles by these parameters (class, helicaltube etc)", default=[])
-    parser.add_argument("--minCount", metavar="<n>", type=int, help="ignore groups of fewer particles than this minimal count. default: %(default)s", default=-1)
+    parser.add_argument("--minParticles", metavar="<n>", type=int, help="ignore groups of fewer particles than this minimal count. default: %(default)s", default=-1)
     parser.add_argument("--batchSize", metavar="<n>", type=int, help="maximal number of particles per batch. default: %(default)s", default=100)
     parser.add_argument("--apix", metavar="<Å/pixel>", type=float, help="pixel size of input image", default=0)
     parser.add_argument("--diameterMask", metavar="<Å>", type=float, help="masking with this filament/tube diameter (in Angstrom). disabled by default", default=0)
