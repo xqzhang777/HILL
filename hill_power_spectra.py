@@ -281,7 +281,8 @@ def averageOneBatch(mgraphs, group_id, compute_phase_differences, diameterMask, 
         pids = particles["pid"].astype(int).values
         filename = particles["filename"].iloc[0]
         with mrcfile.mmap(filename, mode='r') as mrc:
-            _, ny, nx = mrc.data.shape
+            ny, nx = mrc.data.shape[-2:]
+            assert ny==nx, f"Error in reading {filename}: {mrc.data.shape}"
             if data_orig is None:
                 data_orig = np.zeros((nPtcls, ny, nx), dtype=np.float32)
                 if align:
