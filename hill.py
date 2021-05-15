@@ -369,8 +369,8 @@ def main(args):
 
         if fig_ellipses:
             from bokeh.models import Slider, CustomJS
-            slider_pitch = Slider(start=0.0, end=pitch*2.0, value=pitch, step=.01, title="Pitch (Å)", width=pnx)
-            slider_rise = Slider(start=0.0, end=min(max_rise, rise*2.0), value=rise, step=.01, title="Rise (Å)", width=pnx)
+            slider_pitch = Slider(start=0.0, end=pitch*2.0, value=pitch, step=pitch*0.002, title="Pitch (Å)", width=pnx)
+            slider_rise = Slider(start=0.0, end=min(max_rise, rise*2.0), value=rise, step=min(max_rise, rise*2.0)*0.001, title="Rise (Å)", width=pnx)
             callback_code = """
                 var pitch_inv = 1./slider_pitch.value
                 var rise_inv = 1./slider_rise.value
@@ -411,7 +411,7 @@ def main(args):
                     }
                 }
             """
-            reload = input_mode in [1, 2] and input_mode2 in [None, 1, 2]
+            reload = input_mode in [1, 2, 3] and input_mode2 in [None, 1, 2, 3]
             callback = CustomJS(args=dict(slider_pitch=slider_pitch, slider_rise=slider_rise, reload=reload), code=callback_code)
             slider_pitch.js_on_change('value_throttled', callback)
             slider_rise.js_on_change('value_throttled', callback)
@@ -455,7 +455,7 @@ def set_query_params(input, input2, use_pitch, pitch, twist, rise, csym, helical
     input_mode2, url2, image_index2, emdid2, input_type2 = input2
     if input_mode2 is not None:
         params=dict(input_mode=[input_mode, input_mode2])
-        if input_mode == 2:
+        if input_mode in [2, 3]:
             params["emdid"] = [emdid, emdid2]
         elif input_mode == 1:
             params["url"] = [url, url2]
@@ -464,7 +464,7 @@ def set_query_params(input, input2, use_pitch, pitch, twist, rise, csym, helical
             params["input_type"] = [input_type, input_type2]
     else:
         params=dict(input_mode=input_mode)        
-        if input_mode == 2:
+        if input_mode in [2, 3]:
             params["emdid"] = emdid
         elif input_mode == 1:
             params["url"] = url
@@ -599,7 +599,7 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
     from contextlib import suppress
     supress_missing_values = suppress(KeyError, IndexError)
     with column:
-        input_modes = {0:"upload", 1:"url", 2:"emd-xxxxx"}
+        input_modes = {0:"upload", 1:"url", 2:"emd-xxxxx", 3:"random"}
         value = 1
         with supress_missing_values: value = int(query_params["input_mode"][0])
         with supress_missing_values: value = int(query_params["input_mode"][param_i])
@@ -607,13 +607,33 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
         is_3d = False
         is_pwr_auto = None
         is_pd_auto = None
-        if input_mode == 2:  # "emd-xxxxx":
-            label = "Input an EMDB ID (emd-xxxxx):"
-            value = "emd-3567"
-            with supress_missing_values: value = query_params["emdid"][param_i]
-            emdid = st.text_input(label=label, value=value, key=next_key())
-            st.markdown(f'[{emdid.upper()}](https://www.ebi.ac.uk/pdbe/entry/emdb/{emdid.upper()})')
-            data_all, apix = get_emdb_map(emdid.strip())
+        if input_mode in [2, 3]:
+            emdb_ids = get_emdb_ids()
+            if not emdb_ids:
+                st.warning("failed to obtained a list of helical structures in EMDB")
+                return
+            if input_mode == 2:  # "emd-xxxxx":
+                label = "Input an EMDB ID (emd-xxxxx):"
+                value = "emd-6428"
+                with supress_missing_values: value = query_params["emdid"][param_i]
+                emdid = st.text_input(label=label, value=value, key=next_key()).strip()
+                emdid = emdid.lower().split("emd-")[-1]
+                if emdid not in emdb_ids:
+                    emdid_bad = emdid
+                    import random
+                    emdid = random.choice(emdb_ids)
+                    st.warning(f"emd-{emdid_bad} is not a helical structure. Please input a valid id (for example, a randomly selected valid id 'emd-{emdid}')")
+                    return
+            elif input_mode == 3:   # "random":
+                import random
+                button_clicked = st.button(label="Change EMDB ID", help="Randomly select another helical structure in EMDB")
+                if button_clicked or "emdid" not in query_params:
+                    emdid = random.choice(emdb_ids)
+                else:
+                    emdid = random.choice(emdb_ids)
+                    with supress_missing_values: emdid = query_params["emdid"][param_i].lower().split("emd-")[-1]
+            st.markdown(f'[EMD-{emdid}](https://www.ebi.ac.uk/pdbe/entry/emdb/EMD-{emdid})')
+            data_all, apix = get_emdb_map(emdid)
             image_index = 0
             is_3d = True
             is_pwr_auto = False
@@ -724,7 +744,7 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                 apix = 0.5 * st.number_input('Nyquist res (Å)', value=2*apix, min_value=0.1, max_value=30., step=0.01, format="%.5g", key=next_key())
             else:
                 apix = st.number_input('Pixel size (Å/pixel)', value=apix, min_value=0.1, max_value=30., step=0.01, format="%.5g", key=next_key())
-            transpose_auto = input_mode not in [2] and nx > ny
+            transpose_auto = input_mode not in [2, 3] and nx > ny
             transpose = st.checkbox(label='Transpose the image', value=transpose_auto, key=next_key())
             if input_type in ["PS", "PD"] or is_3d:
                 angle_auto, dx_auto = 0., 0.
@@ -827,7 +847,7 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
         else:
             image_label = f"Original image {image_index+1}"
 
-    if input_mode==2:
+    if input_mode in [2, 3]:
         input_params = (input_mode, (None, None, emdid))
     elif input_mode==1:
         input_params = (input_mode, (None, image_url, None))
@@ -1255,10 +1275,19 @@ def get_2d_image_from_uploaded_file(fileobj):
         data, apix = get_2d_image_from_file(FILENAME(temp.name))
     return data, apix
 
+@st.cache(persist=True, show_spinner=False, ttl=24*60*60.) # refresh every day
+def get_emdb_ids():
+    try:
+        import pandas as pd
+        emdb_ids = pd.read_csv("https://wwwdev.ebi.ac.uk/emdb/api/search/*%20AND%20structure_determination_method:%22helical%22?wt=csv&download=true&fl=emdb_id")
+        emdb_ids = list(emdb_ids.iloc[:,0].str.split('-', expand=True).iloc[:, 1].values)
+    except:
+        emdb_ids = []
+    return emdb_ids
+
 @st.cache(persist=True, show_spinner=False)
 def get_emdb_map(emdid: str):
-    emdid_number = emdid.lower().split("emd-")[-1]
-    url = f"http://ftp.ebi.ac.uk/pub/databases/emdb/structures/EMD-{emdid_number}/map/emd_{emdid_number}.map.gz"
+    url = f"http://ftp.ebi.ac.uk/pub/databases/emdb/structures/EMD-{emdid}/map/emd_{emdid}.map.gz"
     ds = np.DataSource(None)
     fp = ds.open(url)
     import mrcfile
