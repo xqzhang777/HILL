@@ -85,6 +85,14 @@ def main(args):
 
         st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to Wen Jiang (jiang12 at purdue.edu)*")
 
+        hide_streamlit_style = """
+        <style>
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        </style>
+        """
+        st.markdown(hide_streamlit_style, unsafe_allow_html=True) 
+
     with col2:
         copy_pitch_rise = st.button(label="Copy pitch/rise⤺", help="Update the pitch/rise values below using the pitch/rise values from the sliders at the top the plots")
         pitch_or_twist_choices = ["pitch", "twist"]
@@ -366,6 +374,13 @@ def main(args):
                             fig_ellipses.append(ellipses)
             else:
                 st.warning(f"No off-equator layer lines to draw for Pitch={pitch:.2f} Csym={csym} combinations. Consider increasing Pitch or reducing Csym")
+
+        from bokeh.models import CustomJS
+        from bokeh.events import MouseEnter
+        title_js = CustomJS(args=dict(title=title), code="""
+            document.title=title
+        """)
+        figs[0].js_on_event(MouseEnter, title_js)
 
         if fig_ellipses:
             from bokeh.models import Slider, CustomJS
