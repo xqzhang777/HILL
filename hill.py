@@ -280,7 +280,7 @@ def main(args):
             sigma = np.std(proj[np.nonzero(proj)])
             proj = proj + np.random.normal(loc=0.0, scale=noise*sigma, size=proj.shape)
         fraction_x = mask_radius/(proj.shape[1]//2*apix)
-        tapering_image = generate_tapering_filter(image_size=proj.shape, fraction_start=[0.9, fraction_x], fraction_slope=0.1)
+        tapering_image = generate_tapering_filter(image_size=proj.shape, fraction_start=[0.8, fraction_x], fraction_slope=0.1)
         proj = proj * tapering_image
         with image_container:
             st.image([normalize(data), normalize(proj)], use_column_width=True, caption=[image_label, "Simulated"])
@@ -300,7 +300,7 @@ def main(args):
                     sigma = np.std(proj[np.nonzero(proj)])
                     proj = proj + np.random.normal(loc=0.0, scale=noise*sigma, size=proj.shape)
                 fraction_x = mask_radius/(proj.shape[1]//2*apix_simu)
-                tapering_image = generate_tapering_filter(image_size=proj.shape, fraction_start=[0.9, fraction_x], fraction_slope=0.1)
+                tapering_image = generate_tapering_filter(image_size=proj.shape, fraction_start=[0.8, fraction_x], fraction_slope=0.1)
                 proj = proj * tapering_image
             else:
                 apix_simu = apix
@@ -315,7 +315,7 @@ def main(args):
             show_pwr_work, pwr_work, title_pwr_work, show_phase_work, phase_work, show_phase_diff_work, phase_diff_work, title_phase_work, show_yprofile_work = item
             if show_pwr_work:
                 tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Amp', '@image')]
-                fig = create_image_figure(pwr_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, pseudocolor=show_pseudocolor, title=title_pwr_work, yaxis_visible=False, tooltips=tooltips)
+                fig = create_layerline_image_figure(pwr_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, pseudocolor=show_pseudocolor, title=title_pwr_work, yaxis_visible=False, tooltips=tooltips)
                 figs.append(fig)
                 figs_image.append(fig)
 
@@ -337,7 +337,7 @@ def main(args):
 
             if show_phase_diff_work:
                 tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Phase Diff', '@image °')]
-                fig = create_image_figure(phase_diff_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, pseudocolor=show_pseudocolor, title=title_phase_work, yaxis_visible=False, tooltips=tooltips)
+                fig = create_layerline_image_figure(phase_diff_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, pseudocolor=show_pseudocolor, title=title_phase_work, yaxis_visible=False, tooltips=tooltips)
                 figs.append(fig)
                 figs_image.append(fig)
                 
@@ -507,7 +507,7 @@ def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radiu
         movie_mode, twist, rise, csym, noise, helical_radius, ball_radius, az, ny, nx, apix =movie_mode_params
     tilt_step = tilt_max/movie_frames
     fraction_x = mask_radius/(nx//2*apix)
-    tapering_image = generate_tapering_filter(image_size=(ny, nx), fraction_start=[0.9, fraction_x], fraction_slope=0.1)
+    tapering_image = generate_tapering_filter(image_size=(ny, nx), fraction_start=[0.8, fraction_x], fraction_slope=0.1)
     image_filenames = []
     from bokeh.io import export_png
     progress_bar = st.empty()
@@ -526,13 +526,13 @@ def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radiu
 
         figs = []
         title = f"Projection"
-        fig_proj = create_image_figure(proj, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudocolor=show_pseudocolor, title=title, yaxis_visible=False, tooltips=None)
+        fig_proj = create_layerline_image_figure(proj, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudocolor=show_pseudocolor, title=title, yaxis_visible=False, tooltips=None)
         figs.append(fig_proj)
 
         proj_pwr, proj_phase = compute_power_spectra(proj, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
             output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
         title = f"Power Spectra"
-        fig_pwr = create_image_figure(proj_pwr, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudocolor=show_pseudocolor, title=title, yaxis_visible=False, tooltips=None)
+        fig_pwr = create_layerline_image_figure(proj_pwr, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudocolor=show_pseudocolor, title=title, yaxis_visible=False, tooltips=None)
         from bokeh.models import Label
         label = Label(x=0., y=0.9/cutoff_res_y, text=f"tilt = {tilt:.2f}°", text_align='center', text_color='white', text_font_size='30px', visible=True)
         fig_pwr.add_layout(label)
@@ -540,7 +540,7 @@ def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radiu
 
         phase_diff = compute_phase_difference_across_meridian(proj_phase)
         title = f"Phase Diff Across Meridian"
-        fig_phase = create_image_figure(phase_diff, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudocolor=show_pseudocolor, title=title, yaxis_visible=False, tooltips=None)
+        fig_phase = create_layerline_image_figure(phase_diff, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudocolor=show_pseudocolor, title=title, yaxis_visible=False, tooltips=None)
         figs.append(fig_phase)
 
         fig_all = gridplot(children=[figs], toolbar_location=None)
@@ -558,7 +558,45 @@ def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radiu
     progress_bar.empty()
     return movie_filename
 
-def create_image_figure(data, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudocolor=True, title="", yaxis_visible=True, tooltips=None):
+def create_image_figure(image, dx, dy, title="", title_location="below", plot_width=None, plot_height=None, x_axis_label='x', y_axis_label='y', tooltips=None, show_axis=True, show_toolbar=True, crosshair_color="white", aspect_ratio=None):
+    from bokeh.plotting import figure
+    h, w = image.shape
+    if aspect_ratio is None and (plot_width and plot_height):
+        aspect_ratio = plot_width/plot_height
+    tools = 'box_zoom,crosshair,pan,reset,save,wheel_zoom'
+    fig = figure(title_location=title_location, 
+        frame_width=plot_width, frame_height=plot_height, 
+        x_axis_label=x_axis_label, y_axis_label=y_axis_label,
+        x_range=(-w//2*dx, (w//2-1)*dx), y_range=(-h//2*dy, (h//2-1)*dy), 
+        tools=tools, aspect_ratio=aspect_ratio)
+    fig.grid.visible = False
+    if title:
+        fig.title.text=title
+        fig.title.align = "center"
+        fig.title.text_font_size = "18px"
+        fig.title.text_font_style = "normal"
+    if not show_axis: fig.axis.visible = False
+    if not show_toolbar: fig.toolbar_location = None
+
+    source_data = dict(image=[image], x=[-w//2*dx], y=[-h//2*dy], dw=[w*dx], dh=[h*dy])
+    from bokeh.models import LinearColorMapper
+    color_mapper = LinearColorMapper(palette='Greys256')    # Greys256, Viridis256
+    image = fig.image(source=source_data, image='image', color_mapper=color_mapper,
+                x='x', y='y', dw='dw', dh='dh'
+            )
+
+    # add hover tool only for the image
+    from bokeh.models.tools import HoverTool, CrosshairTool
+    if not tooltips:
+        tooltips = [("x", "$xÅ"), ('y', '$yÅ'), ('val', '@image')]
+    image_hover = HoverTool(renderers=[image], tooltips=tooltips)
+    fig.add_tools(image_hover)
+    crosshair = [t for t in fig.tools if isinstance(t, CrosshairTool)]
+    if crosshair: 
+        for ch in crosshair: ch.line_color = crosshair_color
+    return fig
+
+def create_layerline_image_figure(data, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudocolor=True, title="", yaxis_visible=True, tooltips=None):
     ny, nx = data.shape
     dsy = 1/(ny//2*cutoff_res_y)
     dsx = 1/(nx//2*cutoff_res_x)
@@ -719,7 +757,7 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                     else:
                         value = nonzeros[0]+1
                         with supress_missing_values: value = int(query_params["i"][param_i])
-                        if value not in nonzeros: value = nonzeros[0]+1
+                        if value not in nonzeros+1: value = nonzeros[0]+1
                         if len(nonzeros)>10:
                             nonzeros = list(nonzeros+1)
                             index = nonzeros.index(value)
@@ -742,7 +780,9 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                 image_label = f"Orignal image ({nx}x{ny})"
             else:
                 image_label = f"Orignal image {image_index+1}/{nz} ({nx}x{ny})"
-            st.image(normalize(data), use_column_width=True, caption=image_label)
+            #st.image(normalize(data), use_column_width=True, caption=image_label)
+            fig = create_image_figure(data, apix, apix, title=image_label, title_location="below", plot_width=None, plot_height=None, x_axis_label=None, y_axis_label=None, tooltips=None, show_axis=False, show_toolbar=False, crosshair_color="white", aspect_ratio=1)
+            st.bokeh_chart(fig, use_container_width=True)
 
         with st.beta_expander(label="Image parameters", expanded=False):
             input_type_auto = None
@@ -778,11 +818,13 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
         mask_radius = 0
         radius_auto = 0
         if input_type in ["image"]:
+            #mask_len_precent = st.number_input('Mask length (%) ', value=90.0, min_value=10.0, max_value=100.0, step=1.0, format="%.1f", key=next_key()) / 100.0
+            mask_len_fraction = 0.8
             radius_auto, mask_radius_auto = estimate_radial_range(data, thresh_ratio=0.1)
             mask_radius = st.number_input('Mask radius (Å) ', value=mask_radius_auto*apix, min_value=1.0, max_value=nx/2*apix, step=1.0, format="%.1f", key=next_key())
 
             fraction_x = mask_radius/(nx//2*apix)
-            tapering_image = generate_tapering_filter(image_size=data.shape, fraction_start=[0.9, fraction_x], fraction_slope=0.1)
+            tapering_image = generate_tapering_filter(image_size=data.shape, fraction_start=[mask_len_fraction, fraction_x], fraction_slope=(1.0-mask_len_fraction)/2.)
             data = data * tapering_image
             transformed = 1
 
@@ -822,7 +864,9 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                     image_label = f"Transformed image ({nx}x{ny})"
                 else:
                     image_label = f"Transformed image {image_index+1}/{nz} ({nx}x{ny})"
-                st.image(normalize(data), use_column_width=True, caption=image_label)
+                #st.image(normalize(data), use_column_width=True, caption=image_label)
+                fig = create_image_figure(data, apix, apix, title=image_label, title_location="below", plot_width=None, plot_height=None, x_axis_label=None, y_axis_label=None, tooltips=None, show_axis=False, show_toolbar=False, crosshair_color="white", aspect_ratio=1)
+                st.bokeh_chart(fig, use_container_width=True)
 
         #if input_type in ["image"]:
         if 0:
@@ -1170,6 +1214,7 @@ def auto_vertical_center(image):
     x = np.arange(3*n)
     f = interpolate.interp1d(x, np.tile(y, 3), kind='linear')    # avoid out-of-bound errors
     def score_shift(dx):
+        if dx<-n or dx>n: return np.finfo(np.float32).max
         x_tmp = x[n:2*n]-dx
         tmp = f(x_tmp)
         err = np.sum(np.abs(tmp-tmp[::-1]))

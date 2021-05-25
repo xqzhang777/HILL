@@ -671,7 +671,7 @@ def parse_command_line():
     parser = argparse.ArgumentParser(description=description, epilog=epilog)
     parser.add_argument('inputImage', help='input particle lst/star/cs/mrcs file')
     parser.add_argument('--outputPrefix', metavar="<str>", type=str, help="prefix of output files", default="")
-    parser.add_argument("--groupby", metavar="<attr>", type=str, nargs="+", help="group particles by these parameters (class, helicaltube etc)", default=[])
+    parser.add_argument("--groupby", metavar="<attr>", type=str, nargs="+", help="group particles by these parameters (None, class, helicaltube, etc)", default=[])
     parser.add_argument("--minParticles", metavar="<n>", type=int, help="ignore groups of fewer particles than this minimal count. default: %(default)s", default=-1)
     parser.add_argument("--batchSize", metavar="<n>", type=int, help="maximal number of particles per batch. default: %(default)s", default=100)
     parser.add_argument("--apix", metavar="<Å/pixel>", type=float, help="pixel size of input image", default=0)
