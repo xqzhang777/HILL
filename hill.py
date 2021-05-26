@@ -591,6 +591,7 @@ def create_image_figure(image, dx, dy, title="", title_location="below", plot_wi
         tooltips = [("x", "$xÅ"), ('y', '$yÅ'), ('val', '@image')]
     image_hover = HoverTool(renderers=[image], tooltips=tooltips)
     fig.add_tools(image_hover)
+    fig.hover[0].attachment="vertical"
     crosshair = [t for t in fig.tools if isinstance(t, CrosshairTool)]
     if crosshair: 
         for ch in crosshair: ch.line_color = crosshair_color
@@ -735,7 +736,7 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
             if nz>1:
                 if len(nonzeros)==nz:
                     if param_i>0:
-                        value = 1
+                        value = 1 if input_mode in [0, 1] and (is_pwr_auto or is_pd_auto) else 0
                         with supress_missing_values: value = int(query_params["sync_i"][0])
                         sync_i = st.checkbox(label=f"Sync image index", value=value, key=next_key(), help="Sync the index of the displayed image when two image stacks are used as inputs, for example, power spectra from one image stack and phase differences across meridian from the other image stack")
                     if param_i>0 and sync_i:
@@ -749,7 +750,7 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                             image_index = st.slider(label=f"Choose an image (out of {nz}):", min_value=1, max_value=nz, value=value, step=1, key=next_key())
                 else:
                     if param_i>0:
-                        value = 1
+                        value = 0
                         with supress_missing_values: value = int(query_params["sync_i"][0])
                         sync_i = st.checkbox(label=f"Sync image index", value=value, key=next_key())
                     if param_i>0 and sync_i:
@@ -758,7 +759,7 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                         value = nonzeros[0]+1
                         with supress_missing_values: value = int(query_params["i"][param_i])
                         if value not in nonzeros+1: value = nonzeros[0]+1
-                        if len(nonzeros)>10:
+                        if len(nonzeros)>50:
                             nonzeros = list(nonzeros+1)
                             index = nonzeros.index(value)
                             image_index = st.selectbox(label=f"Choose an image ({len(nonzeros)} non-zero images out of {nz}):", options=nonzeros, index=index, key=next_key())
@@ -784,7 +785,8 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
             fig = create_image_figure(data, apix, apix, title=image_label, title_location="below", plot_width=None, plot_height=None, x_axis_label=None, y_axis_label=None, tooltips=None, show_axis=False, show_toolbar=False, crosshair_color="white", aspect_ratio=1)
             st.bokeh_chart(fig, use_container_width=True)
 
-        with st.beta_expander(label="Image parameters", expanded=False):
+        image_parameters_expander = st.beta_expander(label="Image parameters", expanded=False)
+        with image_parameters_expander:
             input_type_auto = None
             with supress_missing_values: input_type_auto = query_params["input_type"][param_i]
             if input_type_auto is None:
@@ -815,13 +817,14 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
         if angle or dx:
             data = rotate_shift_image(data, angle=-angle, post_shift=(0, dx/apix), order=1)
 
-        mask_radius = 0
         radius_auto = 0
+        mask_radius = 0
         if input_type in ["image"]:
-            #mask_len_precent = st.number_input('Mask length (%) ', value=90.0, min_value=10.0, max_value=100.0, step=1.0, format="%.1f", key=next_key()) / 100.0
-            mask_len_fraction = 0.8
-            radius_auto, mask_radius_auto = estimate_radial_range(data, thresh_ratio=0.1)
-            mask_radius = st.number_input('Mask radius (Å) ', value=mask_radius_auto*apix, min_value=1.0, max_value=nx/2*apix, step=1.0, format="%.1f", key=next_key())
+            with image_parameters_expander:
+                radius_auto, mask_radius_auto = estimate_radial_range(data, thresh_ratio=0.1)
+                mask_radius = st.number_input('Mask radius (Å) ', value=mask_radius_auto*apix, min_value=1.0, max_value=nx/2*apix, step=1.0, format="%.1f", key=next_key())
+                mask_len_percent_auto = 50.0
+                mask_len_fraction = st.number_input('Mask length (%) ', value=mask_len_percent_auto, min_value=10.0, max_value=100.0, step=1.0, format="%.1f", key=next_key()) / 100.0
 
             fraction_x = mask_radius/(nx//2*apix)
             tapering_image = generate_tapering_filter(image_size=data.shape, fraction_start=[mask_len_fraction, fraction_x], fraction_slope=(1.0-mask_len_fraction)/2.)

@@ -99,6 +99,7 @@ def main():
         groups = data.groupby(args.groupby, sort=True)
         if args.verbose:
             print(f"{len(groups)} groups based on {args.groupby}")
+        if len(groups)>1 and args.minParticles<0: args.minParticles = int(len(data)*0.01)
         if args.minParticles>0:
             groups, groups_all = [], groups
             for gi, g in enumerate(groups_all):
@@ -253,16 +254,7 @@ def main():
             params["resy"] = args.cutoffRes
 
         query_string = get_query_string(params)
-        code_path = pathlib.Path(__file__).parent / "hill.py"
-        if code_path.exists():
-            code_path = code_path.as_posix()
-        else:
-            code_path = "https://raw.githubusercontent.com/wjiang/HILL/main/hill.py"
-        import_with_auto_install("streamlit")
-        import subprocess
-        cmd = f"streamlit run {code_path} -- --query_string '{query_string}'"
-        print(cmd)
-        subprocess.call(cmd, shell=True)
+        run_hill_webapp(query_string)
 
 def averageOneBatch(mgraphs, group_id, compute_phase_differences, diameterMask, cutoff_res, pad_nx, pad_ny, align, verbose):
     nPtcls = sum([len(m[1]) for m in mgraphs])
@@ -546,7 +538,7 @@ def cs2dataframe(csFile):
     if "filament/filament_pose" in data:    # = - rlnAnglePsiPrior
         data.loc[:, "phi0"] = -np.rad2deg(data["filament/filament_pose"]) - 90
     if "alignments2D/class" in data:
-        data.loc[:, "class"] = data["alignments2D/class"]-1
+        data.loc[:, "class"] = data["alignments2D/class"]
     if "blob/path" in data:
         data.loc[:, "filename"] = data["blob/path"].str.decode("utf-8")
     return data
@@ -656,6 +648,23 @@ def dataframe2lst(data, lstFile):
         lstfp.write("#LSX\n#If you edit this file, you MUST rerun lstfast.py on it before using it!\n# %d\n" % (maxlen+1))
         lstfp.write('\n'.join(lines))
         lstfp.write('\n')
+
+def run_hill_webapp(query_string):
+    import_with_auto_install("streamlit")
+    import subprocess
+    code_path = pathlib.Path(__file__).parent / "hill.py"
+    if code_path.exists():
+        code_path = code_path.as_posix()
+        cmd = f"streamlit run {code_path} --server.maxUploadSize 500 -- --query_string '{query_string}'"
+        print(cmd)
+        subprocess.call(cmd, shell=True)
+    else:
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".py") as fp:
+            cmd = f"curl -s https://raw.githubusercontent.com/wjiang/HILL/main/hill.py --output {fp.name}"
+            cmd += f" && streamlit run {fp.name} --server.maxUploadSize 500 -- --query_string '{query_string}'"
+            print(cmd)
+            subprocess.call(cmd, shell=True)
 
 def get_query_string(query_params):
     from urllib.parse import urlencode
