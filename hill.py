@@ -128,6 +128,11 @@ def main(args):
             pitch = abs(round((360./twist)*rise, 2))
             pitch_or_twist_text.markdown(f"*(pitch = {pitch:.2f} Å)*")
 
+        if copy_pitch_rise:
+            query_params.pop('pitch', None)
+            query_params.pop('rise', None)
+            st.experimental_set_query_params(**query_params)
+
         value = int(query_params["csym"][0]) if "csym" in query_params else data_example.csym
         csym = st.number_input('Csym', value=value, min_value=1, step=1, help="Cyclic symmetry around the helical axis")
 
@@ -158,7 +163,7 @@ def main(args):
             use_plot_size=False
             if show_simu:
                 az = st.number_input('Azimuthal angle (°)', value=0.0, min_value=0.0, max_value=360.0, step=1.0, format="%.2f", help="Position the Gaussian in the central Z-section at this azimuthal angle")
-                value = float(query_params["simunoise"][0]) if "simunoise" in query_params else 0.0
+                value = float(query_params["simunoise"][0]) if "simunoise" in query_params else 0.001
                 noise = st.number_input('Noise (sigma)', value=value, min_value=0., step=1., format="%.2f", key=next_key(), help="Add random noise to the simulated helix image")
                 value = bool(query_params["useplotsize"][0]) if "useplotsize" in query_params else False
                 use_plot_size = st.checkbox('Use plot size', value=value, help="If checked, the simulated helix image will use the image size of the displayed power spectra instead of the size of the input image")
@@ -178,6 +183,8 @@ def main(args):
                     if movie_mode == 0:
                         movie_noise = st.number_input('Noise (sigma)', value=0., min_value=0., step=1., format="%.2f", key=next_key(), help="Add random noise to the projection images")
         
+        set_url = st.button("Get link", help="Click to make the URL a sharable link")
+
     if input_type in ["PS"]:
         pwr = resize_rescale_power_spectra(data, nyquist_res=2*apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
                 output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction, norm=1)
@@ -461,9 +468,12 @@ def main(args):
                 movie_filename = create_movie(movie_frames, tilt, params, pny, pnx, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudocolor, log_xform, lp_fraction, hp_fraction)
                 st.video(movie_filename) # it always show the video using the entire column width
 
-    input = (input_mode, url, image_index, emdid, input_type)
-    input2 = (input_mode2, url2, image_index2, emdid2, input_type2)
-    set_query_params(input, input2, use_pitch, pitch, twist, rise, csym, helical_radius, show_LL_text, cutoff_res_x, cutoff_res_y, pnx, pny, ball_radius, noise, use_plot_size)
+    if set_url:
+        input = (input_mode, url, image_index, emdid, input_type)
+        input2 = (input_mode2, url2, image_index2, emdid2, input_type2)
+        set_query_params(input, input2, use_pitch, pitch, twist, rise, csym, helical_radius, show_LL_text, cutoff_res_x, cutoff_res_y, pnx, pny, ball_radius, noise, use_plot_size)
+    else:
+        st.experimental_set_query_params()
 
 def set_query_params(input, input2, use_pitch, pitch, twist, rise, csym, helical_radius, show_LL_text, cutoff_res_x, cutoff_res_y, nx, ny, simuradius, simunoise, useplotsize):
     input_mode, url, image_index, emdid, input_type = input
