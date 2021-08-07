@@ -677,6 +677,8 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                 st.warning("failed to obtained a list of helical structures in EMDB")
                 return
             if input_mode == 2:  # "emd-xxxxx":
+                url = "https://www.ebi.ac.uk/emdb/search/*%20AND%20structure_determination_method:%22helical%22?rows=10&sort=release_date%20desc"
+                st.markdown(f'[All {len(emdb_ids)} helical structures in EMDB]({url})')
                 label = "Input an EMDB ID (emd-xxxxx):"
                 value = "emd-6428"
                 with supress_missing_values: value = query_params["emdid"][param_i]
@@ -1352,7 +1354,7 @@ def get_2d_image_from_uploaded_file(fileobj):
 def get_emdb_ids():
     try:
         import pandas as pd
-        emdb_ids = pd.read_csv("https://wwwdev.ebi.ac.uk/emdb/api/search/*%20AND%20structure_determination_method:%22helical%22?wt=csv&download=true&fl=emdb_id")
+        emdb_ids = pd.read_csv("https://www.ebi.ac.uk/emdb/api/search/*%20AND%20structure_determination_method:%22helical%22?wt=csv&download=true&fl=emdb_id")
         emdb_ids = list(emdb_ids.iloc[:,0].str.split('-', expand=True).iloc[:, 1].values)
     except:
         emdb_ids = []
@@ -1360,7 +1362,10 @@ def get_emdb_ids():
 
 @st.cache(persist=True, show_spinner=False)
 def get_emdb_map(emdid: str):
-    url = f"http://ftp.ebi.ac.uk/pub/databases/emdb/structures/EMD-{emdid}/map/emd_{emdid}.map.gz"
+    server = "https://ftp.wwpdb.org/pub"    # Rutgers University, USA
+    #server = "https://ftp.ebi.ac.uk/pub/databases" # European Bioinformatics Institute, England
+    #server = "http://ftp.pdbj.org/pub" # Osaka University, Japan
+    url = f"{server}/emdb/structures/EMD-{emdid}/map/emd_{emdid}.map.gz"
     ds = np.DataSource(None)
     fp = ds.open(url)
     import mrcfile
@@ -1370,9 +1375,12 @@ def get_emdb_map(emdid: str):
         apix = mrc.voxel_size.x.item()
     return data, apix
 
-@st.cache(persist=True, show_spinner=False, hash_funcs={URL: hash_URL})
+@st.cache(persist=True, show_spinner=False, hash_funcs={URL: hash_URL}, suppress_st_warning=True)
 def get_2d_image_from_url(url: URL):
     ds = np.DataSource(None)
+    if not ds.exists(url.url):
+        st.error(f"ERROR: {url.url} does not exist")
+        st.stop()
     fp=ds.open(url.url)
     return get_2d_image_from_file(FILENAME(fp.name))
 
