@@ -56,17 +56,17 @@ def main(args):
     set_initial_query_params(query_string=args.query_string) # only excuted on the first run
     query_params = st.experimental_get_query_params()
 
-    col1, col2, col3, col4 = st.beta_columns((1., 0.6, 0.4, 4.0))
+    col1, col2, col3, col4 = st.columns((1., 0.6, 0.4, 4.0))
 
     with col1:
-        with st.beta_expander(label="README", expanded=False):
+        with st.expander(label="README", expanded=False):
             st.write("This Web app considers a biological helical structure as the product of a continous helix and a set of parallel planes, and based on the covolution theory, the Fourier Transform (FT) of a helical structure would be the convolution of the FT of the continous helix and the FT of the planes.  \nThe FT of a continous helix consists of equally spaced layer planes (3D) or layerlines (2D projection) that can be described by Bessel functions of increasing orders (0, +/-1, +/-2, ...) from the Fourier origin (i.e. equator). The spacing between the layer planes/lines is determined by the helical pitch (i.e. the shift along the helical axis for a 360 ° turn of the helix). If the structure has additional cyclic symmetry (for example, C6) around the helical axis, only the layer plane/line orders of integer multiplier of the symmetry (e.g. 0, +/-6, +/-12, ...) are visible. The primary peaks of the layer lines in the power spectra form a pattern similar to a X symbol.  \nThe FT of the parallel planes consists of equally spaced points along the helical axis (i.e. meridian) with the spacing being determined by the helical rise.  \nThe convolution of these two components (X-shaped pattern of layer lines and points along the meridian) generates the layer line patterns seen in the power spectra of the projection images of helical structures. The helical indexing task is thus to identify the helical rise, pitch (or twist), and cyclic symmetry that would predict a layer line pattern to explain the observed the layer lines in the power spectra. This Web app allows you to interactively change the helical parameters and superimpose the predicted layer liines on the power spectra to complete the helical indexing task.  \n  \nPS: power spectra; PD: phase difference between the two sides of meridian; YP: Y-axis power spectra profile; LL: layer lines; m: indices of the X-patterns along the meridian; Jn: Bessel order")
         
         # make radio display horizontal
         st.markdown('<style>div.row-widget.stRadio > div{flex-direction:row;}</style>', unsafe_allow_html=True)
 
         data_all, image_index, data, apix, radius_auto, mask_radius, input_type, is_3d, input_params, (image_container, image_label) = obtain_input_image(col1, query_params, param_i=0)
-        input_mode, (uploaded_filename, url, emdid) = input_params
+        input_mode, (uploaded_filename, url, emd_id) = input_params
 
         if input_type in ["image"]:
             label = f"Replace amplitudes or phases with another image"
@@ -78,10 +78,10 @@ def main(args):
         input_image2 = st.checkbox(label=label, value=value)        
         if input_image2:
             _, image_index2, data2, apix2, radius_auto2, mask_radius2, input_type2, is_3d2, input_params2, _ = obtain_input_image(col1, query_params, param_i=1, image_index_sync=image_index+1)
-            input_mode2, (uploaded_filename2, url2, emdid2) = input_params2
+            input_mode2, (uploaded_filename2, url2, emd_id2) = input_params2
         else:
             image_index2, data2, apix2, radius_auto2, mask_radius2, input_type2, is_3d2 = [None] * 7
-            input_mode2, (uploaded_filename2, url2, emdid2) = None, (None, None, None)
+            input_mode2, (uploaded_filename2, url2, emd_id2) = None, (None, None, None)
 
         st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to Wen Jiang (jiang12 at purdue.edu)*")
 
@@ -98,7 +98,7 @@ def main(args):
         pitch_or_twist_choices = ["pitch", "twist"]
         value = int(query_params["use_pitch"][0]) if "use_pitch" in query_params else 1
         value = 0 if value else 1
-        pitch_or_twist = st.radio(label="", options=pitch_or_twist_choices, index=value, key=next_key())
+        pitch_or_twist = st.radio(label="", options=pitch_or_twist_choices, index=value)
         use_pitch = 1 if pitch_or_twist=="pitch" else 0
 
         pitch_or_twist_number_input = st.empty()
@@ -147,15 +147,15 @@ def main(args):
         cutoff_res_x = st.number_input('Resolution limit - X (Å)', value=value, min_value=2*apix, step=1.0, help="Set the highest resolution to be displayed in the X-direction")
         value = max(2*apix, float(query_params["resy"][0]) if "resy" in query_params else round(4*apix, 1))
         cutoff_res_y = st.number_input('Resolution limit - Y (Å)', value=value, min_value=2*apix, step=1.0, help="Set the highest resolution to be displayed in the Y-direction")
-        with st.beta_expander(label="Filters", expanded=False):
+        with st.expander(label="Filters", expanded=False):
             log_xform = st.checkbox(label="Log(amplitude)", value=True, help="Perform log transform of the power spectra to allow clear display of layerlines at low and high resolutions")
             hp_fraction = st.number_input('Fourier high-pass (%)', value=0.4, min_value=0.0, max_value=100.0, step=0.1, format="%.2f", help="Perform high-pass Fourier filtering of the power spectra with filter=0.5 at this percentage of the Nyquist resolution") / 100.0
             lp_fraction = st.number_input('Fourier low-pass (%)', value=0.0, min_value=0.0, max_value=100.0, step=10.0, format="%.2f", help="Perform low-pass Fourier filtering of the power spectra with filter=0.5 at this percentage of the Nyquist resolution") / 100.0
             value = int(query_params["nx"][0]) if "nx" in query_params else max(min(nx,ny), 512)
-            pnx = st.number_input('FFT X-dim size (pixels)', value=value, min_value=min(nx, 128), step=2, help="Set the size of FFT in X-dimension to this number of pixels")
+            pnx = int(st.number_input('FFT X-dim size (pixels)', value=value, min_value=min(nx, 128), step=2, help="Set the size of FFT in X-dimension to this number of pixels"))
             value = int(query_params["ny"][0]) if "ny" in query_params else max(min(nx,ny), 1024)
-            pny = st.number_input('FFT Y-dim size (pixels)', value=value, min_value=min(ny, 512), step=2, help="Set the size of FFT in Y-dimension to this number of pixels")
-        with st.beta_expander(label="Simulation", expanded=False):
+            pny = int(st.number_input('FFT Y-dim size (pixels)', value=value, min_value=min(ny, 512), step=2, help="Set the size of FFT in Y-dimension to this number of pixels"))
+        with st.expander(label="Simulation", expanded=False):
             value = float(query_params["simuradius"][0]) if "simuradius" in query_params else 0.0
             ball_radius = st.number_input('Gaussian radius (Å)', value=value, min_value=0.0, max_value=helical_radius, step=5.0, format="%.1f", help="A 3-D Gaussian function will be used to reprsent each subunit in the simulated helix. The Gaussian function will fall off from 1 to 0.5 at this radius. A value <=0 will disable the simulation")
             show_simu = True if ball_radius > 0 else False
@@ -164,13 +164,13 @@ def main(args):
             if show_simu:
                 az = st.number_input('Azimuthal angle (°)', value=0.0, min_value=0.0, max_value=360.0, step=1.0, format="%.2f", help="Position the Gaussian in the central Z-section at this azimuthal angle")
                 value = float(query_params["simunoise"][0]) if "simunoise" in query_params else 0.001
-                noise = st.number_input('Noise (sigma)', value=value, min_value=0., step=1., format="%.2f", key=next_key(), help="Add random noise to the simulated helix image")
+                noise = st.number_input('Noise (sigma)', value=value, min_value=0., step=1., format="%.2f", help="Add random noise to the simulated helix image")
                 value = bool(query_params["useplotsize"][0]) if "useplotsize" in query_params else False
                 use_plot_size = st.checkbox('Use plot size', value=value, help="If checked, the simulated helix image will use the image size of the displayed power spectra instead of the size of the input image")
         
         movie_frames = 0
         if is_3d or show_simu:
-            with st.beta_expander(label="Tilt movie", expanded=False):
+            with st.expander(label="Tilt movie", expanded=False):
                 movie_frames = st.number_input('Movie frame #', value=0, min_value=0, max_value=1000, step=1, help="Set the number of movies frames that will be generated to show the morphing of the power spectra and phase differences across meridian images of the simulated helix at different tilt angles in the range from 0 to the value specified in the *Out-of-plane tilt (°)* input box. A value <=0 will not generate a movie")
                 if movie_frames>0:
                     if is_3d and show_simu:
@@ -181,9 +181,9 @@ def main(args):
                     else:
                         movie_mode = 1
                     if movie_mode == 0:
-                        movie_noise = st.number_input('Noise (sigma)', value=0., min_value=0., step=1., format="%.2f", key=next_key(), help="Add random noise to the projection images")
+                        movie_noise = st.number_input('Noise (sigma)', value=0., min_value=0., step=1., format="%.2f", help="Add random noise to the projection images")
         
-        set_url = st.button("Get link", help="Click to make the URL a sharable link")
+        set_url = st.button("Get a sharable link", help="Click to make the URL a sharable link")
 
     if input_type in ["PS"]:
         pwr = resize_rescale_power_spectra(data, nyquist_res=2*apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
@@ -469,19 +469,19 @@ def main(args):
                 st.video(movie_filename) # it always show the video using the entire column width
 
     if set_url:
-        input = (input_mode, url, image_index, emdid, input_type)
-        input2 = (input_mode2, url2, image_index2, emdid2, input_type2)
+        input = (input_mode, url, image_index, emd_id, input_type)
+        input2 = (input_mode2, url2, image_index2, emd_id2, input_type2)
         set_query_params(input, input2, use_pitch, pitch, twist, rise, csym, helical_radius, show_LL_text, cutoff_res_x, cutoff_res_y, pnx, pny, ball_radius, noise, use_plot_size)
     else:
         st.experimental_set_query_params()
 
 def set_query_params(input, input2, use_pitch, pitch, twist, rise, csym, helical_radius, show_LL_text, cutoff_res_x, cutoff_res_y, nx, ny, simuradius, simunoise, useplotsize):
-    input_mode, url, image_index, emdid, input_type = input
-    input_mode2, url2, image_index2, emdid2, input_type2 = input2
+    input_mode, url, image_index, emd_id, input_type = input
+    input_mode2, url2, image_index2, emd_id2, input_type2 = input2
     if input_mode2 is not None:
         params=dict(input_mode=[input_mode, input_mode2])
         if input_mode in [2, 3]:
-            params["emdid"] = [emdid, emdid2]
+            params["emd_id"] = [emd_id, emd_id2]
         elif input_mode == 1:
             params["url"] = [url, url2]
             params["i"] = [image_index+1, image_index2+1 if image_index2 is not None else None]
@@ -490,7 +490,7 @@ def set_query_params(input, input2, use_pitch, pitch, twist, rise, csym, helical
     else:
         params=dict(input_mode=input_mode)        
         if input_mode in [2, 3]:
-            params["emdid"] = emdid
+            params["emd_id"] = emd_id
         elif input_mode == 1:
             params["url"] = url
             params["i"] = image_index+1
@@ -663,50 +663,58 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
     from contextlib import suppress
     supress_missing_values = suppress(KeyError, IndexError)
     with column:
-        input_modes = {0:"upload", 1:"url", 2:"emd-xxxxx", 3:"random"}
+        input_modes = {0:"upload", 1:"url", 2:"emd-xxxxx"}
         value = 1
         with supress_missing_values: value = int(query_params["input_mode"][0])
         with supress_missing_values: value = int(query_params["input_mode"][param_i])
-        input_mode = st.radio(label="How to obtain the input image/map:", options=list(input_modes.keys()), format_func=lambda i:input_modes[i], index=value, key=next_key(), help="Only 2D images in MRC (*.mrcs*) and 3D maps in MRC (*.mrc*) or CCP4 (*.map*) format are supported. Compressed maps (*.gz*) will be automatically decompressed")
+        input_mode = st.radio(label="How to obtain the input image/map:", options=list(input_modes.keys()), format_func=lambda i:input_modes[i], index=value, key=f'input_mode_{param_i}', help="Only 2D images in MRC (*.mrcs*) and 3D maps in MRC (*.mrc*) or CCP4 (*.map*) format are supported. Compressed maps (*.gz*) will be automatically decompressed")
         is_3d = False
         is_pwr_auto = None
         is_pd_auto = None
-        if input_mode in [2, 3]:
+        if input_mode == 2:            
             emdb_ids = get_emdb_ids()
             if not emdb_ids:
                 st.warning("failed to obtained a list of helical structures in EMDB")
                 return
-            if input_mode == 2:  # "emd-xxxxx":
-                url = "https://www.ebi.ac.uk/emdb/search/*%20AND%20structure_determination_method:%22helical%22?rows=10&sort=release_date%20desc"
-                st.markdown(f'[All {len(emdb_ids)} helical structures in EMDB]({url})')
-                label = "Input an EMDB ID (emd-xxxxx):"
-                value = "emd-6428"
-                with supress_missing_values: value = query_params["emdid"][param_i]
-                emdid = st.text_input(label=label, value=value, key=next_key()).strip()
-                emdid = emdid.lower().split("emd-")[-1]
-                if emdid not in emdb_ids:
-                    emdid_bad = emdid
-                    import random
-                    emdid = random.choice(emdb_ids)
-                    st.warning(f"emd-{emdid_bad} is not a helical structure. Please input a valid id (for example, a randomly selected valid id 'emd-{emdid}')")
-                    return
-            elif input_mode == 3:   # "random":
-                import random
-                button_clicked = st.button(label="Change EMDB ID", help="Randomly select another helical structure in EMDB")
-                if button_clicked or "emdid" not in query_params:
-                    emdid = random.choice(emdb_ids)
+            key_emd_id = f"emd_id_{param_i}"
+            if key_emd_id not in st.session_state:
+                if "emd_id" in query_params and len(query_params["emd_id"])>param_i:
+                    st.session_state[key_emd_id] = query_params["emd_id"][param_i] 
                 else:
-                    emdid = random.choice(emdb_ids)
-                    with supress_missing_values: emdid = query_params["emdid"][param_i].lower().split("emd-")[-1]
-            st.markdown(f'[EMD-{emdid}](https://www.ebi.ac.uk/pdbe/entry/emdb/EMD-{emdid})')
-            data_all, apix = get_emdb_map(emdid)
+                    st.session_state[key_emd_id] = "emd-10499"
+            url = "https://www.ebi.ac.uk/emdb/search/*%20AND%20structure_determination_method:%22helical%22?rows=10&sort=release_date%20desc"
+            st.markdown(f'[All {len(emdb_ids)} helical structures in EMDB]({url})')
+            do_random_embid = st.checkbox("Choose a random EMDB ID", value=False, key=f"do_random_embid_{param_i}")
+            if do_random_embid:
+                button_clicked = st.button(label="Change EMDB ID", help="Randomly select another helical structure in EMDB")
+                if button_clicked:
+                    import random
+                    st.session_state[key_emd_id] = 'emd-' + random.choice(emdb_ids)
+            else:
+                label = "Input an EMDB ID (emd-xxxxx):"
+                st.text_input(label=label, key=key_emd_id)
+                emd_id = st.session_state[key_emd_id].lower().split("emd-")[-1]
+                if emd_id not in emdb_ids:
+                    emd_id_bad = emd_id
+                    import random
+                    emd_id = random.choice(emdb_ids)
+                    st.warning(f"EMD-{emd_id_bad} is not a helical structure. Please input a valid id (for example, a randomly selected valid id 'emd-{emd_id}')")
+                    return
+            emd_id = st.session_state[key_emd_id].lower().split("emd-")[-1]
+            with st.spinner(f'Downloading EMD-{emd_id}'):
+                data_all, apix = get_emdb_map(emd_id)
+            if data_all is None:
+                st.warning(f"Failed to download [EMD-{emd_id}](https://www.ebi.ac.uk/emdb/entry/EMD-{emd_id})")
+                return
+            st.markdown(f'[EMD-{emd_id}](https://www.ebi.ac.uk/emdb/entry/EMD-{emd_id})')
+
             image_index = 0
             is_3d = True
             is_pwr_auto = False
             is_pd_auto = False
         else:
             if input_mode == 0:  # "upload a mrc/mrcs file":
-                fileobj = st.file_uploader("Upload a mrc or mrcs file ", type=['mrc', 'mrcs', 'map', 'map.gz', 'tnf'], key=next_key())
+                fileobj = st.file_uploader("Upload a mrc or mrcs file ", type=['mrc', 'mrcs', 'map', 'map.gz', 'tnf'], key=f'upload_{param_i}')
                 if fileobj is not None:
                     is_pwr_auto = fileobj.name.find("ps.mrcs")!=-1
                     is_pd_auto = fileobj.name.find("pd.mrcs")!=-1
@@ -717,7 +725,7 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                     label = "Input a url of 2D image(s) or a 3D map:"
                     value = data_example.url
                     with supress_missing_values: value = query_params["url"][param_i]
-                    image_url = st.text_input(label=label, value=value, key=next_key(), help="An online url (http:// or ftp://) or a local file path (/path/to/your/structure.mrc)").strip()
+                    image_url = st.text_input(label=label, value=value, key=f'url_{param_i}', help="An online url (http:// or ftp://) or a local file path (/path/to/your/structure.mrc)").strip()
                     is_pwr_auto = image_url.find("ps.mrcs")!=-1
                     is_pd_auto = image_url.find("pd.mrcs")!=-1
                     data_all, apix = get_2d_image_from_url(URL(image_url))
@@ -727,15 +735,15 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
             else:
                 if nx==ny and (nz>nx//4 and nz%4==0): is_3d_auto = True
                 else: is_3d_auto = False
-                is_3d = st.checkbox(label=f"The input ({nx}x{ny}x{nz}) is a 3D map", value=is_3d_auto, key=next_key(), help="The app thinks the input image contains a stack of 2D images. Check this box to inform the app that the input is a 3D map")
+                is_3d = st.checkbox(label=f"The input ({nx}x{ny}x{nz}) is a 3D map", value=is_3d_auto, key=f'is_3d_{param_i}', help="The app thinks the input image contains a stack of 2D images. Check this box to inform the app that the input is a 3D map")
         if is_3d:
             if not np.any(data_all):
                 st.warning("All voxels of the input 3D map have zero value")
                 st.stop()
             
-            with st.beta_expander(label="Generate 2-D projection from the 3-D map", expanded=False):
-                az = st.number_input(label=f"Rotation around the helical axis (°):", min_value=0.0, max_value=360., value=0.0, step=1.0, key=next_key())
-                tilt = st.number_input(label=f"Tilt (°):", min_value=-180.0, max_value=180., value=0.0, step=1.0, key=next_key())
+            with st.expander(label="Generate 2-D projection from the 3-D map", expanded=False):
+                az = st.number_input(label=f"Rotation around the helical axis (°):", min_value=0.0, max_value=360., value=0.0, step=1.0, key=f'az_{param_i}')
+                tilt = st.number_input(label=f"Tilt (°):", min_value=-180.0, max_value=180., value=0.0, step=1.0, key=f'tilt_{param_i}')
                 data = generate_projection(data_all, az=az, tilt=tilt)
                 image_index = 0
         else:
@@ -750,21 +758,21 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                     if param_i>0:
                         value = 1 if input_mode in [0, 1] and (is_pwr_auto or is_pd_auto) else 0
                         with supress_missing_values: value = int(query_params["sync_i"][0])
-                        sync_i = st.checkbox(label=f"Sync image index", value=value, key=next_key(), help="Sync the index of the displayed image when two image stacks are used as inputs, for example, power spectra from one image stack and phase differences across meridian from the other image stack")
+                        sync_i = st.checkbox(label=f"Sync image index", value=value, key=f'sync_{param_i}', help="Sync the index of the displayed image when two image stacks are used as inputs, for example, power spectra from one image stack and phase differences across meridian from the other image stack")
                     if param_i>0 and sync_i:
                         image_index = image_index_sync
                     else:
                         value = 1
                         with supress_missing_values: value = int(query_params["i"][param_i])
                         if nz>10:
-                            image_index = st.number_input(label=f"Choose an image (out of {nz}):", min_value=1, max_value=nz, value=value, step=1, key=next_key())
+                            image_index = int(st.number_input(label=f"Choose an image (out of {nz}):", min_value=1, max_value=nz, value=value, step=1, key=f'image_index_{param_i}'))
                         else:
-                            image_index = st.slider(label=f"Choose an image (out of {nz}):", min_value=1, max_value=nz, value=value, step=1, key=next_key())
+                            image_index = int(st.slider(label=f"Choose an image (out of {nz}):", min_value=1, max_value=nz, value=value, step=1, key=f'image_index_slider_{param_i}'))
                 else:
                     if param_i>0:
                         value = 0
                         with supress_missing_values: value = int(query_params["sync_i"][0])
-                        sync_i = st.checkbox(label=f"Sync image index", value=value, key=next_key())
+                        sync_i = st.checkbox(label=f"Sync image index", value=value, key=f'sync_{param_i}')
                     if param_i>0 and sync_i:
                         image_index = image_index_sync
                     else:
@@ -774,9 +782,9 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                         if len(nonzeros)>50:
                             nonzeros = list(nonzeros+1)
                             index = nonzeros.index(value)
-                            image_index = st.selectbox(label=f"Choose an image ({len(nonzeros)} non-zero images out of {nz}):", options=nonzeros, index=index, key=next_key())
+                            image_index = int(st.selectbox(label=f"Choose an image ({len(nonzeros)} non-zero images out of {nz}):", options=nonzeros, index=index, key=f'image_index_{param_i}'))
                         else:
-                            image_index = st.select_slider(label=f"Choose an image ({len(nonzeros)} non-zero images out of {nz}):", options=list(nonzeros+1), value=value, key=next_key())
+                            image_index = int(st.select_slider(label=f"Choose an image ({len(nonzeros)} non-zero images out of {nz}):", options=list(nonzeros+1), value=value, key=f'image_index_slider_{param_i}'))
                 image_index -= 1
             else:
                 image_index = 0
@@ -797,7 +805,7 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
             fig = create_image_figure(data, apix, apix, title=image_label, title_location="below", plot_width=None, plot_height=None, x_axis_label=None, y_axis_label=None, tooltips=None, show_axis=False, show_toolbar=False, crosshair_color="white", aspect_ratio=1)
             st.bokeh_chart(fig, use_container_width=True)
 
-        image_parameters_expander = st.beta_expander(label="Image parameters", expanded=False)
+        image_parameters_expander = st.expander(label="Image parameters", expanded=False)
         with image_parameters_expander:
             input_type_auto = None
             with supress_missing_values: input_type_auto = query_params["input_type"][param_i]
@@ -808,19 +816,19 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                 elif is_pd_auto: input_type_auto = "PD"
                 else: input_type_auto = "image"
             mapping = {"image":0, "PS":1, "PD":2}
-            input_type = st.radio(label="Input is:", options="image PS PD".split(), index=mapping[input_type_auto], key=next_key(), help="image: real space image; PS: power spectra; PD: phage differences across meridian")
+            input_type = st.radio(label="Input is:", options="image PS PD".split(), index=mapping[input_type_auto], key=f'input_type_{param_i}', help="image: real space image; PS: power spectra; PD: phage differences across meridian")
             if input_type in ["PS", "PD"]:
-                apix = 0.5 * st.number_input('Nyquist res (Å)', value=2*apix, min_value=0.1, max_value=30., step=0.01, format="%.5g", key=next_key())
+                apix = 0.5 * st.number_input('Nyquist res (Å)', value=2*apix, min_value=0.1, max_value=30., step=0.01, format="%.5g", key=f'apix_nyquist_{param_i}')
             else:
-                apix = st.number_input('Pixel size (Å/pixel)', value=apix, min_value=0.1, max_value=30., step=0.01, format="%.5g", key=next_key())
+                apix = st.number_input('Pixel size (Å/pixel)', value=apix, min_value=0.1, max_value=30., step=0.01, format="%.5g", key=f'apix_{param_i}')
             transpose_auto = input_mode not in [2, 3] and nx > ny
-            transpose = st.checkbox(label='Transpose the image', value=transpose_auto, key=next_key())
+            transpose = st.checkbox(label='Transpose the image', value=transpose_auto, key=f'transpose_{param_i}')
             if input_type in ["PS", "PD"] or is_3d:
                 angle_auto, dx_auto = 0., 0.
             else:
                 angle_auto, dx_auto = auto_vertical_center(data)
-            angle = st.number_input('Rotate (°) ', value=-angle_auto, min_value=-180., max_value=180., step=1.0, format="%.4g", key=next_key())
-            dx = st.number_input('Shift along X-dim (Å) ', value=dx_auto*apix, min_value=-nx*apix, max_value=nx*apix, step=1.0, format="%.3g", key=next_key())
+            angle = st.number_input('Rotate (°) ', value=-angle_auto, min_value=-180., max_value=180., step=1.0, format="%.4g", key=f'angle_{param_i}')
+            dx = st.number_input('Shift along X-dim (Å) ', value=dx_auto*apix, min_value=-nx*apix, max_value=nx*apix, step=1.0, format="%.3g", key=f'dx_{param_i}')
         
         transformed_image = st.empty()
         transformed = transpose or angle or dx
@@ -834,9 +842,9 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
         if input_type in ["image"]:
             with image_parameters_expander:
                 radius_auto, mask_radius_auto = estimate_radial_range(data, thresh_ratio=0.1)
-                mask_radius = st.number_input('Mask radius (Å) ', value=mask_radius_auto*apix, min_value=1.0, max_value=nx/2*apix, step=1.0, format="%.1f", key=next_key())
+                mask_radius = st.number_input('Mask radius (Å) ', value=min(mask_radius_auto*apix, nx/2*apix), min_value=1.0, max_value=nx/2*apix, step=1.0, format="%.1f", key=f'mask_radius_{param_i}')
                 mask_len_percent_auto = 50.0
-                mask_len_fraction = st.number_input('Mask length (%) ', value=mask_len_percent_auto, min_value=10.0, max_value=100.0, step=1.0, format="%.1f", key=next_key()) / 100.0
+                mask_len_fraction = st.number_input('Mask length (%) ', value=mask_len_percent_auto, min_value=10.0, max_value=100.0, step=1.0, format="%.1f", key=f'mask_len_{param_i}') / 100.0
 
             fraction_x = mask_radius/(nx//2*apix)
             tapering_image = generate_tapering_filter(image_size=data.shape, fraction_start=[mask_len_fraction, fraction_x], fraction_slope=(1.0-mask_len_fraction)/2.)
@@ -922,7 +930,7 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
             image_label = f"Original image {image_index+1}"
 
     if input_mode in [2, 3]:
-        input_params = (input_mode, (None, None, emdid))
+        input_params = (input_mode, (None, None, emd_id))
     elif input_mode==1:
         input_params = (input_mode, (None, image_url, None))
     else:
@@ -1361,11 +1369,11 @@ def get_emdb_ids():
     return emdb_ids
 
 @st.cache(persist=True, show_spinner=False)
-def get_emdb_map(emdid: str):
+def get_emdb_map(emd_id: str):
     server = "https://ftp.wwpdb.org/pub"    # Rutgers University, USA
     #server = "https://ftp.ebi.ac.uk/pub/databases" # European Bioinformatics Institute, England
     #server = "http://ftp.pdbj.org/pub" # Osaka University, Japan
-    url = f"{server}/emdb/structures/EMD-{emdid}/map/emd_{emdid}.map.gz"
+    url = f"{server}/emdb/structures/EMD-{emd_id}/map/emd_{emd_id}.map.gz"
     ds = np.DataSource(None)
     fp = ds.open(url)
     import mrcfile
@@ -1413,12 +1421,6 @@ data_examples = [
     Data(twist=29.40, rise=21.92, csym=6, diameter=138, apix=2.3438, url="https://tinyurl.com/y5tq9fqa")
 ]
 data_example = data_examples[0]
-
-# to generate unique keys required by streamlit widgets
-def next_key():
-    return str(next(next_key.counter))
-import itertools
-next_key.counter = itertools.count()
 
 @st.cache(persist=False, show_spinner=False)
 def set_initial_query_params(query_string):
