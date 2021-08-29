@@ -52,8 +52,18 @@ def main(args):
     st.title(title)
 
     st.server.server_util.MESSAGE_SIZE_LIMIT = 2e8  # default is 5e7 (50MB)
-
-    set_initial_query_params(query_string=args.query_string) # only excuted on the first run
+    magic = "MAGIC_12345"
+    if magic not in st.session_state:  # only run once at the start of the session
+        st.session_state[magic] = True
+        st.elements.utils._shown_default_value_warning = True
+        set_initial_query_params(query_string=args.query_string) # only excuted on the first run
+        query_params = st.experimental_get_query_params()
+        st.session_state.rise = float(query_params["rise"][0]) if "rise" in query_params else data_example.rise
+        st.session_state.twist = float(query_params["twist"][0]) if "twist" in query_params else data_example.twist
+        if "pitch" in query_params:
+            st.session_state.twist = twist2pitch(float(query_params["pitch"][0]), st.session_state.rise)
+        st.session_state.csym = int(query_params["csym"][0]) if "csym" in query_params else data_example.csym
+    
     query_params = st.experimental_get_query_params()
 
     col1, col2, col3, col4 = st.columns((1., 0.6, 0.4, 4.0))
@@ -94,7 +104,15 @@ def main(args):
         st.markdown(hide_streamlit_style, unsafe_allow_html=True) 
 
     with col2:
-        copy_pitch_rise = st.button(label="Copy pitch/rise⤺", help="Update the pitch/rise values below using the pitch/rise values from the sliders at the top the plots")
+        copy_pitch_rise = st.button(label="Copy pitch/rise ⤺", help="Update the pitch/rise values below using the pitch/rise values from the sliders at the top the plots")
+        if copy_pitch_rise:
+            if "rise" in query_params:
+                st.session_state.rise = float(query_params["rise"][0])
+                query_params.pop('rise', None)
+            if "pitch" in query_params:
+                st.session_state.twist = pitch2twist(float(query_params["pitch"][0]), st.session_state.rise)
+                query_params.pop('pitch', None)
+            st.experimental_set_query_params(**query_params)
         pitch_or_twist_choices = ["pitch", "twist"]
         value = int(query_params["use_pitch"][0]) if "use_pitch" in query_params else 1
         value = 0 if value else 1
@@ -107,40 +125,28 @@ def main(args):
 
         ny, nx = data.shape
         max_rise = max(2000., max(ny, nx)*apix * 2.0)
-        min_rise = 0.0
-        value = float(query_params["rise"][0]) if "rise" in query_params else data_example.rise
-        value = max(min_rise, min(max_rise, value))
-        rise = rise_empty.number_input('Rise (Å)', value=value, min_value=min_rise, max_value=max_rise, step=1.0, format="%.3f")
+        min_rise = 1e-2
+        rise = rise_empty.number_input('Rise (Å)', min_value=min_rise, max_value=max_rise, step=1.0, format="%.3f", key="rise")
 
         if use_pitch:
             min_pitch = abs(rise)
-            value = float(query_params["pitch"][0]) if "pitch" in query_params else data_example.pitch
-            value = max(min_pitch, value)
-            pitch = pitch_or_twist_number_input.number_input('Pitch (Å)', value=value, min_value=min_pitch, step=1.0, format="%.2f", key="pitch", help="twist = 360 / (pitch/rise)")
-            twist = round(360./(pitch/rise), 2)
-            pitch_or_twist_text.markdown(f"*(twist = {twist:.2f} °)*")
+            value = max(min_pitch, twist2pitch(st.session_state.twist, rise))
+            pitch = pitch_or_twist_number_input.number_input('Pitch (Å)', value=value, min_value=min_pitch, step=1.0, format="%.2f", help="twist = 360 / (pitch/rise)")
+            st.session_state.twist = pitch2twist(pitch, rise)
+            pitch_or_twist_text.markdown(f"*(twist = {st.session_state.twist:.2f} °)*")
+            twist = pitch2twist(pitch, rise)
         else:
-            if "twist" in query_params: value = float(query_params["twist"][0])
-            elif "pitch" in query_params: value = round(360./(float(query_params["pitch"][0])/rise), 2)
-            else: value = data_example.twist
-            value = min(180., max(0., value))
-            twist = pitch_or_twist_number_input.number_input('Twist (°)', value=value, min_value=0.0, max_value=180.0, step=1.0, format="%.2f", help="pitch = 360/twist * rise")
-            pitch = abs(round((360./twist)*rise, 2))
+            twist = pitch_or_twist_number_input.number_input('Twist (°)', min_value=0.0, max_value=180.0, step=1.0, format="%.2f", help="pitch = 360/twist * rise", key="twist")
+            pitch = abs(round(twist2pitch(twist, rise), 2))
             pitch_or_twist_text.markdown(f"*(pitch = {pitch:.2f} Å)*")
 
-        if copy_pitch_rise:
-            query_params.pop('pitch', None)
-            query_params.pop('rise', None)
-            st.experimental_set_query_params(**query_params)
-
-        value = int(query_params["csym"][0]) if "csym" in query_params else data_example.csym
-        csym = st.number_input('Csym', value=value, min_value=1, step=1, help="Cyclic symmetry around the helical axis")
+        csym = st.number_input('Csym', min_value=1, step=1, help="Cyclic symmetry around the helical axis", key="csym")
 
         if input_image2: value = max(radius_auto*apix, radius_auto2*apix2)
         else: value = radius_auto*apix
         value = float(query_params["radius"][0]) if "radius" in query_params else value
         if value<=1: value = 100.0
-        helical_radius = st.number_input('Radius (Å)', value=value, min_value=1.0, max_value=1000.0, step=10., format="%.1f", help="Mean radius of the tube/filament density from the helical axis")
+        helical_radius = st.number_input('Helical radius (Å)', value=value, min_value=1.0, max_value=1000.0, step=10., format="%.1f", help="Mean radius of the tube/filament density from the helical axis")
         
         tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-90.0, max_value=90.0, step=1.0, help="Only used to compute the layerline positions and to simulate the helix. Will not change the power spectra and phase differences across meridian of the input image(s)")
         value = max(2*apix, float(query_params["resx"][0]) if "resx" in query_params else round(8*apix, 1))
@@ -271,9 +277,12 @@ def main(args):
             if show_LL:
                 value = bool(query_params["lltext"][0]) if "lltext" in query_params else True
                 show_LL_text = st.checkbox(label="LLText", value=value, help="Show the layer lines using integer numbers for the Bessel orders instead of ellipses")
-                m_groups = compute_layer_line_positions(twist=twist, rise=rise, csym=csym, radius=helical_radius, tilt=tilt, cutoff_res=cutoff_res_y)
+
+                st.subheader("m:")
+                m_max_auto = int(np.floor(np.abs(rise/cutoff_res_y)))+3
+                m_max = int(st.number_input(label=f"Max=", min_value=1, value=m_max_auto, step=1, help="Maximal number of layer line groups to show"))
+                m_groups = compute_layer_line_positions(twist=twist, rise=rise, csym=csym, radius=helical_radius, tilt=tilt, cutoff_res=cutoff_res_y, m_max=m_max)
                 ng = len(m_groups)
-                st.subheader("m=")
                 show_choices = {}
                 lgs = sorted(m_groups.keys())[::-1]
                 for lgi, lg in enumerate(lgs):
@@ -1012,7 +1021,7 @@ def simulate_helix(twist, rise, csym, helical_radius, ball_radius, ny, nx, apix,
     return projection
 
 @st.cache(persist=True, show_spinner=False)
-def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m=[]):
+def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m_max=-1):
     def pitch(twist, rise):
         p = np.abs(rise * 360./twist)   # pitch in Å
         return p
@@ -1028,10 +1037,10 @@ def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m=
             sx[bi] = peak1/(2*np.pi*radius)
         return sx
 
-    if not m:
+    if m_max<1:
         m_max = int(np.floor(np.abs(rise/cutoff_res)))+3
-        m = list(range(-m_max, m_max+1))
-        m.sort(key=lambda x: (abs(x), x))   # 0, -1, 1, -2, 2, ...
+    m = list(range(-m_max, m_max+1))
+    m.sort(key=lambda x: (abs(x), x))   # 0, -1, 1, -2, 2, ...
     
     smax = 1./cutoff_res
 
@@ -1421,6 +1430,12 @@ data_examples = [
     Data(twist=29.40, rise=21.92, csym=6, diameter=138, apix=2.3438, url="https://tinyurl.com/y5tq9fqa")
 ]
 data_example = data_examples[0]
+
+def twist2pitch(twist, rise):
+    return 360. * rise/twist
+
+def pitch2twist(pitch, rise):
+    return 360. * rise/pitch
 
 @st.cache(persist=False, show_spinner=False)
 def set_initial_query_params(query_string):

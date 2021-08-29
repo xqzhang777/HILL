@@ -360,7 +360,7 @@ def fft_rescale(images, apix=1.0, cutoff_res=None, output_size=None):
     if output_size:
         ony, onx = output_size
     else:
-        ony, onx = image.shape
+        ony, onx = images.shape
 
     freq_y = np.fft.fftfreq(ony) * 2*apix/cutoff_res_y
     freq_x = np.fft.fftfreq(onx) * 2*apix/cutoff_res_x
