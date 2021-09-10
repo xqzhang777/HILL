@@ -144,7 +144,7 @@ def main(args):
 
         if input_image2: value = max(radius_auto*apix, radius_auto2*apix2)
         else: value = radius_auto*apix
-        value = float(query_params["radius"][0]) if "radius" in query_params else value
+        value = float(query_params["helical_radius"][0]) if "helical_radius" in query_params else value
         if value<=1: value = 100.0
         helical_radius = st.number_input('Helical radius (Å)', value=value, min_value=1.0, max_value=1000.0, step=10., format="%.1f", help="Mean radius of the tube/filament density from the helical axis")
         
@@ -509,7 +509,7 @@ def set_query_params(input, input2, use_pitch, pitch, twist, rise, csym, helical
         params["pitch"] = round(pitch,3)
     else:
         params["twist"] = round(twist,3)
-    params.update(dict(rise=round(rise,3), csym=csym, helicalradius=round(helical_radius,1), resx=round(cutoff_res_x,2), resy=round(cutoff_res_y,2)), nx=nx, ny=ny)
+    params.update(dict(rise=round(rise,3), csym=csym, helical_radius=round(helical_radius,1), resx=round(cutoff_res_x,2), resy=round(cutoff_res_y,2)), nx=nx, ny=ny)
     if not show_LL_text: params["lltext"] = 0
     if simuradius>0: params["simuradius"] = simuradius
     if simunoise>0: params["simunoise"] = simunoise
@@ -832,19 +832,24 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                 apix = st.number_input('Pixel size (Å/pixel)', value=apix, min_value=0.1, max_value=30., step=0.01, format="%.5g", key=f'apix_{param_i}')
             transpose_auto = input_mode not in [2, 3] and nx > ny
             transpose = st.checkbox(label='Transpose the image', value=transpose_auto, key=f'transpose_{param_i}')
+            negate_auto = np.median(data) > np.mean(data)
+            negate = st.checkbox(label='Invert the image contrast', value=negate_auto, key=f'negate_{param_i}')
             if input_type in ["PS", "PD"] or is_3d:
                 angle_auto, dx_auto = 0., 0.
             else:
                 angle_auto, dx_auto = auto_vertical_center(data)
             angle = st.number_input('Rotate (°) ', value=-angle_auto, min_value=-180., max_value=180., step=1.0, format="%.4g", key=f'angle_{param_i}')
             dx = st.number_input('Shift along X-dim (Å) ', value=dx_auto*apix, min_value=-nx*apix, max_value=nx*apix, step=1.0, format="%.3g", key=f'dx_{param_i}')
+            dy = st.number_input('Shift along Y-dim (Å) ', value=0.0, min_value=-ny*apix, max_value=ny*apix, step=1.0, format="%.3g", key=f'dy_{param_i}')
         
         transformed_image = st.empty()
-        transformed = transpose or angle or dx
+        transformed = transpose or negate or angle or dx
         if transpose:
             data = data.T
-        if angle or dx:
-            data = rotate_shift_image(data, angle=-angle, post_shift=(0, dx/apix), order=1)
+        if negate:
+            data = -data
+        if angle or dx or dy:
+            data = rotate_shift_image(data, angle=-angle, post_shift=(dy/apix, dx/apix), order=1)
 
         radius_auto = 0
         mask_radius = 0
@@ -1239,8 +1244,11 @@ def auto_vertical_center(image):
     y /= y.max()
     y[y<0.2] = 0
     n = len(y)
-    mask = np.where(y>0.5)
-    max_shift = abs((np.max(mask)-n//2) - (n//2-np.min(mask)))*1.5
+    try:
+        mask = np.where(y>0.5)
+        max_shift = abs((np.max(mask)-n//2) - (n//2-np.min(mask)))*1.5
+    except:
+        max_shift = n/4
 
     import scipy.interpolate as interpolate
     x = np.arange(3*n)
@@ -1403,10 +1411,20 @@ def get_2d_image_from_url(url: URL):
 
 @st.cache(persist=True, show_spinner=False, hash_funcs={FILENAME: hash_FILENAME})
 def get_2d_image_from_file(filename: FILENAME):
-    import mrcfile
-    with mrcfile.open(filename.filename) as mrc:
-        data = mrc.data * 1.0
-        apix = mrc.voxel_size.x.item()
+    try:
+        import mrcfile
+        with mrcfile.open(filename.filename) as mrc:
+            data = mrc.data * 1.0
+            apix = mrc.voxel_size.x.item()
+    except:
+        try:
+            from skimage.io import imread
+            data = imread(filename.filename, as_gray=1) * 1.0    # return: numpy array
+            data = data[::-1, :]
+            data = np.expand_dims(data, axis=0)
+            apix = 1.0
+        except:
+            return None, None
     if data.dtype==np.dtype('complex64'):
         data_complex = data
         ny, nx = data_complex[0].shape
