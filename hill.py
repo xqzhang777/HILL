@@ -478,17 +478,17 @@ def main(args):
                 st.video(movie_filename) # it always show the video using the entire column width
 
     if set_url:
-        input = (input_mode, url, image_index, emd_id, input_type)
-        input2 = (input_mode2, url2, image_index2, emd_id2, input_type2)
+        input = (input_mode, url, image_index, emd_id, input_type, apix)
+        input2 = (input_mode2, url2, image_index2, emd_id2, input_type2, apix2)
         set_query_params(input, input2, use_pitch, pitch, twist, rise, csym, helical_radius, show_LL_text, cutoff_res_x, cutoff_res_y, pnx, pny, ball_radius, noise, use_plot_size)
     else:
         st.experimental_set_query_params()
 
 def set_query_params(input, input2, use_pitch, pitch, twist, rise, csym, helical_radius, show_LL_text, cutoff_res_x, cutoff_res_y, nx, ny, simuradius, simunoise, useplotsize):
-    input_mode, url, image_index, emd_id, input_type = input
-    input_mode2, url2, image_index2, emd_id2, input_type2 = input2
+    input_mode, url, image_index, emd_id, input_type, apix = input
+    input_mode2, url2, image_index2, emd_id2, input_type2, apix2 = input2
     if input_mode2 is not None:
-        params=dict(input_mode=[input_mode, input_mode2])
+        params=dict(input_mode=[input_mode, input_mode2], apix=[apix, apix2])
         if input_mode in [2, 3]:
             params["emd_id"] = [emd_id, emd_id2]
         elif input_mode == 1:
@@ -497,7 +497,7 @@ def set_query_params(input, input2, use_pitch, pitch, twist, rise, csym, helical
         if input_type in ["PS", "PD"] or input_type2 in ["PS", "PD"]:
             params["input_type"] = [input_type, input_type2]
     else:
-        params=dict(input_mode=input_mode)        
+        params=dict(input_mode=input_mode, apix=apix)        
         if input_mode in [2, 3]:
             params["emd_id"] = emd_id
         elif input_mode == 1:
@@ -798,6 +798,7 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
             else:
                 image_index = 0
             data = data_all[image_index]
+            with supress_missing_values: apix = float(query_params["apix"][param_i])
 
         if not np.any(data):
             st.warning("All pixels of the 2D image have zero value")
@@ -832,7 +833,7 @@ def obtain_input_image(column, query_params, param_i=0, image_index_sync=0):
                 apix = st.number_input('Pixel size (Å/pixel)', value=apix, min_value=0.1, max_value=30., step=0.01, format="%.5g", key=f'apix_{param_i}')
             transpose_auto = input_mode not in [2, 3] and nx > ny
             transpose = st.checkbox(label='Transpose the image', value=transpose_auto, key=f'transpose_{param_i}')
-            negate_auto = np.median(data) > np.mean(data)
+            negate_auto = not guess_if_is_positive_contrast(data)
             negate = st.checkbox(label='Invert the image contrast', value=negate_auto, key=f'negate_{param_i}')
             if input_type in ["PS", "PD"] or is_3d:
                 angle_auto, dx_auto = 0., 0.
@@ -1346,6 +1347,10 @@ def guess_if_is_power_spectra(data, thresh=15):
     if (max-median)>thresh*sigma: return True
     else: return False
 
+@st.cache(persist=True, show_spinner=False)
+def guess_if_is_positive_contrast(data):
+    edge_mean = np.mean([data[0, :].mean(), data[-1, :].mean(), data[:, 0].mean(), data[:, -1].mean()])
+    return edge_mean < np.mean(data)
 class FILENAME:
     def __init__(self, filename):
         self.filename = filename
@@ -1417,14 +1422,12 @@ def get_2d_image_from_file(filename: FILENAME):
             data = mrc.data * 1.0
             apix = mrc.voxel_size.x.item()
     except:
-        try:
-            from skimage.io import imread
-            data = imread(filename.filename, as_gray=1) * 1.0    # return: numpy array
-            data = data[::-1, :]
-            data = np.expand_dims(data, axis=0)
-            apix = 1.0
-        except:
-            return None, None
+        from skimage.io import imread
+        data = imread(filename.filename, as_gray=1) * 1.0    # return: numpy array
+        data = data[::-1, :]
+        data = np.expand_dims(data, axis=0)
+        apix = 1.0
+
     if data.dtype==np.dtype('complex64'):
         data_complex = data
         ny, nx = data_complex[0].shape
