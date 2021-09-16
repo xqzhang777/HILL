@@ -700,15 +700,25 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                 tilt = st.number_input(label=f"Tilt (°):", min_value=-180.0, max_value=180., value=0.0, step=1.0, key=f'tilt_{param_i}')
                 data = generate_projection(data_all, az=az, tilt=tilt)
                 image_index = 0
+                data_to_show = np.array([0])
         else:
             nonzeros = nonzero_images(data_all)
             if nonzeros is None:
                 st.warning("All pixels of the input 2D images have zero value")
                 st.stop()
             
+            if "skipped" in st.session_state:
+                data_to_show = np.array([i for i in nonzeros if i not in st.session_state.skipped])
+            else:
+                data_to_show = nonzeros
+
+            if len(data_to_show) < 1:
+                st.warning(f"All {len(data_all)} images have been skipped")
+                st.stop()
+
             nz, ny, nx = data_all.shape
-            if nz>1:
-                if len(nonzeros)==nz:
+            if len(data_to_show)>1:
+                if len(data_to_show)==nz:
                     if param_i>0:
                         value = 1 if input_mode in [0, 1] and (is_pwr_auto or is_pd_auto) else 0
                         sync_i = st.checkbox(label=f"Sync image index", value=value, key=f'sync_{param_i}', help="Sync the index of the displayed image when two image stacks are used as inputs, for example, power spectra from one image stack and phase differences across meridian from the other image stack")
@@ -725,16 +735,23 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                     if param_i>0 and sync_i:
                         image_index = image_index_sync
                     else:
-                        value = nonzeros[0]+1
-                        if len(nonzeros)>50:
-                            nonzeros = list(nonzeros+1)
-                            index = nonzeros.index(value)
-                            image_index = int(st.selectbox(label=f"Choose an image ({len(nonzeros)} non-zero images out of {nz}):", options=nonzeros, index=index, key=f'image_index_{param_i}'))
+                        data_to_show_list = list(data_to_show+1)
+                        value = data_to_show_list[0]
+                        if len(data_to_show_list)>10:
+                            key=f'image_index_{param_i}'
+                            if key in st.session_state:
+                                while st.session_state[key] not in data_to_show_list:
+                                    st.session_state[key] += 1
+                                    st.session_state[key] = st.session_state[key] % (max(data_to_show_list)+1)
+                                index = data_to_show_list.index(st.session_state[key])
+                            else:
+                                index = data_to_show_list.index(value)
+                            image_index = int(st.selectbox(label=f"Choose an image ({len(data_to_show_list)} non-zero images out of {nz}):", options=data_to_show_list, index=index, key=f'image_index_{param_i}'))
                         else:
-                            image_index = int(st.select_slider(label=f"Choose an image ({len(nonzeros)} non-zero images out of {nz}):", options=list(nonzeros+1), value=value, key=f'image_index_slider_{param_i}'))
+                            image_index = int(st.select_slider(label=f"Choose an image ({len(data_to_show_list)} non-zero images out of {nz}):", options=data_to_show_list, value=value, key=f'image_index_slider_{param_i}'))
                 image_index -= 1
             else:
-                image_index = 0
+                image_index = data_to_show[0]
             data = data_all[image_index]
 
         if not np.any(data):
@@ -746,6 +763,29 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
 
         image_parameters_expander = st.expander(label="Image parameters", expanded=False)
         with image_parameters_expander:
+            if nz>1:
+                rerun = False
+                skip = st.button(label="Skip this image", help="Click the button to mark this image as a bad image that should be skipped")
+                if skip:
+                    rerun = True
+                    if "skipped" not in st.session_state: st.session_state.skipped = set()
+                    st.session_state.skipped.add(image_index)
+                if "skipped" in st.session_state and len(st.session_state.skipped):
+                    skipped_str = ' '.join(map(str, np.array(sorted(list(st.session_state.skipped)))+1))
+                    skipped_str_new = st.text_input(label="Skipped images:", value=skipped_str, help=f"Specify the list of image indices (1 for first image, separated by spaces) that should be skipped")
+                    if skipped_str_new != skipped_str:
+                        rerun = True
+                        tmp = []
+                        for s in skipped_str_new.split():
+                            try:
+                                tmp.append(int(s))
+                            except:
+                                pass
+                        skipped_new = np.array(tmp, dtype=np.int)-1
+                        st.session_state.skipped = set(skipped_new)
+                if rerun:
+                    st.experimental_rerun()
+
             input_type_auto = None
             if input_type_auto is None:
                 if is_pwr_auto is None: is_pwr_auto = guess_if_is_power_spectra(data)
