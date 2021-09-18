@@ -141,9 +141,9 @@ def main(args):
         helical_radius = 0.5*st.number_input('Filament/tube diameter (Å)', value=value*2, min_value=1.0, max_value=1000.0, step=10., format="%.1f", help="Mean radius of the tube/filament density from the helical axis", key="diameter")
         
         tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-90.0, max_value=90.0, step=1.0, help="Only used to compute the layerline positions and to simulate the helix. Will not change the power spectra and phase differences across meridian of the input image(s)", key="tilt")
-        value = round(8*apix, 1)
+        value = max(4*apix, round(st.session_state.resolution*1.6, 1)) if 'resolution' in st.session_state else round(8*apix, 1)
         cutoff_res_x = st.number_input('Resolution limit - X (Å)', value=value, min_value=2*apix, step=1.0, help="Set the highest resolution to be displayed in the X-direction", key="cutoff_res_x")
-        value = round(4*apix, 1)
+        value = max(2*apix, round(st.session_state.resolution*0.8, 1)) if 'resolution' in st.session_state else round(4*apix, 1)
         cutoff_res_y = st.number_input('Resolution limit - Y (Å)', value=value, min_value=2*apix, step=1.0, help="Set the highest resolution to be displayed in the Y-direction", key="cutoff_res_y")
         with st.expander(label="Filters", expanded=False):
             log_xform = st.checkbox(label="Log(amplitude)", value=True, help="Perform log transform of the power spectra to allow clear display of layerlines at low and high resolutions")
@@ -628,7 +628,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
         is_pwr_auto = None
         is_pd_auto = None
         if input_mode == 2:            
-            emdb_ids = get_emdb_ids()
+            emdb_ids, _ = get_emdb_ids()
             if not emdb_ids:
                 st.warning("failed to obtained a list of helical structures in EMDB")
                 return
@@ -654,12 +654,25 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                     st.warning(f"EMD-{emd_id_bad} is not a helical structure. Please input a valid id (for example, a randomly selected valid id 'emd-{emd_id}')")
                     return
             emd_id = st.session_state[key_emd_id].lower().split("emd-")[-1]
+            msg = f'[EMD-{emd_id}](https://www.ebi.ac.uk/emdb/entry/EMD-{emd_id})'
+            params = get_emdb_helical_parameters(emd_id)
+            if params:
+                st.session_state[f"input_type_{param_i}"] = "image"
+                st.session_state.twist = abs(params['twist'])
+                st.session_state.rise = params['rise']
+                st.session_state.csym = params['csym']
+                st.session_state.resolution = params['resolution']
+                msg += f" | resolution={params['resolution']}Å"
+                msg += f"  \ntwist={params['twist']}° | rise={params['rise']}Å | c{params['csym']}"
+            else:
+                msg += " | *helical params not available*"
+            st.markdown(msg)
             with st.spinner(f'Downloading EMD-{emd_id}'):
                 data_all, apix_auto = get_emdb_map(emd_id)
+                st.session_state.apix_0 = apix_auto
             if data_all is None:
                 st.warning(f"Failed to download [EMD-{emd_id}](https://www.ebi.ac.uk/emdb/entry/EMD-{emd_id})")
                 return
-            st.markdown(f'[EMD-{emd_id}](https://www.ebi.ac.uk/emdb/entry/EMD-{emd_id})')
 
             image_index = 0
             is_3d = True
@@ -763,7 +776,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
 
         image_parameters_expander = st.expander(label="Image parameters", expanded=False)
         with image_parameters_expander:
-            if nz>1:
+            if not is_3d and nz>1:
                 rerun = False
                 skip = st.button(label="Skip this image", help="Click the button to mark this image as a bad image that should be skipped")
                 if skip:
@@ -1361,11 +1374,35 @@ def get_2d_image_from_uploaded_file(fileobj):
 def get_emdb_ids():
     try:
         import pandas as pd
-        emdb_ids = pd.read_csv("https://www.ebi.ac.uk/emdb/api/search/*%20AND%20structure_determination_method:%22helical%22?wt=csv&download=true&fl=emdb_id")
-        emdb_ids = list(emdb_ids.iloc[:,0].str.split('-', expand=True).iloc[:, 1].values)
+        entries = pd.read_csv("https://www.ebi.ac.uk/emdb/api/search/*%20AND%20structure_determination_method:%22helical%22?wt=csv&download=true&fl=emdb_id,resolution")
+        emdb_ids = list(entries.iloc[:,0].str.split('-', expand=True).iloc[:, 1].values)
+        resolutions = entries.iloc[:,1].values
     except:
         emdb_ids = []
-    return emdb_ids
+        resolutions = []
+    return emdb_ids, resolutions
+
+@st.cache(persist=True, show_spinner=False)
+def get_emdb_helical_parameters(emd_id):
+  try:
+    emd_id2 = ''.join([s for s in str(emd_id) if s.isdigit()])
+    url = f"https://ftp.ebi.ac.uk/pub/databases/emdb/structures/EMD-{emd_id2}/header/emd-{emd_id2}.xml"
+    from urllib.request import urlopen
+    with urlopen(url) as response:
+      xml_data = response.read()
+    import xmltodict
+    data = xmltodict.parse(xml_data)
+    helical_parameters = data['emdEntry']['experiment']['specimenPreparation']['helicalParameters']
+    assert(helical_parameters['deltaPhi']['@units'] == 'degrees')
+    assert(helical_parameters['deltaZ']['@units'] == 'A')
+    ret = {}
+    ret["twist"] = float(helical_parameters['deltaPhi']['#text'])
+    ret["rise"] = float(helical_parameters['deltaZ']['#text'])
+    ret["csym"] = int(helical_parameters['axialSymmetry'][1:])
+    ret["resolution"] = float(data['emdEntry']['processing']['reconstruction']['resolutionByAuthor'])
+  except:
+    ret = None
+  return ret
 
 @st.cache(persist=True, show_spinner=False)
 def get_emdb_map(emd_id: str):
@@ -1420,7 +1457,7 @@ def twist2pitch(twist, rise):
 def pitch2twist(pitch, rise):
     return 360. * rise/pitch
 class Data:
-    def __init__(self, twist, rise, csym, diameter, apix_or_nqyuist, url=None, input_type="image"):
+    def __init__(self, twist, rise, csym, diameter, apix_or_nqyuist=None, url=None, input_type="image"):
         self.input_type = input_type
         self.twist = twist
         self.rise = rise
@@ -1433,7 +1470,7 @@ class Data:
         self.url = url
 
 data_examples = [
-    Data(twist=29.40, rise=21.92, csym=6, diameter=138, apix_or_nqyuist=2.3438, url="https://tinyurl.com/y5tq9fqa"),
+    Data(twist=29.40, rise=21.92, csym=6, diameter=138, url="https://tinyurl.com/y5tq9fqa"),
     Data(twist=36.0, rise=3.4, csym=1, diameter=20, input_type="PS", apix_or_nqyuist=2.5, url="https://upload.wikimedia.org/wikipedia/en/b/b2/Photo_51_x-ray_diffraction_image.jpg")
 ]
 data_example = np.random.choice(data_examples)
@@ -1441,13 +1478,15 @@ data_example = np.random.choice(data_examples)
 def set_session_state_from_data_example(data):
     st.session_state.input_mode_0 = 1
     st.session_state.url_0 = data.url
-    st.session_state.input_type_0 = data.input_type
-    if st.session_state.input_type_0 in ["PS", "PD"]:
-        st.session_state.apix_nyquist_0 = data.nyquist
+    if data.input_type in ["PS", "PD"]:
+        st.session_state.input_type_0 = data.input_type
+        if data.nyquist is not None:
+            st.session_state.apix_nyquist_0 = data.nyquist
     else:
-        st.session_state.apix_0 = data.apix
-    st.session_state.rise = data_example.rise
-    st.session_state.twist = data.twist
+        if data.apix is not None:
+            st.session_state.apix_0 = data.apix
+    st.session_state.rise = data.rise
+    st.session_state.twist = abs(data.twist)
     st.session_state.csym = data.csym
     st.session_state.diameter = data.diameter
 
@@ -1480,7 +1519,7 @@ def setup_anonymous_usage_tracking():
         index_file.chmod(stat.S_IRUSR|stat.S_IWUSR|stat.S_IRGRP|stat.S_IROTH)
         txt = index_file.read_text()
         if txt.find("gtag/js?")==-1:
-            txt = txt.replace("<head>", '''<head><script async src="https://www.googletagmanager.com/gtag/js?id=G-8Z99BDVHTC"></script><script>window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());gtag('config', 'G-8Z99BDVHTC');</script>''')
+            txt = txt.replace("<head>", '''<head><script async src="https://www.googletagmanager.com/gtag/js?id=G-7SGET974KQ"></script><script>window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());gtag('config', 'G-7SGET974KQ');</script>''')
             index_file.write_text(txt)
     except:
         pass
