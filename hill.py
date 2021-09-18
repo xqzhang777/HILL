@@ -35,7 +35,7 @@ def import_with_auto_install(packages, scope=locals()):
             import subprocess
             subprocess.call(f'pip install {package_pip_name}', shell=True)
             scope[package_import_name] =  __import__(package_import_name)
-required_packages = "streamlit numpy scipy bokeh skimage:scikit_image mrcfile finufft moviepy selenium".split()
+required_packages = "streamlit numpy scipy bokeh skimage:scikit_image mrcfile finufft moviepy selenium xmltodict".split()
 import_with_auto_install(required_packages)
 
 import streamlit as st
