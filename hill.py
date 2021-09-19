@@ -628,7 +628,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
         is_pwr_auto = None
         is_pd_auto = None
         if input_mode == 2:            
-            emdb_ids, _ = get_emdb_ids()
+            emdb_ids, resolutions = get_emdb_ids()
             if not emdb_ids:
                 st.warning("failed to obtained a list of helical structures in EMDB")
                 return
@@ -654,7 +654,8 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                     st.warning(f"EMD-{emd_id_bad} is not a helical structure. Please input a valid id (for example, a randomly selected valid id 'emd-{emd_id}')")
                     return
             emd_id = st.session_state[key_emd_id].lower().split("emd-")[-1]
-            msg = f'[EMD-{emd_id}](https://www.ebi.ac.uk/emdb/entry/EMD-{emd_id})'
+            resolution = resolutions[emdb_ids.index(emd_id)]
+            msg = f'[EMD-{emd_id}](https://www.ebi.ac.uk/emdb/entry/EMD-{emd_id}) | resolution={resolution}Å'
             params = get_emdb_helical_parameters(emd_id)
             if params:
                 st.session_state[f"input_type_{param_i}"] = "image"
@@ -662,10 +663,9 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                 st.session_state.rise = params['rise']
                 st.session_state.csym = params['csym']
                 st.session_state.resolution = params['resolution']
-                msg += f" | resolution={params['resolution']}Å"
                 msg += f"  \ntwist={params['twist']}° | rise={params['rise']}Å | c{params['csym']}"
             else:
-                msg += " | *helical params not available*"
+                msg +=  "  \n*helical params not available*"
             st.markdown(msg)
             with st.spinner(f'Downloading EMD-{emd_id}'):
                 data_all, apix_auto = get_emdb_map(emd_id)
