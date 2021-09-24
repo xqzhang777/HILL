@@ -467,7 +467,7 @@ def main(args):
     else:
         st.experimental_set_query_params()
 
-@st.cache(persist=True, show_spinner=False, suppress_st_warning=True)
+@st.experimental_memo(persist='disk', show_spinner=False, suppress_st_warning=True)
 def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudocolor, log_xform, lp_fraction, hp_fraction):
     if movie_mode_params[0] == 0:
         movie_mode, data_all, noise, apix = movie_mode_params
@@ -695,7 +695,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                     image_url = st.text_input(label=label, key=f'url_{param_i}', help="An online url (http:// or ftp://) or a local file path (/path/to/your/structure.mrc)").strip()
                     is_pwr_auto = image_url.find("ps.mrcs")!=-1
                     is_pd_auto = image_url.find("pd.mrcs")!=-1
-                    data_all, apix_auto = get_2d_image_from_url(URL(image_url))
+                    data_all, apix_auto = get_2d_image_from_url(image_url)
             nz, ny, nx = data_all.shape
             if nz==1:
                 is_3d = False
@@ -942,7 +942,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
         input_params = (input_mode, (fileobj, None, None))
     return data_all, image_index, data, apix, radius_auto, mask_radius, input_type, is_3d, input_params, (image_container, image_label)
 
-@st.cache(persist=True, show_spinner=False)
+@st.experimental_memo(persist='disk', show_spinner=False)
 def bessel_n_image(ny, nx, nyquist_res_x, nyquist_res_y, radius, tilt):
     def build_bessel_order_table(xmax):
         from scipy.special import jnp_zeros
@@ -976,7 +976,7 @@ def bessel_n_image(ny, nx, nyquist_res_x, nyquist_res_y, radius, tilt):
         indices = np.abs(table - xs).argmin(axis=-1)
         return np.tile(indices, (ny, 1)).astype(np.int16)
 
-@st.cache(persist=True, show_spinner=False)
+@st.experimental_memo(persist='disk', show_spinner=False)
 def simulate_helix(twist, rise, csym, helical_radius, ball_radius, ny, nx, apix, tilt=0, az0=None):
     def simulate_projection(centers, sigma, ny, nx, apix):
         sigma2 = sigma*sigma
@@ -1016,7 +1016,7 @@ def simulate_helix(twist, rise, csym, helical_radius, ball_radius, ny, nx, apix,
     projection = simulate_projection(centers, ball_radius, ny, nx, apix)
     return projection
 
-@st.cache(persist=True, show_spinner=False)
+@st.experimental_memo(persist='disk', show_spinner=False)
 def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m_max=-1):
     def pitch(twist, rise):
         p = np.abs(rise * 360./twist)   # pitch in Å
@@ -1068,7 +1068,7 @@ def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m_
         m_groups[m[mi]] = d
     return m_groups
 
-@st.cache(persist=True, show_spinner=False)
+@st.experimental_memo(persist='disk', show_spinner=False)
 def compute_phase_difference_across_meridian(phase):
     # https://numpy.org/doc/stable/reference/generated/numpy.fft.fftfreq.html
     phase_diff = phase * 0
@@ -1076,7 +1076,7 @@ def compute_phase_difference_across_meridian(phase):
     phase_diff = np.rad2deg(np.arccos(np.cos(phase_diff)))   # set the range to [0, 180]. 0 -> even order, 180 - odd order
     return phase_diff
 
-@st.cache(persist=True, show_spinner=False)
+@st.experimental_memo(persist='disk', show_spinner=False)
 def resize_rescale_power_spectra(data, nyquist_res, cutoff_res=None, output_size=None, log=True, low_pass_fraction=0, high_pass_fraction=0, norm=1):
     from scipy.ndimage.interpolation import map_coordinates
     ny, nx = data.shape
@@ -1092,7 +1092,7 @@ def resize_rescale_power_spectra(data, nyquist_res, cutoff_res=None, output_size
     if norm: pwr = normalize(pwr, percentile=(0, 100))
     return pwr
 
-@st.cache(persist=True, show_spinner=False)
+@st.experimental_memo(persist='disk', show_spinner=False)
 def compute_power_spectra(data, apix, cutoff_res=None, output_size=None, log=True, low_pass_fraction=0, high_pass_fraction=0):
     fft = fft_rescale(data, apix=apix, cutoff_res=cutoff_res, output_size=output_size)
     fft = np.fft.fftshift(fft)  # shift fourier origin from corner to center
@@ -1105,7 +1105,7 @@ def compute_power_spectra(data, apix, cutoff_res=None, output_size=None, log=Tru
     phase = np.angle(fft, deg=False)
     return pwr, phase
 
-@st.cache(persist=True, show_spinner=False)
+@st.experimental_memo(persist='disk', show_spinner=False)
 def fft_rescale(image, apix=1.0, cutoff_res=None, output_size=None):
     if cutoff_res:
         cutoff_res_y, cutoff_res_x = cutoff_res
@@ -1133,7 +1133,7 @@ def fft_rescale(image, apix=1.0, cutoff_res=None, output_size=None):
     # now fft has the same layout and phase origin (i.e. np.fft.ifft2(fft) would obtain original image)
     return fft
 
-@st.cache(persist=True, show_spinner=False)
+@st.experimental_memo(persist='disk', show_spinner=False)
 def low_high_pass_filter(data, low_pass_fraction=0, high_pass_fraction=0):
     fft = np.fft.fft2(data)
     ny, nx = fft.shape
@@ -1151,7 +1151,7 @@ def low_high_pass_filter(data, low_pass_fraction=0, high_pass_fraction=0):
     ret = np.abs(np.fft.ifft2(fft))
     return ret
 
-@st.cache(persist=True, show_spinner=False)
+@st.experimental_memo(persist='disk', show_spinner=False)
 def generate_tapering_filter(image_size, fraction_start=[0, 0], fraction_slope=0.1):
     ny, nx = image_size
     fy, fx = fraction_start
@@ -1178,7 +1178,7 @@ def generate_tapering_filter(image_size, fraction_start=[0, 0], fraction_slope=0
         filter *= X
     return filter
 
-@st.cache(persist=True, show_spinner=False)
+@st.experimental_memo(persist='disk', show_spinner=False)
 def estimate_radial_range(data, thresh_ratio=0.1):
     proj_y = np.sum(data, axis=0)
     n = len(proj_y)
@@ -1191,7 +1191,7 @@ def estimate_radial_range(data, thresh_ratio=0.1):
     mask_radius = max(abs(n//2-xmin), abs(xmax-n//2))
     return float(radius), float(mask_radius)    # pixel
 
-@st.cache(persist=True, show_spinner=False)
+@st.experimental_memo(persist='disk', show_spinner=False)
 def auto_vertical_center(image):
     image_work = image * 1.0
     background = np.mean(image_work[[0,1,2,-3,-2,-1],[0,1,2,-3,-2,-1]])
@@ -1254,7 +1254,7 @@ def auto_vertical_center(image):
     dx = res.x + (0.0 if n%2 else 0.5)
     return angle, dx
 
-@st.cache(persist=True, show_spinner=False)
+@st.experimental_memo(persist='disk', show_spinner=False)
 def rotate_shift_image(data, angle=0, pre_shift=(0, 0), post_shift=(0, 0), rotation_center=None, order=1):
     # pre_shift/rotation_center/post_shift: [y, x]
     if angle==0 and pre_shift==[0,0] and post_shift==[0,0]: return data*1.0
@@ -1274,7 +1274,7 @@ def rotate_shift_image(data, angle=0, pre_shift=(0, 0), post_shift=(0, 0), rotat
     ret = affine_transform(data, matrix=m, offset=offset, order=order, mode='constant')
     return ret
 
-@st.cache(persist=True, show_spinner=False)
+@st.experimental_memo(persist='disk', show_spinner=False)
 def generate_projection(data, az=0, tilt=0, output_size=None):
     from scipy.spatial.transform import Rotation as R
     from scipy.ndimage import affine_transform
@@ -1300,14 +1300,14 @@ def generate_projection(data, az=0, tilt=0, output_size=None):
     ret = normalize(ret)
     return ret
 
-@st.cache(persist=True, show_spinner=False)
+@st.experimental_memo(persist='disk', show_spinner=False)
 def normalize(data, percentile=(0, 100)):
     p0, p1 = percentile
     vmin, vmax = sorted(np.percentile(data, (p0, p1)))
     data2 = (data-vmin)/(vmax-vmin)
     return data2
 
-@st.cache(persist=True, show_spinner=False)
+@st.experimental_memo(persist='disk', show_spinner=False)
 def nonzero_images(data, thresh_ratio=1e-3):
     assert(len(data.shape) == 3)
     sigmas = np.std(data, axis=(1,2))
@@ -1318,7 +1318,7 @@ def nonzero_images(data, thresh_ratio=1e-3):
     else:
         None
 
-@st.cache(persist=True, show_spinner=False)
+@st.experimental_memo(persist='disk', show_spinner=False)
 def guess_if_is_phase_differences_across_meridian(data, err=30):
     if np.any(data[:, 0]):
         return False
@@ -1329,7 +1329,7 @@ def guess_if_is_phase_differences_across_meridian(data, err=30):
         return False
     return True
 
-@st.cache(persist=True, show_spinner=False)
+@st.experimental_memo(persist='disk', show_spinner=False)
 def guess_if_is_power_spectra(data, thresh=15):
     median = np.median(data)
     max = np.max(data)
@@ -1337,40 +1337,22 @@ def guess_if_is_power_spectra(data, thresh=15):
     if (max-median)>thresh*sigma: return True
     else: return False
 
-@st.cache(persist=True, show_spinner=False)
+@st.experimental_memo(persist='disk', show_spinner=False)
 def guess_if_is_positive_contrast(data):
     edge_mean = np.mean([data[0, :].mean(), data[-1, :].mean(), data[:, 0].mean(), data[:, -1].mean()])
     return edge_mean < np.mean(data)
-class FILENAME:
-    def __init__(self, filename):
-        self.filename = filename
 
-def hash_FILENAME(filename):
-    import pathlib
-    f = pathlib.Path(filename.filename)
-    if f.exists(): return (filename.filename, f.lstat())
-    return filename.filename
-class URL:
-    def __init__(self, url):
-        self.url = url
-
-def hash_URL(url):
-    import pathlib
-    f = pathlib.Path(url.url)
-    if f.exists(): return (url.url, f.lstat())
-    return url.url
-
-@st.cache(persist=True, show_spinner=False)
+@st.experimental_memo(persist='disk', show_spinner=False)
 def get_2d_image_from_uploaded_file(fileobj):
     import os, tempfile
     orignal_filename = fileobj.name
     suffix = os.path.splitext(orignal_filename)[-1]
     with tempfile.NamedTemporaryFile(suffix=suffix) as temp:
         temp.write(fileobj.read())
-        data, apix = get_2d_image_from_file(FILENAME(temp.name))
+        data, apix = get_2d_image_from_file(temp.name)
     return data, apix
 
-@st.cache(persist=True, show_spinner=False, ttl=24*60*60.) # refresh every day
+@st.experimental_memo(persist='disk', show_spinner=False, ttl=24*60*60.) # refresh every day
 def get_emdb_ids():
     try:
         import pandas as pd
@@ -1382,7 +1364,7 @@ def get_emdb_ids():
         resolutions = []
     return emdb_ids, resolutions
 
-@st.cache(persist=True, show_spinner=False)
+@st.experimental_memo(persist='disk', show_spinner=False)
 def get_emdb_helical_parameters(emd_id):
   try:
     emd_id2 = ''.join([s for s in str(emd_id) if s.isdigit()])
@@ -1404,7 +1386,7 @@ def get_emdb_helical_parameters(emd_id):
     ret = None
   return ret
 
-@st.cache(persist=True, show_spinner=False)
+@st.experimental_memo(persist='disk', show_spinner=False)
 def get_emdb_map(emd_id: str):
     server = "https://ftp.wwpdb.org/pub"    # Rutgers University, USA
     #server = "https://ftp.ebi.ac.uk/pub/databases" # European Bioinformatics Institute, England
@@ -1419,27 +1401,27 @@ def get_emdb_map(emd_id: str):
         apix = mrc.voxel_size.x.item()
     return data, apix
 
-@st.cache(persist=True, show_spinner=False, hash_funcs={URL: hash_URL}, suppress_st_warning=True)
-def get_2d_image_from_url(url: URL):
+@st.experimental_memo(persist='disk', show_spinner=False, suppress_st_warning=True)
+def get_2d_image_from_url(url):
     ds = np.DataSource(None)
-    if not ds.exists(url.url):
-        st.error(f"ERROR: {url.url} does not exist")
+    if not ds.exists(url):
+        st.error(f"ERROR: {url} does not exist")
         st.stop()
-    fp=ds.open(url.url)
-    return get_2d_image_from_file(FILENAME(fp.name))
+    with ds.open(url) as fp:
+        data = get_2d_image_from_file(fp.name)
+    return data
 
-@st.cache(persist=True, show_spinner=False, hash_funcs={FILENAME: hash_FILENAME})
-def get_2d_image_from_file(filename: FILENAME):
+#@st.experimental_memo(persist='disk', show_spinner=False)
+def get_2d_image_from_file(filename):
     try:
         import mrcfile
-        with mrcfile.open(filename.filename) as mrc:
+        with mrcfile.open(filename) as mrc:
             data = mrc.data * 1.0
             apix = mrc.voxel_size.x.item()
     except:
         from skimage.io import imread
-        data = imread(filename.filename, as_gray=1) * 1.0    # return: numpy array
+        data = imread(filename, as_gray=1) * 1.0    # return: numpy array
         data = data[::-1, :]
-        data = np.expand_dims(data, axis=0)
         apix = 1.0
 
     if data.dtype==np.dtype('complex64'):
@@ -1449,6 +1431,8 @@ def get_2d_image_from_file(filename: FILENAME):
         for i in range(len(data)):
             tmp = np.abs(np.fft.fftshift(np.fft.fft(np.fft.irfft(data_complex[i])), axes=1))
             data[i] = normalize(tmp, percentile=(0.1, 99.9))
+    if len(data.shape)==2:
+        data = np.expand_dims(data, axis=0)
     return data, apix
 
 def twist2pitch(twist, rise):
@@ -1490,7 +1474,7 @@ def set_session_state_from_data_example(data):
     st.session_state.csym = data.csym
     st.session_state.diameter = data.diameter
 
-@st.cache(persist=False, show_spinner=False)
+@st.experimental_memo(persist=None, show_spinner=False)
 def set_initial_query_params(query_string):
     if len(query_string)<1: return
     from urllib.parse import parse_qs
@@ -1511,7 +1495,7 @@ def set_session_state_from_query_params():
             except:
                 st.session_state[k] = v
 
-@st.cache(persist=True, show_spinner=False)
+@st.experimental_memo(persist='disk', show_spinner=False)
 def setup_anonymous_usage_tracking():
     try:
         import pathlib, stat
