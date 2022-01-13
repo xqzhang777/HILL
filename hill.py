@@ -118,7 +118,7 @@ def main(args):
 
         ny, nx = data.shape
         max_rise = max(2000., max(ny, nx)*apix * 2.0)
-        min_rise = 1e-2
+        min_rise = apix
         rise = rise_empty.number_input('Rise (Å)', min_value=min_rise, max_value=max_rise, step=1.0, format="%.3f", key="rise")
 
         if use_pitch:
@@ -667,7 +667,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
             else:
                 msg +=  "  \n*helical params not available*"
             st.markdown(msg)
-            with st.spinner(f'Downloading EMD-{emd_id}'):
+            with st.spinner(f'Downloading EMD-{emd_id} from {get_emdb_map_url(emd_id)}'):
                 data_all, apix_auto = get_emdb_map(emd_id)
                 st.session_state.apix_0 = apix_auto
             if data_all is None:
@@ -696,7 +696,6 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                     is_pwr_auto = image_url.find("ps.mrcs")!=-1
                     is_pd_auto = image_url.find("pd.mrcs")!=-1
                     with st.spinner(f'Downloading {image_url.strip()}'):
-                        image_url = get_direct_url(image_url)    # convert cloud drive indirect url to direct url
                         data_all, apix_auto = get_2d_image_from_url(image_url)
             nz, ny, nx = data_all.shape
             if nz==1:
@@ -801,31 +800,35 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                 if rerun:
                     st.experimental_rerun()
 
-            input_type_auto = None
-            if input_type_auto is None:
-                if is_pwr_auto is None: is_pwr_auto = guess_if_is_power_spectra(data)
-                if is_pd_auto is None: is_pd_auto = guess_if_is_phase_differences_across_meridian(data)
-                if is_pwr_auto: input_type_auto = "PS"
-                elif is_pd_auto: input_type_auto = "PD"
-                else: input_type_auto = "image"
-            mapping = {"image":0, "PS":1, "PD":2}
-            input_type = st.radio(label="Input is:", options="image PS PD".split(), index=mapping[input_type_auto], key=f'input_type_{param_i}', help="image: real space image; PS: power spectra; PD: phage differences across meridian")
-            if input_type in ["PS", "PD"]:
-                apix = 0.5 * st.number_input('Nyquist res (Å)', value=2*apix_auto, min_value=0.1, max_value=30., step=0.01, format="%.5g", key=f'apix_nyquist_{param_i}')
-            else:
-                apix = st.number_input('Pixel size (Å/pixel)', value=apix_auto, min_value=0.1, max_value=30., step=0.01, format="%.5g", key=f'apix_{param_i}')
-            transpose_auto = input_mode not in [2, 3] and nx > ny
-            transpose = st.checkbox(label='Transpose the image', value=transpose_auto, key=f'transpose_{param_i}')
-            negate_auto = not guess_if_is_positive_contrast(data)
-            negate = st.checkbox(label='Invert the image contrast', value=negate_auto, key=f'negate_{param_i}')
-            if input_type in ["PS", "PD"] or is_3d:
-                angle_auto, dx_auto = 0., 0.
-            else:
-                angle_auto, dx_auto = auto_vertical_center(data)
-            angle = st.number_input('Rotate (°) ', value=-angle_auto, min_value=-180., max_value=180., step=1.0, format="%.4g", key=f'angle_{param_i}')
-            dx = st.number_input('Shift along X-dim (Å) ', value=dx_auto*apix, min_value=-nx*apix, max_value=nx*apix, step=1.0, format="%.3g", key=f'dx_{param_i}')
-            dy = st.number_input('Shift along Y-dim (Å) ', value=0.0, min_value=-ny*apix, max_value=ny*apix, step=1.0, format="%.3g", key=f'dy_{param_i}')
-        
+            with st.form("do_transform_form"):
+                input_type_auto = None
+                if input_type_auto is None:
+                    if is_pwr_auto is None: is_pwr_auto = guess_if_is_power_spectra(data)
+                    if is_pd_auto is None: is_pd_auto = guess_if_is_phase_differences_across_meridian(data)
+                    if is_pwr_auto: input_type_auto = "PS"
+                    elif is_pd_auto: input_type_auto = "PD"
+                    else: input_type_auto = "image"
+                mapping = {"image":0, "PS":1, "PD":2}
+                input_type = st.radio(label="Input is:", options="image PS PD".split(), index=mapping[input_type_auto], key=f'input_type_{param_i}', help="image: real space image; PS: power spectra; PD: phage differences across meridian")
+                if input_type in ["PS", "PD"]:
+                    apix = 0.5 * st.number_input('Nyquist res (Å)', value=2*apix_auto, min_value=0.1, max_value=30., step=0.01, format="%.5g", key=f'apix_nyquist_{param_i}')
+                else:
+                    apix = st.number_input('Pixel size (Å/pixel)', value=apix_auto, min_value=0.1, max_value=30., step=0.01, format="%.5g", key=f'apix_{param_i}')
+                transpose_auto = input_mode not in [2, 3] and nx > ny
+                transpose = st.checkbox(label='Transpose the image', value=transpose_auto, key=f'transpose_{param_i}')
+                negate_auto = not guess_if_is_positive_contrast(data)
+                negate = st.checkbox(label='Invert the image contrast', value=negate_auto, key=f'negate_{param_i}')
+                if input_type in ["PS", "PD"] or is_3d:
+                    angle_auto, dx_auto = 0., 0.
+                else:
+                    angle_auto, dx_auto = auto_vertical_center(data)
+                angle = st.number_input('Rotate (°) ', value=-angle_auto, min_value=-180., max_value=180., step=1.0, format="%.4g", key=f'angle_{param_i}')
+                dx = st.number_input('Shift along X-dim (Å) ', value=dx_auto*apix, min_value=-nx*apix, max_value=nx*apix, step=1.0, format="%.3g", key=f'dx_{param_i}')
+                dy = st.number_input('Shift along Y-dim (Å) ', value=0.0, min_value=-ny*apix, max_value=ny*apix, step=1.0, format="%.3g", key=f'dy_{param_i}')
+
+                mask_empty = st.container()        
+                st.form_submit_button("Submit")
+
         with original_image:
             if is_3d:
                 image_label = f"Orignal image ({nx}x{ny})"
@@ -847,11 +850,10 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
         radius_auto = 0
         mask_radius = 0
         if input_type in ["image"]:
-            with image_parameters_expander:
-                radius_auto, mask_radius_auto = estimate_radial_range(data, thresh_ratio=0.1)
-                mask_radius = st.number_input('Mask radius (Å) ', value=min(mask_radius_auto*apix, nx/2*apix), min_value=1.0, max_value=nx/2*apix, step=1.0, format="%.1f", key=f'mask_radius_{param_i}')
-                mask_len_percent_auto = 50.0
-                mask_len_fraction = st.number_input('Mask length (%) ', value=mask_len_percent_auto, min_value=10.0, max_value=100.0, step=1.0, format="%.1f", key=f'mask_len_{param_i}') / 100.0
+            radius_auto, mask_radius_auto = estimate_radial_range(data, thresh_ratio=0.1)
+            mask_radius = mask_empty.number_input('Mask radius (Å) ', value=min(mask_radius_auto*apix, nx/2*apix), min_value=1.0, max_value=nx/2*apix, step=1.0, format="%.1f", key=f'mask_radius_{param_i}')
+            mask_len_percent_auto = 50.0
+            mask_len_fraction = mask_empty.number_input('Mask length (%) ', value=mask_len_percent_auto, min_value=10.0, max_value=100.0, step=1.0, format="%.1f", key=f'mask_len_{param_i}') / 100.0
 
             fraction_x = mask_radius/(nx//2*apix)
             tapering_image = generate_tapering_filter(image_size=data.shape, fraction_start=[mask_len_fraction, fraction_x], fraction_slope=(1.0-mask_len_fraction)/2.)
@@ -864,7 +866,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
 
             tools = 'box_zoom,crosshair,hover,pan,reset,save,wheel_zoom'
             tooltips = [("X", "@x{0.0}Å")]
-            p = figure(x_axis_label="x (Å)", y_axis_label="pixel value", frame_height=ny, tools=tools, tooltips=tooltips)
+            p = figure(x_axis_label="x (Å)", y_axis_label="pixel value", frame_height=200, tools=tools, tooltips=tooltips)
             p.line(x, ymax, line_width=2, color='red', legend_label="max")
             p.line(-x, ymax, line_width=2, color='red', line_dash="dashed", legend_label="max flipped")
             p.line(x, ymean, line_width=2, color='blue', legend_label="mean")
@@ -1197,9 +1199,11 @@ def estimate_radial_range(data, thresh_ratio=0.1):
 def auto_vertical_center(image):
     image_work = image * 1.0
     background = np.mean(image_work[[0,1,2,-3,-2,-1],[0,1,2,-3,-2,-1]])
-    thresh = (image_work.max()-background) * 0.2 + background
-    image_work = (image_work-thresh)/(image_work.max()-thresh)
-    image_work[image_work<0] = 0
+    max_val = image_work.max()
+    thresh = (max_val-background) * 0.2 + background
+    if background < thresh < max_val:
+        image_work = (image_work-thresh)/(max_val-thresh)
+        image_work[image_work<0] = 0
 
     # rough estimate of rotation
     def score_rotation(angle):
@@ -1358,7 +1362,7 @@ def get_2d_image_from_uploaded_file(fileobj):
 def get_emdb_ids():
     try:
         import pandas as pd
-        entries = pd.read_csv("https://www.ebi.ac.uk/emdb/api/search/*%20AND%20structure_determination_method:%22helical%22?wt=csv&download=true&fl=emdb_id,resolution")
+        entries = pd.read_csv("https://www.ebi.ac.uk/emdb/api/search/current_status:%22REL%22%20AND%20structure_determination_method:%22helical%22?wt=csv&download=true&fl=emdb_id,resolution")
         emdb_ids = list(entries.iloc[:,0].str.split('-', expand=True).iloc[:, 1].values)
         resolutions = entries.iloc[:,1].values
     except:
@@ -1388,12 +1392,16 @@ def get_emdb_helical_parameters(emd_id):
     ret = None
   return ret
 
-@st.experimental_memo(persist='disk', show_spinner=False)
-def get_emdb_map(emd_id: str):
+def get_emdb_map_url(emd_id: str):
     server = "https://ftp.wwpdb.org/pub"    # Rutgers University, USA
     #server = "https://ftp.ebi.ac.uk/pub/databases" # European Bioinformatics Institute, England
     #server = "http://ftp.pdbj.org/pub" # Osaka University, Japan
     url = f"{server}/emdb/structures/EMD-{emd_id}/map/emd_{emd_id}.map.gz"
+    return url
+
+@st.experimental_memo(persist='disk', show_spinner=False)
+def get_emdb_map(emd_id: str):
+    url = get_emdb_map_url(emd_id)
     ds = np.DataSource(None)
     fp = ds.open(url)
     import mrcfile
@@ -1405,8 +1413,9 @@ def get_emdb_map(emd_id: str):
 
 @st.experimental_memo(persist='disk', show_spinner=False, suppress_st_warning=True)
 def get_2d_image_from_url(url):
+    url_final = get_direct_url(url)    # convert cloud drive indirect url to direct url
     ds = np.DataSource(None)
-    if not ds.exists(url):
+    if not ds.exists(url_final):
         st.error(f"ERROR: {url} could not be downloaded. If this url points to a cloud drive file, make sure the link is a direct download link instead of a link for preview")
         st.stop()
     with ds.open(url) as fp:
@@ -1471,10 +1480,10 @@ def set_session_state_from_data_example(data):
     else:
         if data.apix is not None:
             st.session_state.apix_0 = data.apix
-    st.session_state.rise = data.rise
-    st.session_state.twist = abs(data.twist)
-    st.session_state.csym = data.csym
-    st.session_state.diameter = data.diameter
+    st.session_state.rise = float(data.rise)
+    st.session_state.twist = float(abs(data.twist))
+    st.session_state.csym = int(data.csym)
+    st.session_state.diameter = float(data.diameter)
 
 @st.experimental_memo(persist=None, show_spinner=False)
 def set_initial_query_params(query_string):
