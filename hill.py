@@ -910,6 +910,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
             if 0:
                 xmean = np.mean(acf, axis=1)
                 p.line(xmean, y, line_width=2, color='blue', legend_label="mean")
+            p.hover[0].attachment = "above"
             p.legend.visible = False
             p.legend.location = "top_right"
             p.legend.click_policy="hide"
