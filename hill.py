@@ -679,12 +679,14 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
             is_pwr_auto = False
             is_pd_auto = False
         else:
+            is_3d_auto = False
             if input_mode == 0:  # "upload a mrc/mrcs file":
                 fileobj = st.file_uploader("Upload a mrc or mrcs file ", type=['mrc', 'mrcs', 'map', 'map.gz', 'tnf'], key=f'upload_{param_i}')
                 if fileobj is not None:
                     is_pwr_auto = fileobj.name.find("ps.mrcs")!=-1
                     is_pd_auto = fileobj.name.find("pd.mrcs")!=-1
                     data_all, apix_auto = get_2d_image_from_uploaded_file(fileobj)
+                    is_3d_auto = guess_if_3d(filename=fileobj.name, data=data_all)
                 else:
                     st.stop()
             elif input_mode == 1:   # "url":
@@ -697,13 +699,9 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                     is_pd_auto = image_url.find("pd.mrcs")!=-1
                     with st.spinner(f'Downloading {image_url.strip()}'):
                         data_all, apix_auto = get_2d_image_from_url(image_url)
+                    is_3d_auto = guess_if_3d(filename=image_url, data=data_all)
             nz, ny, nx = data_all.shape
-            if nz==1:
-                is_3d = False
-            else:
-                if nx==ny and (nz>nx//4 and nz%4==0): is_3d_auto = True
-                else: is_3d_auto = False
-                is_3d = st.checkbox(label=f"The input ({nx}x{ny}x{nz}) is a 3D map", value=is_3d_auto, key=f'is_3d_{param_i}', help="The app thinks the input image contains a stack of 2D images. Check this box to inform the app that the input is a 3D map")
+            is_3d = st.checkbox(label=f"The input ({nx}x{ny}x{nz}) is a 3D map", value=is_3d_auto, key=f'is_3d_{param_i}', help="The app thinks the input image contains a stack of 2D images. Check this box to inform the app that the input is a 3D map")
         if is_3d:
             if not np.any(data_all):
                 st.warning("All voxels of the input 3D map have zero value")
@@ -900,17 +898,18 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                 fig = create_image_figure(data, apix, apix, title=image_label, title_location="below", plot_width=None, plot_height=None, x_axis_label=None, y_axis_label=None, tooltips=None, show_axis=False, show_toolbar=False, crosshair_color="white", aspect_ratio=1)
                 st.bokeh_chart(fig, use_container_width=True)
 
-        #if input_type in ["image"]:
-        if 0:
+        if input_type in ["image"]:
+            acf = auto_correlation(data, sqrt=True, high_pass_fraction=0.1)
             y = np.arange(-ny//2, ny//2)*apix
-            xmax = np.max(data, axis=1)
-            xmean = np.mean(data, axis=1)
+            xmax = np.max(acf, axis=1)
 
             tools = 'box_zoom,crosshair,hover,pan,reset,save,wheel_zoom'
-            tooltips = [("Y", "@y{0.0}Å")]
-            p = figure(x_axis_label="pixel value", y_axis_label="y (Å)", frame_height=ny, tools=tools, tooltips=tooltips)
-            p.line(xmax, y, line_width=2, color='red', legend_label="max")
-            p.line(xmean, y, line_width=2, color='blue', legend_label="mean")
+            tooltips = [("Axial Shift", "@y{0.0}Å")]
+            p = figure(x_axis_label="Auto-correlation", y_axis_label="Axial Shift (Å)", frame_height=ny, tools=tools, tooltips=tooltips)
+            p.line(xmax, y, line_width=2, color='red', legend_label="ACF")
+            if 0:
+                xmean = np.mean(acf, axis=1)
+                p.line(xmean, y, line_width=2, color='blue', legend_label="mean")
             p.legend.visible = False
             p.legend.location = "top_right"
             p.legend.click_policy="hide"
@@ -1082,7 +1081,7 @@ def compute_phase_difference_across_meridian(phase):
 
 @st.experimental_memo(persist='disk', show_spinner=False)
 def resize_rescale_power_spectra(data, nyquist_res, cutoff_res=None, output_size=None, log=True, low_pass_fraction=0, high_pass_fraction=0, norm=1):
-    from scipy.ndimage.interpolation import map_coordinates
+    from scipy.ndimage import map_coordinates
     ny, nx = data.shape
     ony, onx = output_size
     res_y, res_x = cutoff_res
@@ -1136,6 +1135,24 @@ def fft_rescale(image, apix=1.0, cutoff_res=None, output_size=None):
     fft *= phase_shift
     # now fft has the same layout and phase origin (i.e. np.fft.ifft2(fft) would obtain original image)
     return fft
+
+@st.experimental_memo(persist='disk', show_spinner=False)
+def auto_correlation(data, sqrt=True, high_pass_fraction=0):
+    from scipy.signal import correlate2d
+    fft = np.fft.rfft2(data)
+    product = fft*np.conj(fft)
+    if sqrt: product = np.sqrt(product)
+    if 0<high_pass_fraction<=1:
+        ny, nx = product.shape
+        Y, X = np.meshgrid(np.arange(-ny//2, ny//2, dtype=float), np.arange(-nx//2, nx//2, dtype=float), indexing='ij')
+        Y /= ny//2
+        X /= nx//2
+        f2 = np.log(2)/(high_pass_fraction**2)
+        filter = 1.0 - np.exp(- f2 * Y**2) # Y-direction only
+        product *= np.fft.fftshift(filter)
+    corr = np.fft.fftshift(np.fft.irfft2(product))
+    corr /= np.max(corr)
+    return corr
 
 @st.experimental_memo(persist='disk', show_spinner=False)
 def low_high_pass_filter(data, low_pass_fraction=0, high_pass_fraction=0):
@@ -1349,6 +1366,21 @@ def guess_if_is_positive_contrast(data):
     return edge_mean < np.mean(data)
 
 @st.experimental_memo(persist='disk', show_spinner=False)
+def guess_if_3d(filename, data=None):
+    if filename.endswith(".mrcs"): return False
+    if filename.startswith("cryosparc") and filename.endswith("_class_averages.mrc"): return False    # cryosparc_P*_J*_*_class_averages.mrc
+    if data is None: return None
+    if len(data.shape)<3: return False
+    try:
+        nz, ny, nx = data.shape
+        if nz==1: return False
+        if nz==ny and nz==nx: return True
+        if ny==nx and nz in [50, 100, 200]: return False
+        return None
+    except:
+        return None 
+
+@st.experimental_memo(persist='disk', show_spinner=False)
 def get_2d_image_from_uploaded_file(fileobj):
     import os, tempfile
     orignal_filename = fileobj.name
@@ -1465,12 +1497,13 @@ def twist2pitch(twist, rise):
 def pitch2twist(pitch, rise):
     return 360. * rise/pitch
 class Data:
-    def __init__(self, twist, rise, csym, diameter, apix_or_nqyuist=None, url=None, input_type="image"):
+    def __init__(self, twist, rise, csym, diameter, dx=0, apix_or_nqyuist=None, url=None, input_type="image"):
         self.input_type = input_type
         self.twist = twist
         self.rise = rise
         self.csym = csym
         self.diameter = diameter
+        self.dx = dx
         if self.input_type in ["PS", "PD"]:
             self.nyquist = apix_or_nqyuist
         else:
@@ -1479,13 +1512,14 @@ class Data:
 
 data_examples = [
     Data(twist=29.40, rise=21.92, csym=6, diameter=138, url="https://tinyurl.com/y5tq9fqa"),
-    Data(twist=36.0, rise=3.4, csym=1, diameter=20, input_type="PS", apix_or_nqyuist=2.5, url="https://upload.wikimedia.org/wikipedia/en/b/b2/Photo_51_x-ray_diffraction_image.jpg")
+    Data(twist=36.0, rise=3.4, csym=1, diameter=20, dx=5, input_type="PS", apix_or_nqyuist=2.5, url="https://upload.wikimedia.org/wikipedia/en/b/b2/Photo_51_x-ray_diffraction_image.jpg")
 ]
 data_example = np.random.choice(data_examples)
 
 def set_session_state_from_data_example(data):
     st.session_state.input_mode_0 = 1
     st.session_state.url_0 = data.url
+    st.session_state.dx_0 = float(data.dx)
     if data.input_type in ["PS", "PD"]:
         st.session_state.input_type_0 = data.input_type
         if data.nyquist is not None:
