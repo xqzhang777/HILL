@@ -45,7 +45,11 @@ from bokeh.models import CustomJS, Span, LinearColorMapper
 from bokeh.models import HoverTool, CrosshairTool
 from bokeh.events import MouseMove, DoubleTap
 from bokeh.layouts import gridplot
+import math, random, gc
+gc.enable()
 
+#from memory_profiler import profile
+#@profile(precision=4)
 def main(args):
     title = "HILL: Helical Indexing using Layer Lines"
     st.set_page_config(page_title=title, layout="wide")
@@ -56,7 +60,8 @@ def main(args):
     if len(st.session_state)<1:  # only run once at the start of the session
         set_initial_query_params(query_string=args.query_string) # only excuted on the first run
 
-    set_session_state_from_query_params()
+    if "input_mode_0" not in st.session_state:  # only run once at the start of the session
+        set_session_state_from_query_params()
 
     if "input_mode_0" not in st.session_state:
         set_session_state_from_data_example(data_example)
@@ -87,7 +92,15 @@ def main(args):
             image_index2, data2, apix2, radius_auto2, mask_radius2, input_type2, is_3d2 = [None] * 7
             input_mode2, (uploaded_filename2, url2, emd_id2) = None, (None, None, None)
 
-        st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to Wen Jiang (jiang12 at purdue.edu)*")
+        with st.expander(label="Server info", expanded=False):
+            server_info_empty = st.empty()
+            #server_info = f"Host: {get_hostname()}  \n"
+            #server_info+= f"Account: {get_username()}"
+            server_info = f"Uptime: {uptime():.1f} s  \n"
+            server_info+= f"Mem (total): {mem_info()[0]:.1f} MB  \n"
+            server_info+= f"Mem (quota): {mem_quota():.1f} MB  \n"
+            server_info+= "Mem (used): {mem_used:.1f} MB"
+            server_info_empty.markdown(server_info.format(mem_used=mem_used()))
 
         hide_streamlit_style = """
         <style>
@@ -176,7 +189,11 @@ def main(args):
                     if movie_mode == 0:
                         movie_noise = st.number_input('Noise (sigma)', value=0., min_value=0., step=1., format="%.2f", help="Add random noise to the projection images")
         
-        set_url = st.button("Get a sharable link", help="Click to make the URL a sharable link")
+        share_url = st.checkbox('Show sharable URL', value=False, help="Include relevant parameters in the browser URL to allow you to share the URL and reproduce the plots", key="share_url")
+        if share_url:
+            show_qr = st.checkbox('Show QR code of the URL', value=False, help="Display the QR code of the sharable URL", key="show_qr")
+        else:
+            show_qr = False
 
     if input_type in ["PS"]:
         pwr = resize_rescale_power_spectra(data, nyquist_res=2*apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
@@ -462,12 +479,21 @@ def main(args):
                     params = (movie_mode, twist, rise, csym, noise, helical_radius, ball_radius, az, ny, nx, apix_simu)
                 movie_filename = create_movie(movie_frames, tilt, params, pny, pnx, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudocolor, log_xform, lp_fraction, hp_fraction)
                 st.video(movie_filename) # it always show the video using the entire column width
-    if set_url:
-        set_query_params_from_session_state()
-    else:
-        st.experimental_set_query_params()
 
-@st.experimental_memo(persist='disk', show_spinner=False, suppress_st_warning=True)
+        del data_all, data, figs_grid
+
+        if share_url:
+            set_query_params_from_session_state()
+            if show_qr:
+                qr_image = qr_code()
+                st.image(qr_image)
+        else:
+            st.experimental_set_query_params()
+
+        st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to Wen Jiang (jiang12 at purdue.edu)*")
+
+
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False, suppress_st_warning=True)
 def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudocolor, log_xform, lp_fraction, hp_fraction):
     if movie_mode_params[0] == 0:
         movie_mode, data_all, noise, apix = movie_mode_params
@@ -620,10 +646,21 @@ def add_linked_crosshair_tool(figures, dimensions="both"):
         fig.add_tools(crosshair)
 
 def obtain_input_image(column, param_i=0, image_index_sync=0):
+    if is_hosted():
+        max_map_size  = mem_quota()/2    # MB
+        max_map_dim   = int(pow(max_map_size*pow(2, 20)/4, 1./3.)//10*10)    # pixels in any dimension
+        stop_map_size = mem_quota()*0.75 # MB
+    else:
+        max_map_size = -1   # no limit
+        max_map_dim  = -1
+    if max_map_size>0:
+        warning_map_size = f"Due to the resource limit, the maximal map size should be {max_map_dim}x{max_map_dim}x{max_map_dim} voxels or less to avoid crashing the server process"
+
     with column:
         input_modes = {0:"upload", 1:"url", 2:"emd-xxxxx"}
-        value = 1
-        input_mode = st.radio(label="How to obtain the input image/map:", options=list(input_modes.keys()), format_func=lambda i:input_modes[i], index=value, key=f'input_mode_{param_i}', help="Only 2D images in MRC (*.mrcs*) and 3D maps in MRC (*.mrc*) or CCP4 (*.map*) format are supported. Compressed maps (*.gz*) will be automatically decompressed")
+        help = "Only maps in MRC (.mrc) or CCP4 (.map) format are supported. Compressed maps (.gz) will be automatically decompressed"
+        if max_map_size>0: help += f". {warning_map_size}"
+        input_mode = st.radio(label="How to obtain the input image/map:", options=list(input_modes.keys()), format_func=lambda i:input_modes[i], index=1,help=help, key=f'input_mode_{param_i}')
         is_3d = False
         is_pwr_auto = None
         is_pd_auto = None
@@ -639,24 +676,37 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
             st.markdown(f'[All {len(emdb_ids)} helical structures in EMDB]({url})')
             do_random_embid = st.checkbox("Choose a random EMDB ID", value=False, key=f"do_random_embid_{param_i}")
             if do_random_embid:
-                button_clicked = st.button(label="Change EMDB ID", help="Randomly select another helical structure in EMDB")
+                help = "Randomly select another helical structure in EMDB"
+                if max_map_size>0: help += f". {warning_map_size}"
+                button_clicked = st.button(label="Change EMDB ID", help=help)
                 if button_clicked:
                     import random
                     st.session_state[key_emd_id] = 'emd-' + random.choice(emdb_ids)
             else:
+                help = None
+                if max_map_size>0: help = warning_map_size
                 label = "Input an EMDB ID (emd-xxxxx):"
-                st.text_input(label=label, key=key_emd_id)
+                st.text_input(label=label, help=help, key=key_emd_id)
                 emd_id = st.session_state[key_emd_id].lower().split("emd-")[-1]
                 if emd_id not in emdb_ids:
                     emd_id_bad = emd_id
                     import random
                     emd_id = random.choice(emdb_ids)
                     st.warning(f"EMD-{emd_id_bad} is not a helical structure. Please input a valid id (for example, a randomly selected valid id 'emd-{emd_id}')")
-                    return
+                    st.stop()
             emd_id = st.session_state[key_emd_id].lower().split("emd-")[-1]
             resolution = resolutions[emdb_ids.index(emd_id)]
             msg = f'[EMD-{emd_id}](https://www.ebi.ac.uk/emdb/entry/EMD-{emd_id}) | resolution={resolution}Å'
             params = get_emdb_helical_parameters(emd_id)
+            if max_map_size>0 and params and "nz" in params and "ny" in params and "nx" in params:
+                nz = params["nz"]
+                ny = params["ny"]
+                nx = params["nx"]
+                map_size = nz*ny*nx*4 / pow(2, 20)
+                if map_size>stop_map_size:
+                    msg_map_too_large = f"As the map size ({map_size:.1f} MB, {nx}x{ny}x{nz} voxels) is too large for the resource limit ({mem_quota():.1f} MB memory cap) of the hosting service, HILL will stop analyzing it to avoid crashing the server. Please bin/crop your map so that it is {max_map_size} MB ({max_map_dim}x{max_map_dim}x{max_map_dim} voxels) or less, and then try again. Please check the [HILL web site](https://jiang.bio.purdue.edu/hill) to learn how to run HILL on your local computer with larger memory to support large maps"
+                    st.warning(msg_map_too_large)
+                    st.stop()
             if params:
                 st.session_state[f"input_type_{param_i}"] = "image"
                 st.session_state.twist = abs(params['twist'])
@@ -681,7 +731,9 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
         else:
             is_3d_auto = False
             if input_mode == 0:  # "upload a mrc/mrcs file":
-                fileobj = st.file_uploader("Upload a mrc or mrcs file ", type=['mrc', 'mrcs', 'map', 'map.gz', 'tnf'], key=f'upload_{param_i}')
+                help = None
+                if max_map_size>0: help = warning_map_size
+                fileobj = st.file_uploader("Upload a mrc or mrcs file ", type=['mrc', 'mrcs', 'map', 'map.gz', 'tnf'], help=help, key=f'upload_{param_i}')
                 if fileobj is not None:
                     is_pwr_auto = fileobj.name.find("ps.mrcs")!=-1
                     is_pd_auto = fileobj.name.find("pd.mrcs")!=-1
@@ -694,7 +746,9 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                     key_image_url = f'url_{param_i}'
                     if key_image_url not in st.session_state:
                         st.session_state[key_image_url] = data_example.url
-                    image_url = st.text_input(label=label, key=f'url_{param_i}', help="An online url (http:// or ftp://) or a local file path (/path/to/your/structure.mrc)").strip()
+                    help = "An online url (http:// or ftp://) or a local file path (/path/to/your/structure.mrc)"
+                    if max_map_size>0: help += f". {warning_map_size}"
+                    image_url = st.text_input(label=label, help=help, key=key_image_url).strip()
                     is_pwr_auto = image_url.find("ps.mrcs")!=-1
                     is_pd_auto = image_url.find("pd.mrcs")!=-1
                     with st.spinner(f'Downloading {image_url.strip()}'):
@@ -798,34 +852,32 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                 if rerun:
                     st.experimental_rerun()
 
-            with st.form("do_transform_form"):
-                input_type_auto = None
-                if input_type_auto is None:
-                    if is_pwr_auto is None: is_pwr_auto = guess_if_is_power_spectra(data)
-                    if is_pd_auto is None: is_pd_auto = guess_if_is_phase_differences_across_meridian(data)
-                    if is_pwr_auto: input_type_auto = "PS"
-                    elif is_pd_auto: input_type_auto = "PD"
-                    else: input_type_auto = "image"
-                mapping = {"image":0, "PS":1, "PD":2}
-                input_type = st.radio(label="Input is:", options="image PS PD".split(), index=mapping[input_type_auto], key=f'input_type_{param_i}', help="image: real space image; PS: power spectra; PD: phage differences across meridian")
-                if input_type in ["PS", "PD"]:
-                    apix = 0.5 * st.number_input('Nyquist res (Å)', value=2*apix_auto, min_value=0.1, max_value=30., step=0.01, format="%.5g", key=f'apix_nyquist_{param_i}')
-                else:
-                    apix = st.number_input('Pixel size (Å/pixel)', value=apix_auto, min_value=0.1, max_value=30., step=0.01, format="%.5g", key=f'apix_{param_i}')
-                transpose_auto = input_mode not in [2, 3] and nx > ny
-                transpose = st.checkbox(label='Transpose the image', value=transpose_auto, key=f'transpose_{param_i}')
-                negate_auto = not guess_if_is_positive_contrast(data)
-                negate = st.checkbox(label='Invert the image contrast', value=negate_auto, key=f'negate_{param_i}')
-                if input_type in ["PS", "PD"] or is_3d:
-                    angle_auto, dx_auto = 0., 0.
-                else:
-                    angle_auto, dx_auto = auto_vertical_center(data)
-                angle = st.number_input('Rotate (°) ', value=-angle_auto, min_value=-180., max_value=180., step=1.0, format="%.4g", key=f'angle_{param_i}')
-                dx = st.number_input('Shift along X-dim (Å) ', value=dx_auto*apix, min_value=-nx*apix, max_value=nx*apix, step=1.0, format="%.3g", key=f'dx_{param_i}')
-                dy = st.number_input('Shift along Y-dim (Å) ', value=0.0, min_value=-ny*apix, max_value=ny*apix, step=1.0, format="%.3g", key=f'dy_{param_i}')
+            input_type_auto = None
+            if input_type_auto is None:
+                if is_pwr_auto is None: is_pwr_auto = guess_if_is_power_spectra(data)
+                if is_pd_auto is None: is_pd_auto = guess_if_is_phase_differences_across_meridian(data)
+                if is_pwr_auto: input_type_auto = "PS"
+                elif is_pd_auto: input_type_auto = "PD"
+                else: input_type_auto = "image"
+            mapping = {"image":0, "PS":1, "PD":2}
+            input_type = st.radio(label="Input is:", options="image PS PD".split(), index=mapping[input_type_auto], key=f'input_type_{param_i}', help="image: real space image; PS: power spectra; PD: phage differences across meridian")
+            if input_type in ["PS", "PD"]:
+                apix = 0.5 * st.number_input('Nyquist res (Å)', value=2*apix_auto, min_value=0.1, max_value=30., step=0.01, format="%.5g", key=f'apix_nyquist_{param_i}')
+            else:
+                apix = st.number_input('Pixel size (Å/pixel)', value=apix_auto, min_value=0.1, max_value=30., step=0.01, format="%.5g", key=f'apix_{param_i}')
+            transpose_auto = input_mode not in [2, 3] and nx > ny
+            transpose = st.checkbox(label='Transpose the image', value=transpose_auto, key=f'transpose_{param_i}')
+            negate_auto = not guess_if_is_positive_contrast(data)
+            negate = st.checkbox(label='Invert the image contrast', value=negate_auto, key=f'negate_{param_i}')
+            if input_type in ["PS", "PD"] or is_3d:
+                angle_auto, dx_auto = 0., 0.
+            else:
+                angle_auto, dx_auto = auto_vertical_center(data)
+            angle = st.number_input('Rotate (°) ', value=-angle_auto, min_value=-180., max_value=180., step=1.0, format="%.4g", key=f'angle_{param_i}')
+            dx = st.number_input('Shift along X-dim (Å) ', value=dx_auto*apix, min_value=-nx*apix, max_value=nx*apix, step=1.0, format="%.3g", key=f'dx_{param_i}')
+            dy = st.number_input('Shift along Y-dim (Å) ', value=0.0, min_value=-ny*apix, max_value=ny*apix, step=1.0, format="%.3g", key=f'dy_{param_i}')
 
-                mask_empty = st.container()        
-                st.form_submit_button("Submit")
+            mask_empty = st.container()        
 
         with original_image:
             if is_3d:
@@ -850,7 +902,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
         if input_type in ["image"]:
             radius_auto, mask_radius_auto = estimate_radial_range(data, thresh_ratio=0.1)
             mask_radius = mask_empty.number_input('Mask radius (Å) ', value=min(mask_radius_auto*apix, nx/2*apix), min_value=1.0, max_value=nx/2*apix, step=1.0, format="%.1f", key=f'mask_radius_{param_i}')
-            mask_len_percent_auto = 50.0
+            mask_len_percent_auto = 90.0
             mask_len_fraction = mask_empty.number_input('Mask length (%) ', value=mask_len_percent_auto, min_value=10.0, max_value=100.0, step=1.0, format="%.1f", key=f'mask_len_{param_i}') / 100.0
 
             fraction_x = mask_radius/(nx//2*apix)
@@ -946,7 +998,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
         input_params = (input_mode, (fileobj, None, None))
     return data_all, image_index, data, apix, radius_auto, mask_radius, input_type, is_3d, input_params, (image_container, image_label)
 
-@st.experimental_memo(persist='disk', show_spinner=False)
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def bessel_n_image(ny, nx, nyquist_res_x, nyquist_res_y, radius, tilt):
     def build_bessel_order_table(xmax):
         from scipy.special import jnp_zeros
@@ -980,7 +1032,7 @@ def bessel_n_image(ny, nx, nyquist_res_x, nyquist_res_y, radius, tilt):
         indices = np.abs(table - xs).argmin(axis=-1)
         return np.tile(indices, (ny, 1)).astype(np.int16)
 
-@st.experimental_memo(persist='disk', show_spinner=False)
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def simulate_helix(twist, rise, csym, helical_radius, ball_radius, ny, nx, apix, tilt=0, az0=None):
     def simulate_projection(centers, sigma, ny, nx, apix):
         sigma2 = sigma*sigma
@@ -1020,7 +1072,7 @@ def simulate_helix(twist, rise, csym, helical_radius, ball_radius, ny, nx, apix,
     projection = simulate_projection(centers, ball_radius, ny, nx, apix)
     return projection
 
-@st.experimental_memo(persist='disk', show_spinner=False)
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m_max=-1):
     def pitch(twist, rise):
         p = np.abs(rise * 360./twist)   # pitch in Å
@@ -1072,7 +1124,7 @@ def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m_
         m_groups[m[mi]] = d
     return m_groups
 
-@st.experimental_memo(persist='disk', show_spinner=False)
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def compute_phase_difference_across_meridian(phase):
     # https://numpy.org/doc/stable/reference/generated/numpy.fft.fftfreq.html
     phase_diff = phase * 0
@@ -1080,7 +1132,7 @@ def compute_phase_difference_across_meridian(phase):
     phase_diff = np.rad2deg(np.arccos(np.cos(phase_diff)))   # set the range to [0, 180]. 0 -> even order, 180 - odd order
     return phase_diff
 
-@st.experimental_memo(persist='disk', show_spinner=False)
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def resize_rescale_power_spectra(data, nyquist_res, cutoff_res=None, output_size=None, log=True, low_pass_fraction=0, high_pass_fraction=0, norm=1):
     from scipy.ndimage import map_coordinates
     ny, nx = data.shape
@@ -1096,7 +1148,7 @@ def resize_rescale_power_spectra(data, nyquist_res, cutoff_res=None, output_size
     if norm: pwr = normalize(pwr, percentile=(0, 100))
     return pwr
 
-@st.experimental_memo(persist='disk', show_spinner=False)
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def compute_power_spectra(data, apix, cutoff_res=None, output_size=None, log=True, low_pass_fraction=0, high_pass_fraction=0):
     fft = fft_rescale(data, apix=apix, cutoff_res=cutoff_res, output_size=output_size)
     fft = np.fft.fftshift(fft)  # shift fourier origin from corner to center
@@ -1109,7 +1161,7 @@ def compute_power_spectra(data, apix, cutoff_res=None, output_size=None, log=Tru
     phase = np.angle(fft, deg=False)
     return pwr, phase
 
-@st.experimental_memo(persist='disk', show_spinner=False)
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def fft_rescale(image, apix=1.0, cutoff_res=None, output_size=None):
     if cutoff_res:
         cutoff_res_y, cutoff_res_x = cutoff_res
@@ -1137,7 +1189,7 @@ def fft_rescale(image, apix=1.0, cutoff_res=None, output_size=None):
     # now fft has the same layout and phase origin (i.e. np.fft.ifft2(fft) would obtain original image)
     return fft
 
-@st.experimental_memo(persist='disk', show_spinner=False)
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def auto_correlation(data, sqrt=True, high_pass_fraction=0):
     from scipy.signal import correlate2d
     fft = np.fft.rfft2(data)
@@ -1155,7 +1207,7 @@ def auto_correlation(data, sqrt=True, high_pass_fraction=0):
     corr /= np.max(corr)
     return corr
 
-@st.experimental_memo(persist='disk', show_spinner=False)
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def low_high_pass_filter(data, low_pass_fraction=0, high_pass_fraction=0):
     fft = np.fft.fft2(data)
     ny, nx = fft.shape
@@ -1173,7 +1225,7 @@ def low_high_pass_filter(data, low_pass_fraction=0, high_pass_fraction=0):
     ret = np.abs(np.fft.ifft2(fft))
     return ret
 
-@st.experimental_memo(persist='disk', show_spinner=False)
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def generate_tapering_filter(image_size, fraction_start=[0, 0], fraction_slope=0.1):
     ny, nx = image_size
     fy, fx = fraction_start
@@ -1200,7 +1252,7 @@ def generate_tapering_filter(image_size, fraction_start=[0, 0], fraction_slope=0
         filter *= X
     return filter
 
-@st.experimental_memo(persist='disk', show_spinner=False)
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def estimate_radial_range(data, thresh_ratio=0.1):
     proj_y = np.sum(data, axis=0)
     n = len(proj_y)
@@ -1213,7 +1265,7 @@ def estimate_radial_range(data, thresh_ratio=0.1):
     mask_radius = max(abs(n//2-xmin), abs(xmax-n//2))
     return float(radius), float(mask_radius)    # pixel
 
-@st.experimental_memo(persist='disk', show_spinner=False)
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def auto_vertical_center(image):
     image_work = image * 1.0
     background = np.mean(image_work[[0,1,2,-3,-2,-1],[0,1,2,-3,-2,-1]])
@@ -1278,7 +1330,7 @@ def auto_vertical_center(image):
     dx = res.x + (0.0 if n%2 else 0.5)
     return angle, dx
 
-@st.experimental_memo(persist='disk', show_spinner=False)
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def rotate_shift_image(data, angle=0, pre_shift=(0, 0), post_shift=(0, 0), rotation_center=None, order=1):
     # pre_shift/rotation_center/post_shift: [y, x]
     if angle==0 and pre_shift==[0,0] and post_shift==[0,0]: return data*1.0
@@ -1298,7 +1350,7 @@ def rotate_shift_image(data, angle=0, pre_shift=(0, 0), post_shift=(0, 0), rotat
     ret = affine_transform(data, matrix=m, offset=offset, order=order, mode='constant')
     return ret
 
-@st.experimental_memo(persist='disk', show_spinner=False)
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def generate_projection(data, az=0, tilt=0, output_size=None):
     from scipy.spatial.transform import Rotation as R
     from scipy.ndimage import affine_transform
@@ -1324,14 +1376,14 @@ def generate_projection(data, az=0, tilt=0, output_size=None):
     ret = normalize(ret)
     return ret
 
-@st.experimental_memo(persist='disk', show_spinner=False)
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def normalize(data, percentile=(0, 100)):
     p0, p1 = percentile
     vmin, vmax = sorted(np.percentile(data, (p0, p1)))
     data2 = (data-vmin)/(vmax-vmin)
     return data2
 
-@st.experimental_memo(persist='disk', show_spinner=False)
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def nonzero_images(data, thresh_ratio=1e-3):
     assert(len(data.shape) == 3)
     sigmas = np.std(data, axis=(1,2))
@@ -1342,7 +1394,7 @@ def nonzero_images(data, thresh_ratio=1e-3):
     else:
         None
 
-@st.experimental_memo(persist='disk', show_spinner=False)
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def guess_if_is_phase_differences_across_meridian(data, err=30):
     if np.any(data[:, 0]):
         return False
@@ -1353,7 +1405,7 @@ def guess_if_is_phase_differences_across_meridian(data, err=30):
         return False
     return True
 
-@st.experimental_memo(persist='disk', show_spinner=False)
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def guess_if_is_power_spectra(data, thresh=15):
     median = np.median(data)
     max = np.max(data)
@@ -1361,12 +1413,12 @@ def guess_if_is_power_spectra(data, thresh=15):
     if (max-median)>thresh*sigma: return True
     else: return False
 
-@st.experimental_memo(persist='disk', show_spinner=False)
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def guess_if_is_positive_contrast(data):
     edge_mean = np.mean([data[0, :].mean(), data[-1, :].mean(), data[:, 0].mean(), data[:, -1].mean()])
     return edge_mean < np.mean(data)
 
-@st.experimental_memo(persist='disk', show_spinner=False)
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def guess_if_3d(filename, data=None):
     if filename.endswith(".mrcs"): return False
     if filename.startswith("cryosparc") and filename.endswith("_class_averages.mrc"): return False    # cryosparc_P*_J*_*_class_averages.mrc
@@ -1381,7 +1433,7 @@ def guess_if_3d(filename, data=None):
     except:
         return None 
 
-@st.experimental_memo(persist='disk', show_spinner=False)
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def get_2d_image_from_uploaded_file(fileobj):
     import os, tempfile
     orignal_filename = fileobj.name
@@ -1403,7 +1455,7 @@ def get_emdb_ids():
         resolutions = []
     return emdb_ids, resolutions
 
-@st.experimental_memo(persist='disk', show_spinner=False)
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def get_emdb_helical_parameters(emd_id):
     try:
         emd_id2 = ''.join([s for s in str(emd_id) if s.isdigit()])
@@ -1427,8 +1479,8 @@ def get_emdb_helical_parameters(emd_id):
         if ret["method"] == 'helical':
             #ret["resolution"] = float(data['emd']['structure_determination_list']['structure_determination']['helical_processing']['final_reconstruction']['resolution']['#text'])
             helical_parameters = data['emd']['structure_determination_list']['structure_determination']['helical_processing']['final_reconstruction']['applied_symmetry']['helical_parameters']
-            assert(helical_parameters['delta_phi']['@units'] == 'deg')
-            assert(helical_parameters['delta_z']['@units'] == 'Å')
+            #assert(helical_parameters['delta_phi']['@units'] == 'deg')
+            #assert(helical_parameters['delta_z']['@units'] == 'Å')
             ret["twist"] = float(helical_parameters['delta_phi']['#text'])
             ret["rise"] = float(helical_parameters['delta_z']['#text'])
             ret["csym"] = int(helical_parameters['axial_symmetry'][1:])
@@ -1445,7 +1497,7 @@ def get_emdb_map_url(emd_id: str):
     url = f"{server}/emdb/structures/EMD-{emd_id}/map/emd_{emd_id}.map.gz"
     return url
 
-@st.experimental_memo(persist='disk', show_spinner=False)
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def get_emdb_map(emd_id: str):
     url = get_emdb_map_url(emd_id)
     ds = np.DataSource(None)
@@ -1457,7 +1509,7 @@ def get_emdb_map(emd_id: str):
         apix = mrc.voxel_size.x.item()
     return data, apix
 
-@st.experimental_memo(persist='disk', show_spinner=False, suppress_st_warning=True)
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False, suppress_st_warning=True)
 def get_2d_image_from_url(url):
     url_final = get_direct_url(url)    # convert cloud drive indirect url to direct url
     ds = np.DataSource(None)
@@ -1468,7 +1520,7 @@ def get_2d_image_from_url(url):
         data = get_2d_image_from_file(fp.name)
     return data
 
-#@st.experimental_memo(persist='disk', show_spinner=False)
+#@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def get_2d_image_from_file(filename):
     try:
         import mrcfile
@@ -1540,19 +1592,32 @@ def set_initial_query_params(query_string):
     d = parse_qs(query_string)
     st.session_state.update(d)
 
+int_types = ['csym', 'image_index_0', 'image_index_1', 'input_mode_0', 'input_mode_1', 'is_3d_0', 'is_3d_1', 'negate_0', 'negate_1', 'pnx', 'pny', 'show_LL_text', 'transpose_0', 'transpose_1', 'share_url', 'show_qr']
+float_types = ['angle_0', 'angle_1', 'apix_0', 'apix_1', 'apix_nyquist_0', 'apix_nyquist_1', 'ball_radius', 'cutoff_res_x', 'cutoff_res_y', 'diameter', 'dx_0', 'dx_1', 'dy_0', 'dy_1', 'mask_radius_0', 'mask_radius_1', 'mask_len_0', 'mask_len_1', 'rise', 'tilt', 'twist']
+default_values = {'angle_0':0, 'angle_1':0, 'ball_radius':0, 'csym':1, 'dx_0':0, 'dx_1':0, 'dy_0':0, 'dy_1':0, 'input_mode_0':1, 'input_type_0':'image', 'is_3d_0':0, 'is_3d_1':0, 'mask_len_0':90, 'mask_len_1':90, 'negate_0':0, 'negate_1':0, 'pnx':512, 'pny':1024, 'show_LL_text':1, 'tilt':0, 'transpose_0':0, 'transpose_1':0, 'share_url':0, 'show_qr':0}
 def set_query_params_from_session_state():
-    st.experimental_set_query_params(**st.session_state)
+    d = {}
+    attrs = sorted(st.session_state.keys())
+    for attr in attrs:
+        v = st.session_state[attr]
+        if attr in default_values and v==default_values[attr]: continue
+        if attr in int_types or isinstance(v, bool):
+            d[attr] = int(v)
+        elif attr in float_types:
+            d[attr] = f'{float(v):g}'
+        else:
+            d[attr] = v
+    st.experimental_set_query_params(**d)
 
 def set_session_state_from_query_params():
-    import ast
     query_params = st.experimental_get_query_params()
-    for k, v in query_params.items():
-        if len(v)==1:
-            v = v[0]
-            try:
-                st.session_state[k] = ast.literal_eval(v)
-            except:
-                st.session_state[k] = v
+    for attr in sorted(query_params.keys()):
+            if attr in int_types:
+                st.session_state[attr] = int(query_params[attr][0])
+            elif attr in float_types:
+                st.session_state[attr] = float(query_params[attr][0])
+            else:
+                st.session_state[attr] = query_params[attr][0]
 
 def get_direct_url(url):
     import re
@@ -1602,6 +1667,83 @@ def setup_anonymous_usage_tracking():
     except:
         pass
 
+def mem_info():
+    import_with_auto_install(["psutil"])
+    from psutil import virtual_memory
+    mem = virtual_memory()
+    mb = pow(2, 20)
+    return (mem.total/mb, mem.available/mb, mem.used/mb, mem.percent)
+
+def mem_quota():
+    fqdn = get_hostname()
+    if fqdn.find("heroku")!=-1:
+        return 512  # MB
+    username = get_username()
+    if username.find("appuser")!=-1:    # streamlit share
+        return 1024  # MB
+    available_mem = mem_info()[1]
+    return available_mem
+
+def mem_used():
+    import_with_auto_install(["psutil"])
+    from psutil import Process
+    from os import getpid
+    mem = Process(getpid()).memory_info().rss / 1024**2   # MB
+    return mem
+
+def uptime():
+    import_with_auto_install(["uptime"])
+    from uptime import uptime
+    return uptime()
+
+def get_username():
+    from getpass import getuser
+    return getuser()
+
+def get_hostname():
+    import socket
+    fqdn = socket.getfqdn()
+    return fqdn
+
+def is_hosted(return_host=False):
+    hosted = False
+    host = ""
+    fqdn = get_hostname()
+    if fqdn.find("heroku")!=-1:
+        hosted = True
+        host = "heroku"
+    username = get_username()
+    if username.find("appuser")!=-1:
+        hosted = True
+        host = "streamlit"
+    if not host:
+        host = "localhost"
+    if return_host:
+        return hosted, host
+    else:
+        return hosted
+
+def qr_code(url=None, size = 8):
+    import_with_auto_install(["qrcode"])
+    import qrcode
+    if url is None: # ad hoc way before streamlit can return the url
+        _, host = is_hosted(return_host=True)
+        if len(host)<1: return None
+        if host == "streamlit":
+            url = "https://share.streamlit.io/wjiang/HILL/main/"
+        elif host == "heroku":
+            url = "https://helical-indexing-HILL.herokuapp.com/"
+        else:
+            url = f"http://{host}:8501/"
+        import urllib
+        params = st.experimental_get_query_params()
+        d = {k:params[k][0] for k in params}
+        url += "?" + urllib.parse.urlencode(d)
+    if not url: return None
+    img = qrcode.make(url)  # qrcode.image.pil.PilImage
+    data = np.array(img.convert("RGBA"))
+    return data
+
 if __name__ == "__main__":
     setup_anonymous_usage_tracking()
     import argparse
@@ -1610,3 +1752,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     main(args)
+    gc.collect(2)
