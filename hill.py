@@ -748,7 +748,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                     label = "Input a url of 2D image(s) or a 3D map:"
                     key_image_url = f'url_{param_i}'
                     if key_image_url not in st.session_state:
-                        st.session_state[key_image_url] = data_example.url
+                        st.session_state[key_image_url] = data_examples[0].url
                     help = "An online url (http:// or ftp://) or a local file path (/path/to/your/structure.mrc)"
                     if max_map_size>0: help += f". {warning_map_size}"
                     image_url = st.text_input(label=label, help=help, key=key_image_url).strip()
