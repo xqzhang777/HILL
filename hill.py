@@ -64,7 +64,7 @@ def main(args):
         set_session_state_from_query_params()
 
     if "input_mode_0" not in st.session_state:
-        set_session_state_from_data_example(data_example)
+        set_session_state_from_data_example()
     
     col1, col2, col3, col4 = st.columns((1., 0.6, 0.4, 4.0))
 
@@ -1571,9 +1571,9 @@ data_examples = [
     Data(twist=0.92, rise=4.83, csym=1, diameter=60, url="https://tinyurl.com/2p9yxe7x"),
     Data(twist=36.0, rise=3.4, csym=1, diameter=20, dx=5, input_type="PS", apix_or_nqyuist=2.5, url="https://upload.wikimedia.org/wikipedia/en/b/b2/Photo_51_x-ray_diffraction_image.jpg")
 ]
-data_example = np.random.choice(data_examples)
 
-def set_session_state_from_data_example(data):
+def set_session_state_from_data_example():
+    data = np.random.choice(data_examples)
     st.session_state.input_mode_0 = 1
     st.session_state.url_0 = data.url
     st.session_state.dx_0 = float(data.dx)
