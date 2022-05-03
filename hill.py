@@ -156,8 +156,11 @@ def main(args):
         tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-90.0, max_value=90.0, step=1.0, help="Only used to compute the layerline positions and to simulate the helix. Will not change the power spectra and phase differences across meridian of the input image(s)", key="tilt")
         value = max(4*apix, round(st.session_state.resolution*1.6, 1)) if 'resolution' in st.session_state else round(8*apix, 1)
         cutoff_res_x = st.number_input('Resolution limit - X (Å)', value=value, min_value=2*apix, step=1.0, help="Set the highest resolution to be displayed in the X-direction", key="cutoff_res_x")
-        value = max(2*apix, round(st.session_state.resolution*0.8, 1)) if 'resolution' in st.session_state else round(4*apix, 1)
-        cutoff_res_y = st.number_input('Resolution limit - Y (Å)', value=value, min_value=2*apix, step=1.0, help="Set the highest resolution to be displayed in the Y-direction", key="cutoff_res_y")
+        if 'resolution' in st.session_state:
+            value = max(2.*apix, round(st.session_state.resolution*0.8, 1))
+        else:
+            value = max(2.*apix, round(st.session_state.rise*0.8, 1))
+        cutoff_res_y = st.number_input('Resolution limit - Y (Å)', value=value, min_value=2.*apix, step=1.0, help="Set the highest resolution to be displayed in the Y-direction", key="cutoff_res_y")
         with st.expander(label="Filters", expanded=False):
             log_xform = st.checkbox(label="Log(amplitude)", value=True, help="Perform log transform of the power spectra to allow clear display of layerlines at low and high resolutions")
             hp_fraction = st.number_input('Fourier high-pass (%)', value=0.4, min_value=0.0, max_value=100.0, step=0.1, format="%.2f", help="Perform high-pass Fourier filtering of the power spectra with filter=0.5 at this percentage of the Nyquist resolution") / 100.0
@@ -1441,7 +1444,7 @@ def get_2d_image_from_uploaded_file(fileobj):
     with tempfile.NamedTemporaryFile(suffix=suffix) as temp:
         temp.write(fileobj.read())
         data, apix = get_2d_image_from_file(temp.name)
-    return data, apix
+    return data.astype(np.float32), apix
 
 @st.experimental_memo(persist='disk', show_spinner=False, ttl=24*60*60.) # refresh every day
 def get_emdb_ids():
@@ -1505,9 +1508,9 @@ def get_emdb_map(emd_id: str):
     import mrcfile
     with mrcfile.open(fp.name) as mrc:
         vmin, vmax = np.min(mrc.data), np.max(mrc.data)
-        data = ((mrc.data - vmin) / (vmax - vmin)).astype(np.float32)
+        data = ((mrc.data - vmin) / (vmax - vmin))
         apix = mrc.voxel_size.x.item()
-    return data, apix
+    return data.astype(np.float32), apix
 
 @st.experimental_memo(persist='disk', max_entries=1, show_spinner=False, suppress_st_warning=True)
 def get_2d_image_from_url(url):
@@ -1525,7 +1528,7 @@ def get_2d_image_from_file(filename):
     try:
         import mrcfile
         with mrcfile.open(filename) as mrc:
-            data = mrc.data * 1.0
+            data = mrc.data.astype(np.float32)
             apix = mrc.voxel_size.x.item()
     except:
         from skimage.io import imread
@@ -1542,7 +1545,7 @@ def get_2d_image_from_file(filename):
             data[i] = normalize(tmp, percentile=(0.1, 99.9))
     if len(data.shape)==2:
         data = np.expand_dims(data, axis=0)
-    return data, apix
+    return data.astype(np.float32), apix
 
 def twist2pitch(twist, rise):
     return 360. * rise/twist
@@ -1565,6 +1568,7 @@ class Data:
 
 data_examples = [
     Data(twist=29.40, rise=21.92, csym=6, diameter=138, url="https://tinyurl.com/y5tq9fqa"),
+    Data(twist=0.92, rise=4.83, csym=1, diameter=60, url="https://tinyurl.com/2p9yxe7x"),
     Data(twist=36.0, rise=3.4, csym=1, diameter=20, dx=5, input_type="PS", apix_or_nqyuist=2.5, url="https://upload.wikimedia.org/wikipedia/en/b/b2/Photo_51_x-ray_diffraction_image.jpg")
 ]
 data_example = np.random.choice(data_examples)
