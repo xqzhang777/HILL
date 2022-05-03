@@ -240,13 +240,13 @@ def main(args):
         show_phase_diff = False
         show_yprofile = False
         if input_type in ["image", "PS"]:
-            show_pwr = st.checkbox(label="PS", value=True, help="Show the power spectra")
+            show_pwr = st.checkbox(label="PS", value=True, help="Show the power spectra", key="show_pwr")
         if show_pwr:
-            show_yprofile = st.checkbox(label="YP", value=False, help="Show the Y-profile of the power spectra (i.e. horizontal projection of the power spectra")
+            show_yprofile = st.checkbox(label="YP", value=False, help="Show the Y-profile of the power spectra (i.e. horizontal projection of the power spectra", key="show_yprofile")
         if input_type in ["image"]:
             show_phase = st.checkbox(label="Phase", value=False, help="Show the phase values in the hover tooltips of the displayed power spectra and phase differences across meridian")
         if input_type in ["image", "PD"]:
-            show_phase_diff = st.checkbox(label="PD", value=True, help="Show the phase differences across meridian")
+            show_phase_diff = st.checkbox(label="PD", value=True, help="Show the phase differences across meridian", key="show_phase_diff")
         
         show_pwr2 = False
         show_phase2 = False
@@ -280,7 +280,7 @@ def main(args):
         show_LL_text = False
         if show_pwr or show_phase_diff or show_pwr2 or show_phase_diff2 or show_pwr_simu or show_phase_diff_simu:
             show_pseudocolor = st.checkbox(label="Color", value=True, help="Show the power spectra in pseudo color instead of grey scale")
-            show_LL = st.checkbox(label="LL", value=True, help="Show the layer lines at positions computed from the current values of pitch/twist, rise, csym, radius, and tilt")
+            show_LL = st.checkbox(label="LL", value=True, help="Show the layer lines at positions computed from the current values of pitch/twist, rise, csym, radius, and tilt", key="show_LL")
             if show_LL:
                 show_LL_text = st.checkbox(label="LLText", value=True, help="Show the layer lines using integer numbers for the Bessel orders instead of ellipses", key="show_LL_text")
 
@@ -1596,9 +1596,9 @@ def set_initial_query_params(query_string):
     d = parse_qs(query_string)
     st.session_state.update(d)
 
-int_types = ['csym', 'image_index_0', 'image_index_1', 'input_mode_0', 'input_mode_1', 'is_3d_0', 'is_3d_1', 'negate_0', 'negate_1', 'pnx', 'pny', 'show_LL_text', 'transpose_0', 'transpose_1', 'share_url', 'show_qr']
+int_types = ['csym', 'image_index_0', 'image_index_1', 'input_mode_0', 'input_mode_1', 'is_3d_0', 'is_3d_1', 'negate_0', 'negate_1', 'pnx', 'pny', 'show_LL', 'show_LL_text', 'show_phase_diff', 'show_pwr', 'show_yprofile', 'transpose_0', 'transpose_1', 'share_url', 'show_qr']
 float_types = ['angle_0', 'angle_1', 'apix_0', 'apix_1', 'apix_nyquist_0', 'apix_nyquist_1', 'ball_radius', 'cutoff_res_x', 'cutoff_res_y', 'diameter', 'dx_0', 'dx_1', 'dy_0', 'dy_1', 'mask_radius_0', 'mask_radius_1', 'mask_len_0', 'mask_len_1', 'rise', 'tilt', 'twist']
-default_values = {'angle_0':0, 'angle_1':0, 'ball_radius':0, 'csym':1, 'dx_0':0, 'dx_1':0, 'dy_0':0, 'dy_1':0, 'input_mode_0':1, 'input_type_0':'image', 'is_3d_0':0, 'is_3d_1':0, 'mask_len_0':90, 'mask_len_1':90, 'negate_0':0, 'negate_1':0, 'pnx':512, 'pny':1024, 'show_LL_text':1, 'tilt':0, 'transpose_0':0, 'transpose_1':0, 'share_url':0, 'show_qr':0}
+default_values = {'angle_0':0, 'angle_1':0, 'ball_radius':0, 'csym':1, 'dx_0':0, 'dx_1':0, 'dy_0':0, 'dy_1':0, 'input_mode_0':1, 'input_type_0':'image', 'is_3d_0':0, 'is_3d_1':0, 'mask_len_0':90, 'mask_len_1':90, 'negate_0':0, 'negate_1':0, 'pnx':512, 'pny':1024, 'show_LL':1, 'show_LL_text':1, 'show_phase_diff':1, 'show_pwr':1, 'show_yprofile':0, 'tilt':0, 'transpose_0':0, 'transpose_1':0, 'share_url':0, 'show_qr':0}
 def set_query_params_from_session_state():
     d = {}
     attrs = sorted(st.session_state.keys())
