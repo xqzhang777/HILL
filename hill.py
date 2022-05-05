@@ -909,11 +909,6 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
             mask_len_percent_auto = 90.0
             mask_len_fraction = mask_empty.number_input('Mask length (%) ', value=mask_len_percent_auto, min_value=10.0, max_value=100.0, step=1.0, format="%.1f", key=f'mask_len_{param_i}') / 100.0
 
-            fraction_x = mask_radius/(nx//2*apix)
-            tapering_image = generate_tapering_filter(image_size=data.shape, fraction_start=[mask_len_fraction, fraction_x], fraction_slope=(1.0-mask_len_fraction)/2.)
-            data = data * tapering_image
-            transformed = 1
-
             x = np.arange(-nx//2, nx//2)*apix
             ymax = np.max(data, axis=0)
             ymean = np.mean(data, axis=0)
@@ -944,6 +939,11 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
             p.js_on_event(DoubleTap, toggle_legend_js_x)
             st.bokeh_chart(p, use_container_width=True)
         
+            fraction_x = mask_radius/(nx//2*apix)
+            tapering_image = generate_tapering_filter(image_size=data.shape, fraction_start=[mask_len_fraction, fraction_x], fraction_slope=(1.0-mask_len_fraction)/2.)
+            data = data * tapering_image
+            transformed = 1
+
         if transformed:
             with transformed_image:
                 if is_3d:
@@ -1332,7 +1332,7 @@ def auto_vertical_center(image):
         return err
     res = minimize_scalar(score_shift, bounds=(-max_shift, max_shift), method='bounded', options={'disp':0})
     dx = res.x + (0.0 if n%2 else 0.5)
-    return angle, dx
+    return set_to_periodic_range(angle), dx
 
 @st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def rotate_shift_image(data, angle=0, pre_shift=(0, 0), post_shift=(0, 0), rotation_center=None, order=1):
@@ -1645,6 +1645,13 @@ def get_direct_url(url):
         return f"https://api.onedrive.com/v1.0/shares/u!{data_bytes64_String}/root/content"
     else:
         return url
+
+def set_to_periodic_range(v, min=-180, max=180):
+    from math import fmod
+    tmp = fmod(v-min, max-min)
+    if tmp>=0: tmp+=min
+    else: tmp+=max
+    return tmp
 
 def dict_recursive_search(d, key, default=None):
     stack = [iter(d.items())]
