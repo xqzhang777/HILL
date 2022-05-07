@@ -3,4 +3,5 @@
 
 No software installation is needed. Just click one of the hosting links (<a href="https://helical-indexing-layerlines.herokuapp.com">Host 1</a> | <a href="https://share.streamlit.io/wjiang/hill/main">Host 2</a>) to index your helical structure!</a>
 
-<a href="https://helical-indexing-layerlines.herokuapp.com/?input_mode=1&url=https%3A%2F%2Ftinyurl.com%2Fy5tq9fqa&i=2&show_pitch=1&pitch=268.408&rise=21.92&csym=6&helicalradius=60.9&resx=7.0&resy=7.0&nx=512&ny=2048&simuradius=4.0&simunoise=0.1&useplotsize=1"><img src="./helical_indexing.png" style='width: 100%; object-fit: contain'></a>
+<a href="https://share.streamlit.io/wjiang/hill/main?ball_radius=5&csym=6&cutoff_res_x=15&cutoff_res_y=10&image_index_0=11&rise=21.92&input_mode_0=1&share_url=1&show_yprofile=1&simunoise=1&twist=29.4&url_0=https%3A%2F%2Ftinyurl.com%2Fy5tq9fqa"><img src="./helical_indexing.png" style='width: 100%; object-fit: contain'></a>
+

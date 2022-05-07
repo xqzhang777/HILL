@@ -174,7 +174,7 @@ def main(args):
             noise=0.0
             use_plot_size=False
             if show_simu:
-                az = st.number_input('Azimuthal angle (°)', value=0.0, min_value=0.0, max_value=360.0, step=1.0, format="%.2f", help="Position the Gaussian in the central Z-section at this azimuthal angle")
+                az = st.number_input('Azimuthal angle (°)', value=0.0, min_value=0.0, max_value=360.0, step=1.0, format="%.2f", help="Position the Gaussian in the central Z-section at this azimuthal angle", key="simuaz")
                 noise = st.number_input('Noise (sigma)', value=0.001, min_value=0., step=1., format="%.2f", help="Add random noise to the simulated helix image", key="simunoise")
                 use_plot_size = st.checkbox('Use plot size', value=False, help="If checked, the simulated helix image will use the image size of the displayed power spectra instead of the size of the input image", key="useplotsize")
         
@@ -1597,9 +1597,9 @@ def set_initial_query_params(query_string):
     d = parse_qs(query_string)
     st.session_state.update(d)
 
-int_types = ['csym', 'do_random_embid_0', 'do_random_embid_1', 'image_index_0', 'image_index_1', 'input_mode_0', 'input_mode_1', 'is_3d_0', 'is_3d_1', 'negate_0', 'negate_1', 'pnx', 'pny', 'show_LL', 'show_LL_text', 'show_phase_diff', 'show_pwr', 'show_yprofile', 'transpose_0', 'transpose_1', 'share_url', 'show_qr']
-float_types = ['angle_0', 'angle_1', 'apix_0', 'apix_1', 'apix_nyquist_0', 'apix_nyquist_1', 'az_0', 'az_1', 'ball_radius', 'cutoff_res_x', 'cutoff_res_y', 'diameter', 'dx_0', 'dx_1', 'dy_0', 'dy_1', 'mask_radius_0', 'mask_radius_1', 'mask_len_0', 'mask_len_1', 'resolution', 'rise', 'tilt', 'tilt_0', 'tilt_1', 'twist']
-default_values = {'angle_0':0, 'angle_1':0, 'az_0':0, 'ball_radius':0, 'csym':1, 'do_random_embid_0':0, 'dx_0':0, 'dx_1':0, 'dy_0':0, 'dy_1':0, 'image_index_0':1, 'input_mode_0':1, 'input_type_0':'image', 'is_3d_0':0, 'is_3d_1':0, 'mask_len_0':90, 'mask_len_1':90, 'negate_0':0, 'negate_1':0, 'pnx':512, 'pny':1024, 'show_LL':1, 'show_LL_text':1, 'show_phase_diff':1, 'show_pwr':1, 'show_yprofile':0, 'tilt':0, 'tilt_0':0, 'tilt_1':0, 'transpose_0':0, 'transpose_1':0, 'share_url':0, 'show_qr':0}
+int_types = ['csym', 'do_random_embid_0', 'do_random_embid_1', 'image_index_0', 'image_index_1', 'input_mode_0', 'input_mode_1', 'input_type_0', 'input_type_1', 'is_3d_0', 'is_3d_1', 'negate_0', 'negate_1', 'pnx', 'pny', 'show_LL', 'show_LL_text', 'show_phase_diff', 'show_pwr', 'show_yprofile', 'simunoise', 'transpose_0', 'transpose_1', 'share_url', 'show_qr', 'useplotsize']
+float_types = ['angle_0', 'angle_1', 'apix_0', 'apix_1', 'apix_nyquist_0', 'apix_nyquist_1', 'az_0', 'az_1', 'ball_radius', 'cutoff_res_x', 'cutoff_res_y', 'diameter', 'dx_0', 'dx_1', 'dy_0', 'dy_1', 'mask_radius_0', 'mask_radius_1', 'mask_len_0', 'mask_len_1', 'resolution', 'rise', 'simuaz', 'simunoise', 'tilt', 'tilt_0', 'tilt_1', 'twist']
+default_values = {'angle_0':0, 'angle_1':0, 'az_0':0, 'ball_radius':0, 'csym':1, 'do_random_embid_0':0, 'dx_0':0, 'dx_1':0, 'dy_0':0, 'dy_1':0, 'image_index_0':1, 'input_type_0':'image', 'is_3d_0':0, 'is_3d_1':0, 'mask_len_0':90, 'mask_len_1':90, 'negate_0':0, 'negate_1':0, 'pnx':512, 'pny':1024, 'show_LL':1, 'show_LL_text':1, 'show_phase_diff':1, 'show_pwr':1, 'show_yprofile':0, 'simuaz':0, 'simunoise':0, 'tilt':0, 'tilt_0':0, 'tilt_1':0, 'transpose_0':0, 'transpose_1':0, 'share_url':0, 'show_qr':0, 'useplotsize':0}
 def set_query_params_from_session_state():
     d = {}
     attrs = sorted(st.session_state.keys())
