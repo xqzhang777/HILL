@@ -243,7 +243,7 @@ def main(args):
         if input_type in ["image", "PS"]:
             show_pwr = st.checkbox(label="PS", value=True, help="Show the power spectra", key="show_pwr")
         if show_pwr:
-            show_yprofile = st.checkbox(label="YP", value=False, help="Show the Y-profile of the power spectra (i.e. horizontal projection of the power spectra", key="show_yprofile")
+            show_yprofile = st.checkbox(label="YP", value=True, help="Show the Y-profile of the power spectra (i.e. horizontal projection of the power spectra", key="show_yprofile")
         if input_type in ["image"]:
             show_phase = st.checkbox(label="Phase", value=False, help="Show the phase values in the hover tooltips of the displayed power spectra and phase differences across meridian")
         if input_type in ["image", "PD"]:
@@ -1599,7 +1599,7 @@ def set_initial_query_params(query_string):
 
 int_types = ['csym', 'do_random_embid_0', 'do_random_embid_1', 'image_index_0', 'image_index_1', 'input_mode_0', 'input_mode_1', 'input_type_0', 'input_type_1', 'is_3d_0', 'is_3d_1', 'negate_0', 'negate_1', 'pnx', 'pny', 'show_LL', 'show_LL_text', 'show_phase_diff', 'show_pwr', 'show_yprofile', 'simunoise', 'transpose_0', 'transpose_1', 'share_url', 'show_qr', 'useplotsize']
 float_types = ['angle_0', 'angle_1', 'apix_0', 'apix_1', 'apix_nyquist_0', 'apix_nyquist_1', 'az_0', 'az_1', 'ball_radius', 'cutoff_res_x', 'cutoff_res_y', 'diameter', 'dx_0', 'dx_1', 'dy_0', 'dy_1', 'mask_radius_0', 'mask_radius_1', 'mask_len_0', 'mask_len_1', 'resolution', 'rise', 'simuaz', 'simunoise', 'tilt', 'tilt_0', 'tilt_1', 'twist']
-default_values = {'angle_0':0, 'angle_1':0, 'az_0':0, 'ball_radius':0, 'csym':1, 'do_random_embid_0':0, 'dx_0':0, 'dx_1':0, 'dy_0':0, 'dy_1':0, 'image_index_0':1, 'input_type_0':'image', 'is_3d_0':0, 'is_3d_1':0, 'mask_len_0':90, 'mask_len_1':90, 'negate_0':0, 'negate_1':0, 'pnx':512, 'pny':1024, 'show_LL':1, 'show_LL_text':1, 'show_phase_diff':1, 'show_pwr':1, 'show_yprofile':0, 'simuaz':0, 'simunoise':0, 'tilt':0, 'tilt_0':0, 'tilt_1':0, 'transpose_0':0, 'transpose_1':0, 'share_url':0, 'show_qr':0, 'useplotsize':0}
+default_values = {'angle_0':0, 'angle_1':0, 'az_0':0, 'ball_radius':0, 'csym':1, 'do_random_embid_0':0, 'dx_0':0, 'dx_1':0, 'dy_0':0, 'dy_1':0, 'image_index_0':1, 'input_type_0':'image', 'is_3d_0':0, 'is_3d_1':0, 'mask_len_0':90, 'mask_len_1':90, 'negate_0':0, 'negate_1':0, 'pnx':512, 'pny':1024, 'show_LL':1, 'show_LL_text':1, 'show_phase_diff':1, 'show_pwr':1, 'show_yprofile':1, 'simuaz':0, 'simunoise':0, 'tilt':0, 'tilt_0':0, 'tilt_1':0, 'transpose_0':0, 'transpose_1':0, 'share_url':0, 'show_qr':0, 'useplotsize':0}
 def set_query_params_from_session_state():
     d = {}
     attrs = sorted(st.session_state.keys())
