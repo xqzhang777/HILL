@@ -155,13 +155,8 @@ def main(args):
         helical_radius = 0.5*st.number_input('Filament/tube diameter (Å)', value=value*2, min_value=1.0, max_value=1000.0, step=10., format="%.1f", help="Mean radius of the tube/filament density from the helical axis", key="diameter")
         
         tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-90.0, max_value=90.0, step=1.0, help="Only used to compute the layerline positions and to simulate the helix. Will not change the power spectra and phase differences across meridian of the input image(s)", key="tilt")
-        value = max(4*apix, round(st.session_state.resolution*1.6, 1)) if 'resolution' in st.session_state else round(8*apix, 1)
-        cutoff_res_x = st.number_input('Resolution limit - X (Å)', value=value, min_value=2*apix, step=1.0, help="Set the highest resolution to be displayed in the X-direction", key="cutoff_res_x")
-        if 'resolution' in st.session_state:
-            value = max(2.*apix, round(st.session_state.resolution*0.8, 1))
-        else:
-            value = max(2.*apix, round(st.session_state.rise*0.8, 1))
-        cutoff_res_y = st.number_input('Resolution limit - Y (Å)', value=value, min_value=2.*apix, step=1.0, help="Set the highest resolution to be displayed in the Y-direction", key="cutoff_res_y")
+        cutoff_res_x = st.number_input('Resolution limit - X (Å)', value=3*apix, min_value=2*apix, step=1.0, help="Set the highest resolution to be displayed in the X-direction", key="cutoff_res_x")
+        cutoff_res_y = st.number_input('Resolution limit - Y (Å)', value=2*apix, min_value=2.*apix, step=1.0, help="Set the highest resolution to be displayed in the Y-direction", key="cutoff_res_y")
         with st.expander(label="Filters", expanded=False):
             log_xform = st.checkbox(label="Log(amplitude)", value=True, help="Perform log transform of the power spectra to allow clear display of layerlines at low and high resolutions")
             hp_fraction = st.number_input('Fourier high-pass (%)', value=0.4, min_value=0.0, max_value=100.0, step=0.1, format="%.2f", help="Perform high-pass Fourier filtering of the power spectra with filter=0.5 at this percentage of the Nyquist resolution") / 100.0
@@ -1260,14 +1255,15 @@ def generate_tapering_filter(image_size, fraction_start=[0, 0], fraction_slope=0
 def estimate_radial_range(data, thresh_ratio=0.1):
     proj_y = np.sum(data, axis=0)
     n = len(proj_y)
-    radius = np.mean([n//2-np.argmax(proj_y[:n//2+1]), np.argmax(proj_y[n//2:])])
     background = np.mean(proj_y[[0,1,2,-3,-3,-1]])
     thresh = (proj_y.max() - background) * thresh_ratio + background
     indices = np.nonzero(proj_y>thresh)
+    radius_mean = np.sum(proj_y[indices] * np.abs(np.array(indices)-n//2))/np.sum(proj_y[indices])
+    #radius_max = np.mean([n//2-np.argmax(proj_y[:n//2+1]), np.argmax(proj_y[n//2:])])
     xmin = np.min(indices)
     xmax = np.max(indices)
     mask_radius = max(abs(n//2-xmin), abs(xmax-n//2))
-    return float(radius), float(mask_radius)    # pixel
+    return float(radius_mean), float(mask_radius)    # pixel
 
 @st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def auto_vertical_center(image):
