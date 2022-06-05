@@ -61,7 +61,7 @@ def main(args):
     if len(st.session_state)<1:  # only run once at the start of the session
         set_initial_query_params(query_string=args.query_string) # only excuted on the first run
 
-    if "input_mode_0" not in st.session_state:  # only run once at the start of the session
+    if len(st.session_state)<1:  # only run once at the start of the session
         set_session_state_from_query_params()
 
     if "input_mode_0" not in st.session_state:
@@ -72,9 +72,6 @@ def main(args):
     with col1:
         with st.expander(label="README", expanded=False):
             st.write("This Web app considers a biological helical structure as the product of a continous helix and a set of parallel planes, and based on the covolution theory, the Fourier Transform (FT) of a helical structure would be the convolution of the FT of the continous helix and the FT of the planes.  \nThe FT of a continous helix consists of equally spaced layer planes (3D) or layerlines (2D projection) that can be described by Bessel functions of increasing orders (0, +/-1, +/-2, ...) from the Fourier origin (i.e. equator). The spacing between the layer planes/lines is determined by the helical pitch (i.e. the shift along the helical axis for a 360 ° turn of the helix). If the structure has additional cyclic symmetry (for example, C6) around the helical axis, only the layer plane/line orders of integer multiplier of the symmetry (e.g. 0, +/-6, +/-12, ...) are visible. The primary peaks of the layer lines in the power spectra form a pattern similar to a X symbol.  \nThe FT of the parallel planes consists of equally spaced points along the helical axis (i.e. meridian) with the spacing being determined by the helical rise.  \nThe convolution of these two components (X-shaped pattern of layer lines and points along the meridian) generates the layer line patterns seen in the power spectra of the projection images of helical structures. The helical indexing task is thus to identify the helical rise, pitch (or twist), and cyclic symmetry that would predict a layer line pattern to explain the observed the layer lines in the power spectra. This Web app allows you to interactively change the helical parameters and superimpose the predicted layer liines on the power spectra to complete the helical indexing task.  \n  \nPS: power spectra; PD: phase difference between the two sides of meridian; YP: Y-axis power spectra profile; LL: layer lines; m: indices of the X-patterns along the meridian; Jn: Bessel order")
-        
-        # make radio display horizontal
-        st.markdown('<style>div.row-widget.stRadio > div{flex-direction:row;}</style>', unsafe_allow_html=True)
 
         data_all, image_index, data, apix, radius_auto, mask_radius, input_type, is_3d, input_params, (image_container, image_label) = obtain_input_image(col1, param_i=0)
         input_mode, (uploaded_filename, url, emd_id) = input_params
@@ -112,18 +109,15 @@ def main(args):
         st.markdown(hide_streamlit_style, unsafe_allow_html=True) 
 
     with col2:
-        copy_pitch_rise = st.button(label="Copy pitch/rise ⤺", help="Update the pitch/rise values below using the pitch/rise values from the sliders at the top the plots")
-        if copy_pitch_rise:
-            query_params = st.experimental_get_query_params()
-            if "rise" in query_params:
-                st.session_state.rise = float(query_params["rise"][0])
-                query_params.pop('rise', None)
-            if "pitch" in query_params:
-                st.session_state.twist = pitch2twist(float(query_params["pitch"][0]), st.session_state.rise)
-                query_params.pop('pitch', None)
+        query_params = st.experimental_get_query_params()
+        if "pitch" in query_params and "rise" in query_params:
+            st.session_state.rise = float(query_params["rise"][0])
+            st.session_state.twist = pitch2twist(float(query_params["pitch"][0]), st.session_state.rise)
+            query_params.pop('rise', None)
+            query_params.pop('pitch', None)
             st.experimental_set_query_params(**query_params)
         pitch_or_twist_choices = ["pitch", "twist"]
-        pitch_or_twist = st.radio(label="", options=pitch_or_twist_choices, index=0)
+        pitch_or_twist = st.radio(label="", options=pitch_or_twist_choices, index=0, horizontal=True)
         use_pitch = 1 if pitch_or_twist=="pitch" else 0
 
         pitch_or_twist_number_input = st.empty()
@@ -131,8 +125,8 @@ def main(args):
         rise_empty = st.empty()
 
         ny, nx = data.shape
-        max_rise = max(2000., max(ny, nx)*apix * 2.0)
-        min_rise = apix
+        max_rise = round(max(2000., max(ny, nx)*apix * 2.0), 2)
+        min_rise = round(apix/2.0, 2)
         rise = rise_empty.number_input('Rise (Å)', min_value=min_rise, max_value=max_rise, step=1.0, format="%.3f", key="rise")
 
         if use_pitch:
@@ -180,7 +174,7 @@ def main(args):
                 if movie_frames>0:
                     if is_3d and show_simu:
                         movie_modes = {0:"3D map", 1:"simulation"}
-                        movie_mode = st.radio(label="Tilt:", options=list(movie_modes.keys()), format_func=lambda i:movie_modes[i], index=0, help="Tilt the input 3D map to different angles instead of simulating a helix at different tilt angles")
+                        movie_mode = st.radio(label="Tilt:", options=list(movie_modes.keys()), format_func=lambda i:movie_modes[i], index=0, help="Tilt the input 3D map to different angles instead of simulating a helix at different tilt angles", horizontal=True)
                     elif is_3d:
                         movie_mode = 0
                     else:
@@ -422,6 +416,7 @@ def main(args):
             callback = CustomJS(args=dict(fig_ellipses=fig_ellipses, slider_pitch=slider_pitch, slider_rise=slider_rise), code=callback_code)
             slider_pitch.js_on_change('value', callback)
             slider_rise.js_on_change('value', callback)
+
             callback_code = """
                 let url = new URL(document.location)
                 let params = url.searchParams
@@ -448,6 +443,7 @@ def main(args):
             callback = CustomJS(args=dict(slider_pitch=slider_pitch, slider_rise=slider_rise, reload=reload), code=callback_code)
             slider_pitch.js_on_change('value_throttled', callback)
             slider_rise.js_on_change('value_throttled', callback)
+
             if len(figs)==1:
                 from bokeh.layouts import column
                 figs[0].toolbar_location="right"
@@ -659,7 +655,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
         input_modes = {0:"upload", 1:"url", 2:"emd-xxxxx"}
         help = "Only maps in MRC (.mrc) or CCP4 (.map) format are supported. Compressed maps (.gz) will be automatically decompressed"
         if max_map_size>0: help += f". {warning_map_size}"
-        input_mode = st.radio(label="How to obtain the input image/map:", options=list(input_modes.keys()), format_func=lambda i:input_modes[i], index=1,help=help, key=f'input_mode_{param_i}')
+        input_mode = st.radio(label="How to obtain the input image/map:", options=list(input_modes.keys()), format_func=lambda i:input_modes[i], index=1,help=help, horizontal=True, key=f'input_mode_{param_i}')
         is_3d = False
         is_pwr_auto = None
         is_pd_auto = None
@@ -669,31 +665,25 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                 st.warning("failed to obtained a list of helical structures in EMDB")
                 return
             key_emd_id = f"emd_id_{param_i}"
-            if key_emd_id not in st.session_state:
-                st.session_state[key_emd_id] = "emd-10499"
             url = "https://www.ebi.ac.uk/emdb/search/*%20AND%20structure_determination_method:%22helical%22?rows=10&sort=release_date%20desc"
             st.markdown(f'[All {len(emdb_ids)} helical structures in EMDB]({url})')
-            do_random_embid = st.checkbox("Choose a random EMDB ID", value=False, key=f"do_random_embid_{param_i}")
-            if do_random_embid:
-                help = "Randomly select another helical structure in EMDB"
-                if max_map_size>0: help += f". {warning_map_size}"
-                button_clicked = st.button(label="Change EMDB ID", help=help)
-                if button_clicked:
-                    import random
-                    st.session_state[key_emd_id] = 'emd-' + random.choice(emdb_ids)
-            else:
-                help = None
-                if max_map_size>0: help = warning_map_size
-                label = "Input an EMDB ID (emd-xxxxx):"
-                st.text_input(label=label, help=help, key=key_emd_id)
-                emd_id = st.session_state[key_emd_id].lower().split("emd-")[-1]
-                if emd_id not in emdb_ids:
-                    emd_id_bad = emd_id
-                    import random
-                    emd_id = random.choice(emdb_ids)
-                    st.warning(f"EMD-{emd_id_bad} is not a helical structure. Please input a valid id (for example, a randomly selected valid id 'emd-{emd_id}')")
-                    st.stop()
+            help = "Randomly select another helical structure in EMDB"
+            if max_map_size>0: help += f". {warning_map_size}"
+            button_clicked = st.button(label="Select a random EMDB ID", help=help)
+            if button_clicked:
+                import random
+                st.session_state[key_emd_id] = 'emd-' + random.choice(emdb_ids)
+            help = None
+            if max_map_size>0: help = warning_map_size
+            label = "Input an EMDB ID (emd-xxxxx):"
+            st.text_input(label=label, value="emd-10499", help=help, key=key_emd_id)
             emd_id = st.session_state[key_emd_id].lower().split("emd-")[-1]
+            if emd_id not in emdb_ids:
+                emd_id_bad = emd_id
+                import random
+                emd_id = random.choice(emdb_ids)
+                st.warning(f"EMD-{emd_id_bad} is not a helical structure. Please input a valid id (for example, a randomly selected valid id 'emd-{emd_id}')")
+                st.stop()
             resolution = resolutions[emdb_ids.index(emd_id)]
             msg = f'[EMD-{emd_id}](https://www.ebi.ac.uk/emdb/entry/EMD-{emd_id}) | resolution={resolution}Å'
             params = get_emdb_helical_parameters(emd_id)
@@ -754,7 +744,10 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                         data_all, apix_auto = get_2d_image_from_url(image_url)
                     is_3d_auto = guess_if_3d(filename=image_url, data=data_all)
             nz, ny, nx = data_all.shape
-            is_3d = st.checkbox(label=f"The input ({nx}x{ny}x{nz}) is a 3D map", value=is_3d_auto, key=f'is_3d_{param_i}', help="The app thinks the input image contains a stack of 2D images. Check this box to inform the app that the input is a 3D map")
+            if nz > 1:
+                is_3d = st.checkbox(label=f"The input ({nx}x{ny}x{nz}) is a 3D map", value=is_3d_auto, key=f'is_3d_{param_i}', help="The app thinks the input image contains a stack of 2D images. Check this box to inform the app that the input is a 3D map")
+            else:
+                is_3d = False
         if is_3d:
             if not np.any(data_all):
                 st.warning("All voxels of the input 3D map have zero value")
@@ -859,7 +852,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                 elif is_pd_auto: input_type_auto = "PD"
                 else: input_type_auto = "image"
             mapping = {"image":0, "PS":1, "PD":2}
-            input_type = st.radio(label="Input is:", options="image PS PD".split(), index=mapping[input_type_auto], key=f'input_type_{param_i}', help="image: real space image; PS: power spectra; PD: phage differences across meridian")
+            input_type = st.radio(label="Input is:", options="image PS PD".split(), index=mapping[input_type_auto], help="image: real space image; PS: power spectra; PD: phage differences across meridian", horizontal=True, key=f'input_type_{param_i}')
             if input_type in ["PS", "PD"]:
                 apix = 0.5 * st.number_input('Nyquist res (Å)', value=2*apix_auto, min_value=0.1, max_value=30., step=0.01, format="%.5g", key=f'apix_nyquist_{param_i}')
             else:
@@ -1258,12 +1251,31 @@ def estimate_radial_range(data, thresh_ratio=0.1):
     background = np.mean(proj_y[[0,1,2,-3,-3,-1]])
     thresh = (proj_y.max() - background) * thresh_ratio + background
     indices = np.nonzero(proj_y>thresh)
-    radius_mean = np.sum(proj_y[indices] * np.abs(np.array(indices)-n//2))/np.sum(proj_y[indices])
-    #radius_max = np.mean([n//2-np.argmax(proj_y[:n//2+1]), np.argmax(proj_y[n//2:])])
     xmin = np.min(indices)
     xmax = np.max(indices)
     mask_radius = max(abs(n//2-xmin), abs(xmax-n//2))
-    return float(radius_mean), float(mask_radius)    # pixel
+    proj_y -= thresh
+    proj_y[proj_y<0] = 0
+    def fitRadialProfile(x, radProfile):
+        a, b, w, rcore, rmax= x  # y = a*(sqrt(rmax^2-x^2)+(w-1)*sqrt(rcore^2-x^2))+b
+        n = len(radProfile)
+        x = np.abs(np.arange(n, dtype=np.float)-n/2)
+        yshell = radProfile * 0
+        mask = x<=rmax
+        yshell[mask] = np.sqrt(rmax*rmax - x*x)[mask]
+        ycore = radProfile * 0
+        mask = x<=rcore
+        ycore[mask] = np.sqrt(rcore*rcore - x*x)[mask]
+        y = a*(yshell+(w-1)*ycore)+b
+        score = np.linalg.norm(y-radProfile)
+        return score
+    from scipy.optimize import minimize
+    x0 = (1, 0, 0.5, mask_radius/2, mask_radius)
+    bounds = ((0, None), (None, None), (0, None), (0, mask_radius), (0, mask_radius))
+    res = minimize(fitRadialProfile, x0, args=(proj_y,), method='Nelder-Mead', bounds=bounds, tol=1e-6)
+    a, b, w, rcore, rmax = res.x
+    rmean = 0.5 * (rmax*rmax+(w-1)*rcore*rcore) / (rmax+(w-1)*rcore)
+    return float(rmean), float(mask_radius)    # pixel
 
 @st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def auto_vertical_center(image):
@@ -1424,14 +1436,12 @@ def guess_if_3d(filename, data=None):
     if filename.startswith("cryosparc") and filename.endswith("_class_averages.mrc"): return False    # cryosparc_P*_J*_*_class_averages.mrc
     if data is None: return None
     if len(data.shape)<3: return False
-    try:
-        nz, ny, nx = data.shape
-        if nz==1: return False
-        if nz==ny and nz==nx: return True
-        if ny==nx and nz in [50, 100, 200]: return False
-        return None
-    except:
-        return None 
+    if len(data.shape)>3: return None
+    nz, ny, nx = data.shape
+    if nz==1: return False
+    if nz==ny and nz==nx: return True
+    if ny==nx and nz in [50, 100, 200]: return False
+    return None
 
 @st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def get_2d_image_from_uploaded_file(fileobj):
@@ -1545,7 +1555,7 @@ def get_2d_image_from_file(filename):
     return data.astype(np.float32), apix
 
 def twist2pitch(twist, rise):
-    return 360. * rise/twist
+    return 360. * rise/abs(twist)
 
 def pitch2twist(pitch, rise):
     return 360. * rise/pitch
@@ -1591,6 +1601,7 @@ def set_initial_query_params(query_string):
     if len(query_string)<1: return
     from urllib.parse import parse_qs
     d = parse_qs(query_string)
+    if len(d)<1: return
     st.session_state.update(d)
 
 int_types = ['csym', 'do_random_embid_0', 'do_random_embid_1', 'image_index_0', 'image_index_1', 'input_mode_0', 'input_mode_1', 'input_type_0', 'input_type_1', 'is_3d_0', 'is_3d_1', 'negate_0', 'negate_1', 'pnx', 'pny', 'show_LL', 'show_LL_text', 'show_phase_diff', 'show_pwr', 'show_yprofile', 'simunoise', 'transpose_0', 'transpose_1', 'share_url', 'show_qr', 'useplotsize']
