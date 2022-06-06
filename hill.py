@@ -335,10 +335,12 @@ def main(args):
                 ny, nx = pwr_work.shape
                 dsy = 1/(ny//2*cutoff_res_y)
                 y=np.arange(-ny//2, ny//2)*dsy
-                y[len(y)//2] = 1e10
+                yinv = y*1.0
+                yinv[yinv==0] = 1e-10
+                yinv = 1/np.abs(yinv)
                 yprofile = np.mean(pwr_work, axis=1)
                 yprofile /= yprofile.max()
-                source_data = dict(yprofile=yprofile, y=y, resy=np.abs(1./y))
+                source_data = dict(yprofile=yprofile, y=y, resy=yinv)
                 tools = 'box_zoom,hover,pan,reset,save,wheel_zoom'
                 tooltips = [('Res y', '@resyÅ'), ('Amp', '$x')]
                 fig = figure(frame_width=nx//2, frame_height=figs[-1].frame_height, y_range=figs[-1].y_range, y_axis_location = "right", 
