@@ -335,6 +335,7 @@ def main(args):
                 ny, nx = pwr_work.shape
                 dsy = 1/(ny//2*cutoff_res_y)
                 y=np.arange(-ny//2, ny//2)*dsy
+                y[len(y)//2] = 1e10
                 yprofile = np.mean(pwr_work, axis=1)
                 yprofile /= yprofile.max()
                 source_data = dict(yprofile=yprofile, y=y, resy=np.abs(1./y))
@@ -1258,22 +1259,34 @@ def estimate_radial_range(data, thresh_ratio=0.1):
     proj_y[proj_y<0] = 0
     def fitRadialProfile(x, radProfile):
         a, b, w, rcore, rmax= x  # y = a*(sqrt(rmax^2-x^2)+(w-1)*sqrt(rcore^2-x^2))+b
-        n = len(radProfile)
-        x = np.abs(np.arange(n, dtype=np.float)-n/2)
-        yshell = radProfile * 0
-        mask = x<=rmax
-        yshell[mask] = np.sqrt(rmax*rmax - x*x)[mask]
-        ycore = radProfile * 0
-        mask = x<=rcore
-        ycore[mask] = np.sqrt(rcore*rcore - x*x)[mask]
-        y = a*(yshell+(w-1)*ycore)+b
-        score = np.linalg.norm(y-radProfile)
+        try:
+            n = len(radProfile)
+            x = np.abs(np.arange(n, dtype=float)-n/2)
+            yshell = radProfile * 0
+            mask = x<=abs(rmax)
+            yshell[mask] = np.sqrt(rmax*rmax - x[mask]*x[mask])
+            ycore = radProfile * 0
+            mask = x<=abs(rcore)
+            ycore[mask] = np.sqrt(rcore*rcore - x[mask]*x[mask])
+            y = a*(yshell+(w-1)*ycore)+b
+            score = np.linalg.norm(y-radProfile)
+        except:
+            score = 1e10
         return score
     from scipy.optimize import minimize
-    x0 = (1, 0, 0.5, mask_radius/2, mask_radius)
+    from itertools import product
     bounds = ((0, None), (None, None), (0, None), (0, mask_radius), (0, mask_radius))
-    res = minimize(fitRadialProfile, x0, args=(proj_y,), method='Nelder-Mead', bounds=bounds, tol=1e-6)
-    a, b, w, rcore, rmax = res.x
+    vals_a = (1, 2, 4, 8)
+    vals_w = (0, 0.5)
+    vals_rcore = (0, mask_radius/2)
+    results = []
+    for val_a, val_w, val_rcore in product(vals_a, vals_w, vals_rcore):
+        x0 = (val_a, 0, val_w, val_rcore, mask_radius)
+        res = minimize(fitRadialProfile, x0, args=(proj_y,), method='Nelder-Mead', bounds=bounds, tol=1e-6)
+        a, b, w, rcore, rmax = res.x
+        results.append((res.fun, w, rcore, rmax, val_a, val_w, val_rcore))
+    result = sorted(results)[0]
+    w, rcore, rmax = result[1:4]
     rmean = 0.5 * (rmax*rmax+(w-1)*rcore*rcore) / (rmax+(w-1)*rcore)
     return float(rmean), float(mask_radius)    # pixel
 
