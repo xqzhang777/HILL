@@ -55,7 +55,7 @@ def main(args):
     st.set_page_config(page_title=title, layout="wide")
     st.title(title)
 
-    st.server.server_util.MESSAGE_SIZE_LIMIT = 2e8  # default is 5e7 (50MB)
+    st.web.server.server_util.MESSAGE_SIZE_LIMIT = 2e8  # default is 5e7 (50MB)
     st.elements.utils._shown_default_value_warning = True
 
     if len(st.session_state)<1:  # only run once at the start of the session
@@ -1137,7 +1137,7 @@ def resize_rescale_power_spectra(data, nyquist_res, cutoff_res=None, output_size
     Y = Y/(ony//2+0.5) * nyquist_res/res_y * ny//2 + ny//2+0.5
     X = X/(onx//2+0.5) * nyquist_res/res_x * nx//2 + nx//2+0.5
     pwr = map_coordinates(data, (Y.flatten(), X.flatten()), order=3, mode='constant').reshape(Y.shape)
-    if log: pwr = np.log(np.abs(pwr))
+    if log: pwr = np.log1p(np.abs(pwr))
     if 0<low_pass_fraction<1 or 0<high_pass_fraction<1:
         pwr = low_high_pass_filter(pwr, low_pass_fraction=low_pass_fraction, high_pass_fraction=high_pass_fraction)
     if norm: pwr = normalize(pwr, percentile=(0, 100))
@@ -1148,7 +1148,7 @@ def compute_power_spectra(data, apix, cutoff_res=None, output_size=None, log=Tru
     fft = fft_rescale(data, apix=apix, cutoff_res=cutoff_res, output_size=output_size)
     fft = np.fft.fftshift(fft)  # shift fourier origin from corner to center
 
-    if log: pwr = np.log(np.abs(fft))
+    if log: pwr = np.log1p(np.abs(fft))
     if 0<low_pass_fraction<1 or 0<high_pass_fraction<1:
         pwr = low_high_pass_filter(pwr, low_pass_fraction=low_pass_fraction, high_pass_fraction=high_pass_fraction)
     pwr = normalize(pwr, percentile=(0, 100))
