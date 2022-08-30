@@ -42,7 +42,7 @@ import streamlit as st
 import numpy as np
 from bokeh.plotting import figure
 from bokeh.models import CustomJS, Span, LinearColorMapper
-from bokeh.models import HoverTool, CrosshairTool
+from bokeh.models import ColumnDataSource, HoverTool, CrosshairTool
 from bokeh.events import MouseMove, DoubleTap
 from bokeh.layouts import gridplot
 import math, random, gc
@@ -116,6 +116,9 @@ def main(args):
             query_params.pop('rise', None)
             query_params.pop('pitch', None)
             st.experimental_set_query_params(**query_params)
+        
+        reload = st.button("Copy pitch/rise↶")
+
         pitch_or_twist_choices = ["pitch", "twist"]
         pitch_or_twist = st.radio(label="", options=pitch_or_twist_choices, index=0, horizontal=True)
         use_pitch = 1 if pitch_or_twist=="pitch" else 0
@@ -340,7 +343,7 @@ def main(args):
                 yinv = 1/np.abs(yinv)
                 yprofile = np.mean(pwr_work, axis=1)
                 yprofile /= yprofile.max()
-                source_data = dict(yprofile=yprofile, y=y, resy=yinv)
+                source_data = ColumnDataSource(data=dict(yprofile=yprofile, y=y, resy=yinv))
                 tools = 'box_zoom,hover,pan,reset,save,wheel_zoom'
                 tooltips = [('Res y', '@resyÅ'), ('Amp', '$x')]
                 fig = figure(frame_width=nx//2, frame_height=figs[-1].frame_height, y_range=figs[-1].y_range, y_axis_location = "right", 
@@ -399,8 +402,8 @@ def main(args):
 
         if fig_ellipses:
             from bokeh.models import Slider, CustomJS
-            slider_pitch = Slider(start=0.0, end=pitch*2.0, value=pitch, step=pitch*0.002, title="Pitch (Å)", width=pnx)
-            slider_rise = Slider(start=0.0, end=min(max_rise, rise*2.0), value=rise, step=min(max_rise, rise*2.0)*0.001, title="Rise (Å)", width=pnx)
+            slider_pitch = Slider(start=pitch/2, end=pitch*2.0, value=pitch, step=pitch*0.002, title="Pitch (Å)", width=pnx)
+            slider_rise = Slider(start=rise/2, end=min(max_rise, rise*2.0), value=rise, step=min(max_rise, rise*2.0)*0.001, title="Rise (Å)", width=pnx)
             callback_code = """
                 var pitch_inv = 1./slider_pitch.value
                 var rise_inv = 1./slider_rise.value
@@ -428,7 +431,7 @@ def main(args):
                 //document.location = url.href
                 history.replaceState({}, document.title, url.href)
                 if (reload) {
-                    var class_names = ["streamlit-button small-button primary-button ", "css-2trqyj edgvbvh1"]
+                    var class_names = ["streamlit-button small-button primary-button ", "css-2trqyj edgvbvh1", "css-1cpxqw2 edgvbvh9"]
                     console.log(class_names)
                     var i
                     for (i=0; i<class_names.length; i++) {
@@ -572,7 +575,7 @@ def create_image_figure(image, dx, dy, title="", title_location="below", plot_wi
     if not show_axis: fig.axis.visible = False
     if not show_toolbar: fig.toolbar_location = None
 
-    source_data = dict(image=[image], x=[-w//2*dx], y=[-h//2*dy], dw=[w*dx], dh=[h*dy])
+    source_data = ColumnDataSource(data=dict(image=[image], x=[-w//2*dx], y=[-h//2*dy], dw=[w*dx], dh=[h*dy]))
     from bokeh.models import LinearColorMapper
     color_mapper = LinearColorMapper(palette='Greys256')    # Greys256, Viridis256
     image = fig.image(source=source_data, image='image', color_mapper=color_mapper,
@@ -609,7 +612,7 @@ def create_layerline_image_figure(data, cutoff_res_x, cutoff_res_y, helical_radi
     fig.title.text_font_size = "20px"
     fig.yaxis.visible = yaxis_visible   # leaving yaxis on will make the crosshair x-position out of sync with other figures
 
-    source_data = dict(image=[data.astype(np.float16)], x=[-nx//2*dsx], y=[-ny//2*dsy], dw=[nx*dsx], dh=[ny*dsy], bessel=[bessel])
+    source_data = ColumnDataSource(data=dict(image=[data.astype(np.float16)], x=[-nx//2*dsx], y=[-ny//2*dsy], dw=[nx*dsx], dh=[ny*dsy], bessel=[bessel]))
     if phase is not None: source_data["phase"] = [np.fmod(np.rad2deg(phase)+360, 360).astype(np.float16)]
     palette = 'Viridis256' if pseudocolor else 'Greys256'
     color_mapper = LinearColorMapper(palette=palette)    # Greys256, Viridis256
@@ -1069,10 +1072,6 @@ def simulate_helix(twist, rise, csym, helical_radius, ball_radius, ny, nx, apix,
 
 @st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m_max=-1):
-    def pitch(twist, rise):
-        p = np.abs(rise * 360./twist)   # pitch in Å
-        return p
-    
     def peak_sx(bessel_order, radius):
         from scipy.special import jnp_zeros
         sx = np.zeros(len(bessel_order))
@@ -1099,7 +1098,7 @@ def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m_
         sy0 = m[mi] / rise
 
         # first peak positions of each layer line
-        p = pitch(twist, rise)
+        p = twist2pitch(twist, rise)
         ds_p = 1/p
         ll_i_top = int(np.abs(smax - sy0)/ds_p) * 2
         ll_i_bottom = -int(np.abs(-smax - sy0)/ds_p) * 2
@@ -1570,10 +1569,17 @@ def get_2d_image_from_file(filename):
     return data.astype(np.float32), apix
 
 def twist2pitch(twist, rise):
-    return 360. * rise/abs(twist)
+    if twist:
+        return 360. * rise/abs(twist)
+    else:
+        return rise
 
 def pitch2twist(pitch, rise):
-    return 360. * rise/pitch
+    if pitch>rise:
+        return 360. * rise/pitch
+    else:
+        return 0.
+
 class Data:
     def __init__(self, twist, rise, csym, diameter, dx=0, apix_or_nqyuist=None, url=None, input_type="image"):
         self.input_type = input_type
