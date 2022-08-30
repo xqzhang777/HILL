@@ -431,7 +431,7 @@ def main(args):
                 //document.location = url.href
                 history.replaceState({}, document.title, url.href)
                 if (reload) {
-                    var class_names = ["streamlit-button small-button primary-button ", "css-2trqyj edgvbvh1", "css-1cpxqw2 edgvbvh9"]
+                    var class_names = ["css-1cpxqw2 edgvbvh9"]
                     console.log(class_names)
                     var i
                     for (i=0; i<class_names.length; i++) {
@@ -439,7 +439,7 @@ def main(args):
                         let reload_buttons = document.getElementsByClassName(class_names[i])
                         console.log(reload_buttons)
                         if (reload_buttons.length>0) {
-                            reload_buttons[0].click()
+                            reload_buttons[reload_buttons.length-1].click()
                             break
                         }
                     }
