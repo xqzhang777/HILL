@@ -53,6 +53,11 @@ gc.enable()
 def main(args):
     title = "HILL: Helical Indexing using Layer Lines"
     st.set_page_config(page_title=title, layout="wide")
+
+    hosted, host = is_hosted(return_host=True)
+    if hosted and host in ['heroku']:
+        st.error(f"This app hosted on Heroku will be unavailable starting November 28, 2022 [when Heroku discontinues free hosting service](https://blog.heroku.com/next-chapter). Please switch to [the same app hosted elsewhere](https://jianglab-hill-streamlit-app-gk7bkc.streamlitapp.com)")
+
     st.title(title)
 
     st.web.server.server_util.MESSAGE_SIZE_LIMIT = 2e8  # default is 5e7 (50MB)
