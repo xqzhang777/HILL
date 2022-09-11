@@ -787,38 +787,17 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
 
             nz, ny, nx = data_all.shape
             if len(data_to_show)>1:
-                if len(data_to_show)==nz:
-                    if param_i>0:
-                        value = 1 if input_mode in [0, 1] and (is_pwr_auto or is_pd_auto) else 0
-                        sync_i = st.checkbox(label=f"Sync image index", value=value, key=f'sync_{param_i}', help="Sync the index of the displayed image when two image stacks are used as inputs, for example, power spectra from one image stack and phase differences across meridian from the other image stack")
-                    if param_i>0 and sync_i:
-                        image_index = image_index_sync
-                    else:
-                        if nz>10:
-                            image_index = int(st.number_input(label=f"Choose an image (out of {nz}):", min_value=1, max_value=nz, value=1, step=1, key=f'image_index_{param_i}'))
-                        else:
-                            image_index = int(st.slider(label=f"Choose an image (out of {nz}):", min_value=1, max_value=nz, value=1, step=1, key=f'image_index_slider_{param_i}'))
-                else:
-                    if param_i>0:
-                        sync_i = st.checkbox(label=f"Sync image index", value=0, key=f'sync_{param_i}')
-                    if param_i>0 and sync_i:
-                        image_index = image_index_sync
-                    else:
-                        data_to_show_list = list(data_to_show+1)
-                        value = data_to_show_list[0]
-                        if len(data_to_show_list)>10:
-                            key=f'image_index_{param_i}'
-                            if key in st.session_state:
-                                while st.session_state[key] not in data_to_show_list:
-                                    st.session_state[key] += 1
-                                    st.session_state[key] = st.session_state[key] % (max(data_to_show_list)+1)
-                                index = data_to_show_list.index(st.session_state[key])
-                            else:
-                                index = data_to_show_list.index(value)
-                            image_index = int(st.selectbox(label=f"Choose an image ({len(data_to_show_list)} non-zero images out of {nz}):", options=data_to_show_list, index=index, key=f'image_index_{param_i}'))
-                        else:
-                            image_index = int(st.select_slider(label=f"Choose an image ({len(data_to_show_list)} non-zero images out of {nz}):", options=data_to_show_list, value=value, key=f'image_index_slider_{param_i}'))
-                image_index -= 1
+                st.markdown('<div style="text-align: center;">Click to choose an image:</div>', unsafe_allow_html=True)
+                from st_clickable_images import clickable_images
+                images = [encode_numpy(data_all[i], hflip=True) for i in data_to_show]
+                image_index = clickable_images(
+                    images,
+                    titles=[f"{i+1}" for i in data_to_show],
+                    div_style={"display": "flex", "justify-content": "center", "flex-wrap": "wrap"},
+                    img_style={"margin": "2px", "height": "128px"},
+                )
+                if image_index<0: image_index = 0
+                image_index = data_to_show[image_index]
             else:
                 image_index = data_to_show[0]
             data = data_all[image_index]
@@ -1584,6 +1563,22 @@ def pitch2twist(pitch, rise):
         return 360. * rise/pitch
     else:
         return 0.
+
+def encode_numpy(img, hflip=True):
+    if img.dtype != np.dtype('uint8'):
+        vmin, vmax = img.min(), img.max()
+        tmp = (255*(img-vmin)/(vmax-vmin)).astype(np.uint8)
+    else:
+        tmp = img
+    if hflip:
+        tmp = tmp[::-1, :]
+    import io, base64
+    from PIL import Image
+    pil_img = Image.fromarray(tmp)
+    buffer = io.BytesIO()
+    pil_img.save(buffer, format="JPEG")
+    encoded = base64.b64encode(buffer.getvalue()).decode()
+    return f"data:image/jpeg;base64, {encoded}"
 
 class Data:
     def __init__(self, twist, rise, csym, diameter, dx=0, apix_or_nqyuist=None, url=None, input_type="image"):
