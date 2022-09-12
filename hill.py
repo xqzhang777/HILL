@@ -153,7 +153,7 @@ def main(args):
 
         if input_image2: value = max(radius_auto*apix, radius_auto2*apix2)
         else: value = radius_auto*apix
-        if value<=1: value = 100.0
+        value = max(min(500.0, value), 1.0)
         helical_radius = 0.5*st.number_input('Filament/tube diameter (Å)', value=value*2, min_value=1.0, max_value=1000.0, step=10., format="%.1f", help="Mean radius of the tube/filament density from the helical axis", key="diameter")
         
         tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-90.0, max_value=90.0, step=1.0, help="Only used to compute the layerline positions and to simulate the helix. Will not change the power spectra and phase differences across meridian of the input image(s)", key="tilt")
@@ -795,6 +795,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                     titles=[f"{i+1}" for i in data_to_show],
                     div_style={"display": "flex", "justify-content": "center", "flex-wrap": "wrap"},
                     img_style={"margin": "2px", "height": "128px"},
+                    key=f"image_index_{param_i}"
                 )
                 if image_index<0: image_index = 0
                 image_index = data_to_show[image_index]
@@ -1625,9 +1626,9 @@ def set_initial_query_params(query_string):
     if len(d)<1: return
     st.session_state.update(d)
 
-int_types = ['csym', 'do_random_embid_0', 'do_random_embid_1', 'image_index_0', 'image_index_1', 'input_mode_0', 'input_mode_1', 'input_type_0', 'input_type_1', 'is_3d_0', 'is_3d_1', 'negate_0', 'negate_1', 'pnx', 'pny', 'show_LL', 'show_LL_text', 'show_phase_diff', 'show_pwr', 'show_yprofile', 'simunoise', 'transpose_0', 'transpose_1', 'share_url', 'show_qr', 'useplotsize']
+int_types = ['csym', 'do_random_embid_0', 'do_random_embid_1', 'image_index_0', 'image_index_1', 'input_mode_0', 'input_mode_1', 'is_3d_0', 'is_3d_1', 'negate_0', 'negate_1', 'pnx', 'pny', 'show_LL', 'show_LL_text', 'show_phase_diff', 'show_pwr', 'show_yprofile', 'simunoise', 'transpose_0', 'transpose_1', 'share_url', 'show_qr', 'useplotsize']
 float_types = ['angle_0', 'angle_1', 'apix_0', 'apix_1', 'apix_nyquist_0', 'apix_nyquist_1', 'az_0', 'az_1', 'ball_radius', 'cutoff_res_x', 'cutoff_res_y', 'diameter', 'dx_0', 'dx_1', 'dy_0', 'dy_1', 'mask_radius_0', 'mask_radius_1', 'mask_len_0', 'mask_len_1', 'resolution', 'rise', 'simuaz', 'simunoise', 'tilt', 'tilt_0', 'tilt_1', 'twist']
-default_values = {'angle_0':0, 'angle_1':0, 'az_0':0, 'ball_radius':0, 'csym':1, 'do_random_embid_0':0, 'dx_0':0, 'dx_1':0, 'dy_0':0, 'dy_1':0, 'image_index_0':1, 'input_type_0':'image', 'is_3d_0':0, 'is_3d_1':0, 'mask_len_0':90, 'mask_len_1':90, 'negate_0':0, 'negate_1':0, 'pnx':512, 'pny':1024, 'show_LL':1, 'show_LL_text':1, 'show_phase_diff':1, 'show_pwr':1, 'show_yprofile':1, 'simuaz':0, 'simunoise':0, 'tilt':0, 'tilt_0':0, 'tilt_1':0, 'transpose_0':0, 'transpose_1':0, 'share_url':0, 'show_qr':0, 'useplotsize':0}
+default_values = {'angle_0':0, 'angle_1':0, 'az_0':0, 'ball_radius':0, 'csym':1, 'do_random_embid_0':0, 'dx_0':0, 'dx_1':0, 'dy_0':0, 'dy_1':0, 'image_index_0':0, 'input_type_0':'image', 'is_3d_0':0, 'is_3d_1':0, 'mask_len_0':90, 'mask_len_1':90, 'negate_0':0, 'negate_1':0, 'pnx':512, 'pny':1024, 'show_LL':1, 'show_LL_text':1, 'show_phase_diff':1, 'show_pwr':1, 'show_yprofile':1, 'simuaz':0, 'simunoise':0, 'tilt':0, 'tilt_0':0, 'tilt_1':0, 'transpose_0':0, 'transpose_1':0, 'share_url':0, 'show_qr':0, 'useplotsize':0}
 def set_query_params_from_session_state():
     d = {}
     attrs = sorted(st.session_state.keys())
