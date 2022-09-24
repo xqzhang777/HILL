@@ -125,7 +125,7 @@ def main(args):
         reload = st.button("Copy pitch/rise↶")
 
         pitch_or_twist_choices = ["pitch", "twist"]
-        pitch_or_twist = st.radio(label="", options=pitch_or_twist_choices, index=0, horizontal=True)
+        pitch_or_twist = st.radio(label="", options=pitch_or_twist_choices, index=0, label_visibility="collapsed", horizontal=True)
         use_pitch = 1 if pitch_or_twist=="pitch" else 0
 
         pitch_or_twist_number_input = st.empty()
