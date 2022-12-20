@@ -35,7 +35,7 @@ def import_with_auto_install(packages, scope=locals()):
             import subprocess
             subprocess.call(f'pip install {package_pip_name}', shell=True)
             scope[package_import_name] =  __import__(package_import_name)
-required_packages = "streamlit numpy scipy bokeh skimage:scikit_image mrcfile finufft xmltodict".split()
+required_packages = "streamlit numpy scipy bokeh skimage:scikit_image mrcfile finufft xmltodict st_clickable_images".split()
 import_with_auto_install(required_packages)
 
 import streamlit as st
@@ -53,10 +53,6 @@ gc.enable()
 def main(args):
     title = "HILL: Helical Indexing using Layer Lines"
     st.set_page_config(page_title=title, layout="wide")
-
-    hosted, host = is_hosted(return_host=True)
-    if hosted and host in ['heroku']:
-        st.error(f"This app hosted on Heroku will be unavailable starting November 28, 2022 [when Heroku discontinues free hosting service](https://blog.heroku.com/next-chapter). Please switch to [the same app hosted elsewhere](https://jianglab-hill-streamlit-app-gk7bkc.streamlitapp.com)")
 
     st.title(title)
 
@@ -125,7 +121,7 @@ def main(args):
         reload = st.button("Copy pitch/rise↶")
 
         pitch_or_twist_choices = ["pitch", "twist"]
-        pitch_or_twist = st.radio(label="", options=pitch_or_twist_choices, index=0, label_visibility="collapsed", horizontal=True)
+        pitch_or_twist = st.radio(label="Choose pitch or twist mode", options=pitch_or_twist_choices, index=0, label_visibility="collapsed", horizontal=True)
         use_pitch = 1 if pitch_or_twist=="pitch" else 0
 
         pitch_or_twist_number_input = st.empty()
@@ -848,8 +844,11 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                 apix = 0.5 * st.number_input('Nyquist res (Å)', value=2*apix_auto, min_value=0.1, max_value=30., step=0.01, format="%.5g", key=f'apix_nyquist_{param_i}')
             else:
                 apix = st.number_input('Pixel size (Å/pixel)', value=apix_auto, min_value=0.1, max_value=30., step=0.01, format="%.5g", key=f'apix_{param_i}')
-            transpose_auto = input_mode not in [2, 3] and nx > ny
-            transpose = st.checkbox(label='Transpose the image', value=transpose_auto, key=f'transpose_{param_i}')
+            if nx != ny:
+                transpose_auto = input_mode not in [2, 3] and nx > ny
+                transpose = st.checkbox(label='Transpose the image', value=transpose_auto, key=f'transpose_{param_i}')
+            else:
+                transpose = 0
             negate_auto = not guess_if_is_positive_contrast(data)
             negate = st.checkbox(label='Invert the image contrast', value=negate_auto, key=f'negate_{param_i}')
             if input_type in ["PS", "PD"] or is_3d:
@@ -1277,69 +1276,36 @@ def estimate_radial_range(data, thresh_ratio=0.1):
     return float(rmean), float(mask_radius)    # pixel
 
 @st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
-def auto_vertical_center(image):
-    image_work = image * 1.0
-    background = np.mean(image_work[[0,1,2,-3,-2,-1],[0,1,2,-3,-2,-1]])
-    max_val = image_work.max()
-    thresh = (max_val-background) * 0.2 + background
-    if background < thresh < max_val:
-        image_work = (image_work-thresh)/(max_val-thresh)
-        image_work[image_work<0] = 0
-
-    # rough estimate of rotation
-    def score_rotation(angle):
-        tmp = rotate_shift_image(data=image_work, angle=angle)
-        y_proj = tmp.sum(axis=0)
-        percentiles = (100, 95, 90, 85, 80) # more robust than max alone
-        y_values = np.percentile(y_proj, percentiles)
-        err = -np.sum(y_values)
-        return err
-    from scipy.optimize import minimize_scalar
-    res = minimize_scalar(score_rotation, bounds=(-90, 90), method='bounded', options={'disp':0})
-    angle = res.x
-
-    # further refine rotation
-    def score_rotation_shift(x):
-        angle, dy, dx = x
-        tmp1 = rotate_shift_image(data=image_work, angle=angle, pre_shift=(dy, dx))
-        tmp2 = rotate_shift_image(data=image_work, angle=angle+180, pre_shift=(dy, dx))
-        tmps = [tmp1, tmp2, tmp1[::-1,:], tmp2[::-1,:], tmp1[:,::-1], tmp2[:,::-1]]
-        tmp_mean = np.zeros_like(image_work)
-        for tmp in tmps: tmp_mean += tmp
-        tmp_mean /= len(tmps)
-        err = 0
-        for tmp in tmps:
-            err += np.sum(np.abs(tmp - tmp_mean))
-        err /= len(tmps) * image_work.size
-        return err
-    from scipy.optimize import fmin
-    res = fmin(score_rotation_shift, x0=(angle, 0, 0), xtol=1e-2, disp=0)
-    angle = res[0]  # dy, dx are not robust enough
-
-    # refine dx 
-    image_work = rotate_shift_image(data=image_work, angle=angle)
-    y = np.sum(image_work, axis=0)
-    y /= y.max()
-    y[y<0.2] = 0
-    n = len(y)
-    try:
-        mask = np.where(y>0.5)
-        max_shift = abs((np.max(mask)-n//2) - (n//2-np.min(mask)))*1.5
-    except:
-        max_shift = n/4
-
-    import scipy.interpolate as interpolate
-    x = np.arange(3*n)
-    f = interpolate.interp1d(x, np.tile(y, 3), kind='linear')    # avoid out-of-bound errors
-    def score_shift(dx):
-        if dx<-n or dx>n: return np.finfo(np.float32).max
-        x_tmp = x[n:2*n]-dx
-        tmp = f(x_tmp)
-        err = np.sum(np.abs(tmp-tmp[::-1]))
-        return err
-    res = minimize_scalar(score_shift, bounds=(-max_shift, max_shift), method='bounded', options={'disp':0})
-    dx = res.x + (0.0 if n%2 else 0.5)
-    return set_to_periodic_range(angle), dx
+def auto_vertical_center(data, n_theta=180):
+    from skimage.transform import radon
+    from scipy.interpolate import interp1d
+    from scipy.ndimage import rotate
+    from scipy.signal import correlate
+    theta = np.linspace(start=0., stop=180., num=n_theta, endpoint=False)
+    import warnings
+    with warnings.catch_warnings(): # ignore outside of circle warnings
+        warnings.simplefilter('ignore')
+        sinogram = radon(data, theta=theta)
+    y = np.std(sinogram, axis=0)
+    theta_best = np.argmax(y)
+    yfit = interp1d(theta, y, kind='cubic', bounds_error=False, fill_value="extrapolate")
+    n = 180/n_theta/0.01   # 0.01 degree accuracy
+    theta_samples = theta[theta_best] + np.arange(-n, n)/n*(180/n_theta)
+    y_samples = yfit(theta_samples)
+    theta_best = -theta_samples[np.argmax(y_samples)]
+    rotated_data = rotate(data, theta_best, reshape=False)
+    # now find best horizontal shift
+    yproj = np.sum(rotated_data, axis=0)
+    yproj_xflip = yproj*1.0
+    yproj_xflip[1:] = yproj[1:][::-1]
+    corr = correlate(yproj, yproj_xflip, mode='same')
+    shift_best = np.argmax(corr)
+    corrfit = interp1d(np.arange(len(corr)), corr, kind='cubic', bounds_error=False, fill_value="extrapolate")
+    n = 10   # 0.1 pixel accuracy
+    shift_samples = shift_best + np.arange(-n, n)/n
+    corr_samples = corrfit(shift_samples)
+    shift_best = -(shift_samples[np.argmax(corr_samples)] - len(corr)//2)/2
+    return set_to_periodic_range(theta_best), shift_best
 
 @st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def rotate_shift_image(data, angle=0, pre_shift=(0, 0), post_shift=(0, 0), rotation_center=None, order=1):
@@ -1452,7 +1418,7 @@ def get_2d_image_from_uploaded_file(fileobj):
         data, apix = get_2d_image_from_file(temp.name)
     return data.astype(np.float32), apix
 
-@st.experimental_memo(persist='disk', show_spinner=False, ttl=24*60*60.) # refresh every day
+@st.experimental_memo(show_spinner=False, ttl=24*60*60.) # refresh every day
 def get_emdb_ids():
     try:
         import pandas as pd
