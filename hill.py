@@ -95,7 +95,7 @@ def main(args):
             server_info_empty = st.empty()
             #server_info = f"Host: {get_hostname()}  \n"
             #server_info+= f"Account: {get_username()}"
-            server_info = f"Uptime: {uptime():.1f} s  \n"
+            server_info = f"Uptime: {host_uptime():.1f} s  \n"
             server_info+= f"Mem (total): {mem_info()[0]:.1f} MB  \n"
             server_info+= f"Mem (quota): {mem_quota():.1f} MB  \n"
             server_info+= "Mem (used): {mem_used:.1f} MB"
@@ -1698,10 +1698,12 @@ def mem_used():
     mem = Process(getpid()).memory_info().rss / 1024**2   # MB
     return mem
 
-def uptime():
+def host_uptime():
     import_with_auto_install(["uptime"])
     from uptime import uptime
-    return uptime()
+    t = uptime()
+    if t is None: t = 0
+    return t
 
 def get_username():
     from getpass import getuser
