@@ -1234,11 +1234,11 @@ def generate_tapering_filter(image_size, fraction_start=[0, 0], fraction_slope=0
 def estimate_radial_range(data, thresh_ratio=0.1):
     proj_y = np.sum(data, axis=0)
     n = len(proj_y)
-    background = np.mean(proj_y[[0,1,2,-3,-3,-1]])
+    background = np.mean(proj_y[[0,1,2,-3,-2,-1]])
     thresh = (proj_y.max() - background) * thresh_ratio + background
-    indices = np.nonzero(proj_y>thresh)
-    xmin = np.min(indices)
-    xmax = np.max(indices)
+    indices = np.nonzero(proj_y<thresh)[0]
+    xmin = np.max(indices[indices<np.argmax(proj_y[:n//2])])
+    xmax = np.min(indices[indices>np.argmax(proj_y[n//2:])+n//2])
     mask_radius = max(abs(n//2-xmin), abs(xmax-n//2))
     proj_y -= thresh
     proj_y[proj_y<0] = 0
@@ -1277,35 +1277,43 @@ def estimate_radial_range(data, thresh_ratio=0.1):
 
 @st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def auto_vertical_center(data, n_theta=180):
-    from skimage.transform import radon
-    from scipy.interpolate import interp1d
-    from scipy.ndimage import rotate
-    from scipy.signal import correlate
-    theta = np.linspace(start=0., stop=180., num=n_theta, endpoint=False)
-    import warnings
-    with warnings.catch_warnings(): # ignore outside of circle warnings
-        warnings.simplefilter('ignore')
-        sinogram = radon(data, theta=theta)
-    y = np.std(sinogram, axis=0)
-    theta_best = np.argmax(y)
-    yfit = interp1d(theta, y, kind='cubic', bounds_error=False, fill_value="extrapolate")
-    n = 180/n_theta/0.01   # 0.01 degree accuracy
-    theta_samples = theta[theta_best] + np.arange(-n, n)/n*(180/n_theta)
-    y_samples = yfit(theta_samples)
-    theta_best = -theta_samples[np.argmax(y_samples)]
-    rotated_data = rotate(data, theta_best, reshape=False)
-    # now find best horizontal shift
-    yproj = np.sum(rotated_data, axis=0)
-    yproj_xflip = yproj*1.0
-    yproj_xflip[1:] = yproj[1:][::-1]
-    corr = correlate(yproj, yproj_xflip, mode='same')
-    shift_best = np.argmax(corr)
-    corrfit = interp1d(np.arange(len(corr)), corr, kind='cubic', bounds_error=False, fill_value="extrapolate")
-    n = 10   # 0.1 pixel accuracy
-    shift_samples = shift_best + np.arange(-n, n)/n
-    corr_samples = corrfit(shift_samples)
-    shift_best = -(shift_samples[np.argmax(corr_samples)] - len(corr)//2)/2
-    return set_to_periodic_range(theta_best), shift_best
+  from skimage.transform import radon
+  from scipy.interpolate import interp1d
+  from scipy.ndimage import rotate, shift
+  from scipy.signal import correlate
+  
+  data_work = np.clip(data, 0, None)
+  
+  theta = np.linspace(start=0., stop=180., num=n_theta, endpoint=False)
+  import warnings
+  with warnings.catch_warnings(): # ignore outside of circle warnings
+    warnings.simplefilter('ignore')
+    sinogram = radon(data_work, theta=theta)
+  sinogram += sinogram[::-1, :]
+  y = np.std(sinogram, axis=0)
+  theta_best = -theta[np.argmax(y)]
+
+  rotated_data = rotate(data_work, theta_best, reshape=False)
+  # now find best vertical shift
+  yproj = np.sum(rotated_data, axis=0)
+  yproj_xflip = yproj*1.0
+  yproj_xflip[1:] = yproj[1:][::-1]
+  corr = correlate(yproj, yproj_xflip, mode='same')
+  shift_best = -(np.argmax(corr) - len(corr)//2)/2
+
+  # refine to sub-degree, sub-pixel level
+  def score_rotation_shift(x):
+    theta, shift_x = x
+    data_tmp = rotate(data_work, theta, reshape=False)
+    data_tmp = shift(data_tmp, shift=(0, shift_x))
+    xproj = np.sum(data_tmp, axis=0)[1:]
+    xproj += xproj[::-1]
+    score = -np.std(xproj)
+    return score
+  from scipy.optimize import fmin
+  res = fmin(score_rotation_shift, x0=(theta_best, shift_best), xtol=1e-2, disp=0)
+  theta_best, shift_best = res
+  return set_to_periodic_range(theta_best), shift_best
 
 @st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def rotate_shift_image(data, angle=0, pre_shift=(0, 0), post_shift=(0, 0), rotation_center=None, order=1):
@@ -1392,8 +1400,8 @@ def guess_if_is_power_spectra(data, thresh=15):
 
 @st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def guess_if_is_positive_contrast(data):
-    edge_mean = np.mean([data[0, :].mean(), data[-1, :].mean(), data[:, 0].mean(), data[:, -1].mean()])
-    return edge_mean < np.mean(data)
+    edge_max = np.max(data[[0, 1, 2, -3, -2, -1], :])
+    return edge_max < np.max(data)
 
 @st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def guess_if_3d(filename, data=None):
@@ -1563,7 +1571,6 @@ class Data:
 
 data_examples = [
     Data(twist=29.40, rise=21.92, csym=6, diameter=138, url="https://tinyurl.com/y5tq9fqa"),
-    Data(twist=0.92, rise=4.83, csym=1, diameter=60, url="https://tinyurl.com/2p9yxe7x"),
     Data(twist=36.0, rise=3.4, csym=1, diameter=20, dx=5, input_type="PS", apix_or_nqyuist=2.5, url="https://upload.wikimedia.org/wikipedia/en/b/b2/Photo_51_x-ray_diffraction_image.jpg")
 ]
 
@@ -1642,6 +1649,7 @@ def get_direct_url(url):
         return url
 
 def set_to_periodic_range(v, min=-180, max=180):
+    if min <= v <= max: return v
     from math import fmod
     tmp = fmod(v-min, max-min)
     if tmp>=0: tmp+=min
