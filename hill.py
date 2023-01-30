@@ -133,6 +133,7 @@ def main(args):
         min_rise = round(apix/2.0, 2)
         rise = rise_empty.number_input('Rise (Å)', min_value=min_rise, max_value=max_rise, step=1.0, format="%.3f", key="rise")
 
+        if "twist" not in st.session_state: st.session_state.twist = 1.0
         if use_pitch:
             min_pitch = abs(rise)
             value = max(min_pitch, twist2pitch(st.session_state.twist, rise))
@@ -141,7 +142,7 @@ def main(args):
             pitch_or_twist_text.markdown(f"*(twist = {st.session_state.twist:.2f} °)*")
             twist = pitch2twist(pitch, rise)
         else:
-            twist = pitch_or_twist_number_input.number_input('Twist (°)', min_value=0.0, max_value=180.0, step=1.0, format="%.2f", help="pitch = 360/twist * rise", key="twist")
+            twist = pitch_or_twist_number_input.number_input('Twist (°)', value=st.session_state.twist, min_value=0.0, max_value=180.0, step=1.0, format="%.2f", help="pitch = 360/twist * rise", key="twist")
             pitch = abs(round(twist2pitch(twist, rise), 2))
             pitch_or_twist_text.markdown(f"*(pitch = {pitch:.2f} Å)*")
 
@@ -373,8 +374,7 @@ def main(args):
                 x, y, n = m_groups[0]["LL"]
                 tmp_x = np.sort(np.unique(x))
                 width = np.mean(tmp_x[1:]-tmp_x[:-1])
-                tmp_y = np.sort(np.unique(y))
-                height = np.mean(tmp_y[1:]-tmp_y[:-1])/3
+                height = width/5
                 for mi, m in enumerate(m_groups.keys()):
                     if not show_choices[m]: continue
                     x, y, bessel_order = m_groups[m]["LL"]
@@ -1278,8 +1278,6 @@ def estimate_radial_range(data, thresh_ratio=0.1):
 @st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def auto_vertical_center(data, n_theta=180):
   from skimage.transform import radon
-  from scipy.interpolate import interp1d
-  from scipy.ndimage import rotate, shift
   from scipy.signal import correlate
   
   data_work = np.clip(data, 0, None)
@@ -1293,7 +1291,7 @@ def auto_vertical_center(data, n_theta=180):
   y = np.std(sinogram, axis=0)
   theta_best = -theta[np.argmax(y)]
 
-  rotated_data = rotate(data_work, theta_best, reshape=False)
+  rotated_data = rotate_shift_image(data_work, angle=theta_best)
   # now find best vertical shift
   yproj = np.sum(rotated_data, axis=0)
   yproj_xflip = yproj*1.0
@@ -1304,8 +1302,7 @@ def auto_vertical_center(data, n_theta=180):
   # refine to sub-degree, sub-pixel level
   def score_rotation_shift(x):
     theta, shift_x = x
-    data_tmp = rotate(data_work, theta, reshape=False)
-    data_tmp = shift(data_tmp, shift=(0, shift_x))
+    data_tmp=rotate_shift_image(data_work, angle=theta, post_shift=(0, shift_x), order=1)
     xproj = np.sum(data_tmp, axis=0)[1:]
     xproj += xproj[::-1]
     score = -np.std(xproj)
@@ -1400,8 +1397,7 @@ def guess_if_is_power_spectra(data, thresh=15):
 
 @st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def guess_if_is_positive_contrast(data):
-    edge_max = np.max(data[[0, 1, 2, -3, -2, -1], :])
-    return edge_max < np.max(data)
+    return scipy.stats.skew(data, axis=None)>0
 
 @st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def guess_if_3d(filename, data=None):
