@@ -725,6 +725,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
 
             image_index = 0
             is_3d = True
+            st.session_state[f'input_type_{param_i}'] = "image"
             is_pwr_auto = False
             is_pd_auto = False
         else:
@@ -1264,13 +1265,19 @@ def generate_tapering_filter(image_size, fraction_start=[0, 0], fraction_slope=0
 
 @st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def estimate_radial_range(data, thresh_ratio=0.1):
-    proj_y = np.sum(data, axis=1)
+    proj_y = np.sum(data, axis=0)
     n = len(proj_y)
     background = np.mean(proj_y[[0,1,2,-3,-2,-1]])
     thresh = (proj_y.max() - background) * thresh_ratio + background
     indices = np.nonzero(proj_y<thresh)[0]
-    xmin = np.max(indices[indices<np.argmax(proj_y[:n//2])])
-    xmax = np.min(indices[indices>np.argmax(proj_y[n//2:])+n//2])
+    try:
+        xmin = np.max(indices[indices<np.argmax(proj_y[:n//2])])
+    except:
+        xmin = 0
+    try:
+        xmax = np.min(indices[indices>np.argmax(proj_y[n//2:])+n//2])
+    except:
+        xmax = n-1
     mask_radius = max(abs(n//2-xmin), abs(xmax-n//2))
     proj_y -= thresh
     proj_y[proj_y<0] = 0
@@ -1418,24 +1425,23 @@ def apply_helical_symmetry(data, twist_degree, rise_pixel, csym=1, new_size=None
   w = np.zeros_like(data_work).ravel()
   m = np.zeros_like(data_work).ravel()
 
-  rise_pixel_new = rise_pixel*scale
-  hsym_max = max(1, int(nz/2/rise_pixel_new))
+  hsym_max = max(1, int(nz/2/rise_pixel))
   hsyms = range(-hsym_max, hsym_max+1)
   csyms = range(csym)
   hcsyms = list(product(hsyms, csyms))
 
   mask = (data_work!=0)*1
   z_nonzeros = np.nonzero(mask)[0]
-  z0 = np.min(z_nonzeros)-1
-  z1 = np.max(z_nonzeros)+1
+  z0 = np.min(z_nonzeros)
+  z1 = np.max(z_nonzeros)
   for hci, (hi, ci) in enumerate(hcsyms):
     rot = twist_degree * hi + 360*ci/csym
     xform = R.from_euler('x', rot, degrees=True)
     zyx = xform.apply(ZYX/scale, inverse=False)
-    zyx[:,0] += nz//2 - hi*rise_pixel
+    zyx[:,0] += nz//2 - hi*rise_pixel/scale
     zyx[:,1] += ny//2
     zyx[:,2] += nx//2
-    z_mask = (z0 < zyx[:,0]) & (zyx[:,0] < z1)
+    z_mask = (z0 <= zyx[:,0]) & (zyx[:,0] <= z1)
     vals_data = map_coordinates(data_work, zyx[z_mask, :].T, order=1)
     vals_mask = map_coordinates(mask, zyx[z_mask, :].T, order=0)
     tmp_data = np.zeros_like(m)
@@ -1493,7 +1499,10 @@ def guess_if_is_power_spectra(data, thresh=15):
 
 @st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def guess_if_is_positive_contrast(data):
-    return scipy.stats.skew(data, axis=None)>0
+    y_proj = np.sum(data, axis=0)
+    mean_edge = np.mean(y_proj[[0,1,2,-3,-2,-1]])
+    if np.max(y_proj)-mean_edge > abs(np.min(y_proj)-mean_edge): return True
+    else: return False
 
 @st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def guess_if_3d(filename, data=None):
