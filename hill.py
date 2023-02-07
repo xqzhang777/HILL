@@ -118,7 +118,7 @@ def main(args):
             query_params.pop('pitch', None)
             st.experimental_set_query_params(**query_params)
         
-        reload = st.button("Copy pitch/rise↶")
+        reload_button = st.button("Copy pitch/rise↶")
 
         pitch_or_twist_choices = ["pitch", "twist"]
         pitch_or_twist = st.radio(label="Choose pitch or twist mode", options=pitch_or_twist_choices, index=0, label_visibility="collapsed", horizontal=True)
@@ -559,8 +559,11 @@ def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radiu
 def create_image_figure(image, dx, dy, title="", title_location="below", plot_width=None, plot_height=None, x_axis_label='x', y_axis_label='y', tooltips=None, show_axis=True, show_toolbar=True, crosshair_color="white", aspect_ratio=None):
     from bokeh.plotting import figure
     h, w = image.shape
-    if aspect_ratio is None and (plot_width and plot_height):
-        aspect_ratio = plot_width/plot_height
+    if aspect_ratio is None:
+        if plot_width and plot_height:
+            aspect_ratio = plot_width/plot_height
+        else:
+            aspect_ratio = w*dx/(h*dy)
     tools = 'box_zoom,crosshair,pan,reset,save,wheel_zoom'
     fig = figure(title_location=title_location, 
         frame_width=plot_width, frame_height=plot_height, 
@@ -703,11 +706,12 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                     msg_map_too_large = f"As the map size ({map_size:.1f} MB, {nx}x{ny}x{nz} voxels) is too large for the resource limit ({mem_quota():.1f} MB memory cap) of the hosting service, HILL will stop analyzing it to avoid crashing the server. Please bin/crop your map so that it is {max_map_size} MB ({max_map_dim}x{max_map_dim}x{max_map_dim} voxels) or less, and then try again. Please check the [HILL web site](https://jiang.bio.purdue.edu/hill) to learn how to run HILL on your local computer with larger memory to support large maps"
                     st.warning(msg_map_too_large)
                     st.stop()
-            if params:
+            if params and ("twist" not in st.session_state and "rise" not in st.session_state and "csym" not in st.session_state):
                 st.session_state[f"input_type_{param_i}"] = "image"
                 st.session_state.twist = abs(params['twist'])
                 st.session_state.rise = params['rise']
                 st.session_state.csym = params['csym']
+            if params:
                 st.session_state.resolution = params['resolution']
                 msg += f"  \ntwist={params['twist']}° | rise={params['rise']}Å | c{params['csym']}"
             else:
@@ -715,7 +719,6 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
             st.markdown(msg)
             with st.spinner(f'Downloading EMD-{emd_id} from {get_emdb_map_url(emd_id)}'):
                 data_all, apix_auto = get_emdb_map(emd_id)
-                st.session_state.apix_0 = apix_auto
             if data_all is None:
                 st.warning(f"Failed to download [EMD-{emd_id}](https://www.ebi.ac.uk/emdb/entry/EMD-{emd_id})")
                 return
@@ -761,9 +764,38 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                 st.stop()
             
             with st.expander(label="Generate 2-D projection from the 3-D map", expanded=False):
-                az = st.number_input(label=f"Rotation around the helical axis (°):", min_value=0.0, max_value=360., value=0.0, step=1.0, key=f'az_{param_i}')
-                tilt = st.number_input(label=f"Tilt (°):", min_value=-180.0, max_value=180., value=0.0, step=1.0, key=f'tilt_{param_i}')
-                data = generate_projection(data_all, az=az, tilt=tilt)
+                with st.form("Projection"):
+                    apply_helical_sym = st.checkbox(label='Apply helical symmetry', value=0, key=f'apply_helical_symmetry_{param_i}')
+                    twist_ahs = st.number_input(label=f"Twist (°):", min_value=-180.0, max_value=180.0, value=0.0, step=1.0, key=f'twist_ahs_{param_i}')
+                    rise_ahs = st.number_input(label=f"Rise (Å):", min_value=0.0, value=0.0, step=1.0, key=f'rise_ahs_{param_i}')
+                    csym_ahs = st.number_input(label=f"Csym:", min_value=1, value=1, step=1, key=f'csym_ahs_{param_i}')
+                    apix_map = st.number_input(label=f"Current map pixel size (Å):", min_value=0.0, value=apix_auto, step=1.0, key=f'apix_map_{param_i}')
+                    apix_ahs = st.number_input(label=f"New map pixel size (Å):", min_value=0.0, value=apix_map, step=1.0, key=f'apix_ahs_{param_i}')
+                    nz, ny, nx = data_all.shape
+                    length_ahs = st.number_input(label=f"Box length (Å):", min_value=0.0, value=apix_map*nz, step=1.0, key=f'length_ahs_{param_i}')
+                    width_ahs = st.number_input(label=f"Box width (Å):", min_value=0.0, value=apix_map*nx, step=1.0, key=f'width_ahs_{param_i}')                        
+                    st.markdown("""---""")
+                    az = st.number_input(label=f"Rotation around the helical axis (°):", min_value=0.0, max_value=360., value=0.0, step=1.0, key=f'az_{param_i}')
+                    tilt = st.number_input(label=f"Tilt (°):", min_value=-180.0, max_value=180., value=0.0, step=1.0, key=f'tilt_{param_i}')
+                    noise = st.number_input(label=f"Add noise (σ):", min_value=0.0, value=0.0, step=0.1, key=f'noise_{param_i}')
+
+                    st.form_submit_button("Start symmetrization/projection")
+                if apply_helical_sym and rise_ahs:
+                    with st.spinner('Applying helical symmetry'):
+                        nz_ahs = round(length_ahs/apix_ahs)//2*2
+                        nyx_ahs = round(width_ahs/apix_ahs)//2*2
+                        data_all = apply_helical_symmetry(data_all, twist_ahs, rise_ahs/apix_ahs, csym_ahs, new_size=(nz_ahs, nyx_ahs, nyx_ahs), scale=apix_map/apix_ahs)
+                        apix_auto = apix_ahs
+
+                    file_name = "helical_symmetrized.mrc.gz"
+                    with mrcfile.new(file_name, compression="gzip", overwrite=True) as mrc:
+                        mrc.set_data(data_all.astype(np.float32))
+                        mrc.voxel_size = apix_ahs
+                    with open(file_name, 'rb') as fp:
+                        st.download_button('Download symmetrized map', fp, file_name=file_name)
+
+                with st.spinner('Generating 2D projection'):
+                    data = generate_projection(data_all, az=az, tilt=tilt, noise=noise)
                 image_index = 0
                 data_to_show = np.array([0])
         else:
@@ -785,7 +817,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
             if len(data_to_show)>1:
                 st.markdown('<div style="text-align: center;">Click to choose an image:</div>', unsafe_allow_html=True)
                 from st_clickable_images import clickable_images
-                images = [encode_numpy(data_all[i], hflip=True) for i in data_to_show]
+                images = [encode_numpy(data_all[i], vflip=True) for i in data_to_show]
                 image_index = clickable_images(
                     images,
                     titles=[f"{i+1}" for i in data_to_show],
@@ -867,7 +899,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
             else:
                 image_label = f"Orignal image {image_index+1}/{nz} ({nx}x{ny})"
             #st.image(normalize(data), use_column_width=True, caption=image_label)
-            fig = create_image_figure(data, apix, apix, title=image_label, title_location="below", plot_width=None, plot_height=None, x_axis_label=None, y_axis_label=None, tooltips=None, show_axis=False, show_toolbar=False, crosshair_color="white", aspect_ratio=1)
+            fig = create_image_figure(data, apix, apix, title=image_label, title_location="below", plot_width=None, plot_height=None, x_axis_label=None, y_axis_label=None, tooltips=None, show_axis=False, show_toolbar=False, crosshair_color="white")
             st.bokeh_chart(fig, use_container_width=True)
 
         transformed_image = st.empty()
@@ -929,7 +961,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                 else:
                     image_label = f"Transformed image {image_index+1}/{nz} ({nx}x{ny})"
                 #st.image(normalize(data), use_column_width=True, caption=image_label)
-                fig = create_image_figure(data, apix, apix, title=image_label, title_location="below", plot_width=None, plot_height=None, x_axis_label=None, y_axis_label=None, tooltips=None, show_axis=False, show_toolbar=False, crosshair_color="white", aspect_ratio=1)
+                fig = create_image_figure(data, apix, apix, title=image_label, title_location="below", plot_width=None, plot_height=None, x_axis_label=None, y_axis_label=None, tooltips=None, show_axis=False, show_toolbar=False, crosshair_color="white")
                 st.bokeh_chart(fig, use_container_width=True)
 
         if input_type in ["image"]:
@@ -1232,7 +1264,7 @@ def generate_tapering_filter(image_size, fraction_start=[0, 0], fraction_slope=0
 
 @st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def estimate_radial_range(data, thresh_ratio=0.1):
-    proj_y = np.sum(data, axis=0)
+    proj_y = np.sum(data, axis=1)
     n = len(proj_y)
     background = np.mean(proj_y[[0,1,2,-3,-2,-1]])
     thresh = (proj_y.max() - background) * thresh_ratio + background
@@ -1333,18 +1365,21 @@ def rotate_shift_image(data, angle=0, pre_shift=(0, 0), post_shift=(0, 0), rotat
     return ret
 
 @st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
-def generate_projection(data, az=0, tilt=0, output_size=None):
+def generate_projection(data, az=0, tilt=0, noise=0, output_size=None):
     from scipy.spatial.transform import Rotation as R
     from scipy.ndimage import affine_transform
     # note the convention change
     # xyz in scipy is zyx in cryoEM maps
-    rot = R.from_euler('zx', [tilt, az], degrees=True)  # order: right to left
-    m = rot.as_matrix()
-    nx, ny, nz = data.shape
-    bcenter = np.array((nx//2, ny//2, nz//2), dtype=np.float32)
-    offset = bcenter.T - np.dot(m, bcenter.T)
-    tmp = affine_transform(data, matrix=m, offset=offset, mode='nearest')
-    ret = tmp.sum(axis=1)   # integrate along y-axis
+    if az or tilt:
+        rot = R.from_euler('zx', [tilt, az], degrees=True)  # order: right to left
+        m = rot.as_matrix()
+        nx, ny, nz = data.shape
+        bcenter = np.array((nx//2, ny//2, nz//2), dtype=np.float32)
+        offset = bcenter.T - np.dot(m, bcenter.T)
+        data_work = affine_transform(data, matrix=m, offset=offset, mode='nearest')
+    else:
+        data_work = data
+    ret = data_work.sum(axis=1)   # integrate along y-axis
     if output_size is not None:
         ony, onx = output_size
         ny, nx = ret.shape
@@ -1356,7 +1391,68 @@ def generate_projection(data, az=0, tilt=0, output_size=None):
             ret2[y0:y0+ny, x0:x0+nx] = ret
             ret = ret2 
     ret = normalize(ret)
+    if noise:
+        ret += np.random.normal(loc=0.0, scale=noise, size=ret.shape)
     return ret
+
+@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+def apply_helical_symmetry(data, twist_degree, rise_pixel, csym=1, new_size=None, scale=1.0):
+  from scipy.spatial.transform import Rotation as R
+  from scipy.ndimage import map_coordinates
+  from itertools import product
+  if new_size != data.shape:
+    nz0, ny0, nx0 = data.shape
+    nz1, ny1, nx1 = new_size
+    nz2, ny2, nx2 = max(nz0, nz1), max(ny0, ny1), max(nx0, nx1)
+    data_work = np.zeros((nz2, ny2, nx2), dtype=np.float32)
+    data_work[nz2//2-nz0//2:nz2//2+nz0//2, ny2//2-ny0//2:ny2//2+ny0//2, nx2//2-nx0//2:nx2//2+nx0//2] = data
+  else:
+    data_work = data
+  nz, ny, nx = data_work.shape
+  k = np.arange(0, nz, dtype=np.int32)-nz//2
+  j = np.arange(0, ny, dtype=np.int32)-ny//2
+  i = np.arange(0, nx, dtype=np.int32)-nx//2
+  Z, Y, X = np.meshgrid(k, j, i, indexing='ij')
+  ZYX = np.vstack((Z.ravel(), Y.ravel(), X.ravel())).transpose()
+
+  w = np.zeros_like(data_work).ravel()
+  m = np.zeros_like(data_work).ravel()
+
+  rise_pixel_new = rise_pixel*scale
+  hsym_max = max(1, int(nz/2/rise_pixel_new))
+  hsyms = range(-hsym_max, hsym_max+1)
+  csyms = range(csym)
+  hcsyms = list(product(hsyms, csyms))
+
+  mask = (data_work!=0)*1
+  z_nonzeros = np.nonzero(mask)[0]
+  z0 = np.min(z_nonzeros)-1
+  z1 = np.max(z_nonzeros)+1
+  for hci, (hi, ci) in enumerate(hcsyms):
+    rot = twist_degree * hi + 360*ci/csym
+    xform = R.from_euler('x', rot, degrees=True)
+    zyx = xform.apply(ZYX/scale, inverse=False)
+    zyx[:,0] += nz//2 - hi*rise_pixel
+    zyx[:,1] += ny//2
+    zyx[:,2] += nx//2
+    z_mask = (z0 < zyx[:,0]) & (zyx[:,0] < z1)
+    vals_data = map_coordinates(data_work, zyx[z_mask, :].T, order=1)
+    vals_mask = map_coordinates(mask, zyx[z_mask, :].T, order=0)
+    tmp_data = np.zeros_like(m)
+    tmp_mask = np.zeros_like(m)
+    tmp_data[z_mask] = vals_data
+    tmp_mask[z_mask] = vals_mask
+    tmp_mask_nonzeros = tmp_mask!=0
+    m[tmp_mask_nonzeros] += tmp_data[tmp_mask_nonzeros]
+    w[tmp_mask_nonzeros] += 1.0
+  mask = w>0
+  m[mask] /= w[mask]
+  m[~mask] = 0
+  m = m.reshape((nz, ny, nx))
+  if m.shape != new_size:
+    nz1, ny1, nx1 = new_size
+    m = m[nz//2-nz1//2:nz//2+nz1//2, ny//2-ny1//2:ny//2+ny1//2, nx//2-nx1//2:nx//2+nx1//2]
+  return m
 
 @st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def normalize(data, percentile=(0, 100)):
@@ -1535,13 +1631,15 @@ def pitch2twist(pitch, rise):
     else:
         return 0.
 
-def encode_numpy(img, hflip=True):
+def encode_numpy(img, hflip=False, vflip=False):
     if img.dtype != np.dtype('uint8'):
         vmin, vmax = img.min(), img.max()
         tmp = (255*(img-vmin)/(vmax-vmin)).astype(np.uint8)
     else:
         tmp = img
     if hflip:
+        tmp = tmp[:, ::-1]
+    if vflip:
         tmp = tmp[::-1, :]
     import io, base64
     from PIL import Image
