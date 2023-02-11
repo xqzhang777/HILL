@@ -786,7 +786,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                     with st.spinner('Applying helical symmetry'):
                         nz_ahs = round(length_ahs/apix_ahs)//2*2
                         nyx_ahs = round(width_ahs/apix_ahs)//2*2
-                        data_all = apply_helical_symmetry(data_all, twist_ahs, rise_ahs/apix_ahs, csym_ahs, fraction_ahs, new_size=(nz_ahs, nyx_ahs, nyx_ahs), scale=apix_map/apix_ahs)
+                        data_all = apply_helical_symmetry(data_all, apix_map, twist_ahs, rise_ahs, csym_ahs, fraction_ahs, new_size=(nz_ahs, nyx_ahs, nyx_ahs), new_apix=apix_ahs)
                         apix_auto = apix_ahs
 
                     file_name = "helical_symmetrized.mrc.gz"
@@ -1404,10 +1404,11 @@ def generate_projection(data, az=0, tilt=0, noise=0, output_size=None):
     return ret
 
 @st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
-def apply_helical_symmetry(data, twist_degree, rise_pixel, csym=1, fraction=1.0, new_size=None, scale=1.0):
+def apply_helical_symmetry(data, apix, twist_degree, rise_angstrom, csym=1, fraction=1.0, new_size=None, new_apix=None):
   from scipy.spatial.transform import Rotation as R
   from scipy.ndimage import map_coordinates
   from itertools import product
+  if new_apix is None: new_apix = apix
   nz0, ny0, nx0 = data.shape
   if new_size != data.shape:
     nz0, ny0, nx0 = data.shape
@@ -1421,13 +1422,13 @@ def apply_helical_symmetry(data, twist_degree, rise_pixel, csym=1, fraction=1.0,
   k = np.arange(0, nz, dtype=np.int32)-nz//2
   j = np.arange(0, ny, dtype=np.int32)-ny//2
   i = np.arange(0, nx, dtype=np.int32)-nx//2
-  Z, Y, X = np.meshgrid(k, j, i, indexing='ij')
+  Z, Y, X = np.meshgrid(k*new_apix, j*new_apix, i*new_apix, indexing='ij')
   ZYX = np.vstack((Z.ravel(), Y.ravel(), X.ravel())).transpose()
 
   w = np.zeros_like(data_work).ravel()
   m = np.zeros_like(data_work).ravel()
 
-  hsym_max = max(1, int(nz/2/rise_pixel))
+  hsym_max = max(1, int(nz/2*new_apix/rise_angstrom))
   hsyms = range(-hsym_max, hsym_max+1)
   csyms = range(csym)
   hcsyms = list(product(hsyms, csyms))
@@ -1441,8 +1442,10 @@ def apply_helical_symmetry(data, twist_degree, rise_pixel, csym=1, fraction=1.0,
   for hci, (hi, ci) in enumerate(hcsyms):
     rot = twist_degree * hi + 360*ci/csym
     xform = R.from_euler('x', rot, degrees=True)
-    zyx = xform.apply(ZYX/scale, inverse=False)
-    zyx[:,0] += nz//2 - hi*rise_pixel/scale
+    zyx = xform.apply(ZYX, inverse=False)
+    zyx[:,0] -= hi*rise_angstrom
+    zyx /= apix
+    zyx[:,0] += nz//2
     zyx[:,1] += ny//2
     zyx[:,2] += nx//2
     z_mask = (z0 <= zyx[:,0]) & (zyx[:,0] <= z1)
