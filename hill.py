@@ -767,25 +767,26 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
             with st.expander(label="Generate 2-D projection from the 3-D map", expanded=False):
                 with st.form("Projection"):
                     apply_helical_sym = st.checkbox(label='Apply helical symmetry', value=0, key=f'apply_helical_symmetry_{param_i}')
-                    twist_ahs = st.number_input(label=f"Twist (°):", min_value=-180.0, max_value=180.0, value=0.0, step=1.0, key=f'twist_ahs_{param_i}')
-                    rise_ahs = st.number_input(label=f"Rise (Å):", min_value=0.0, value=0.0, step=1.0, key=f'rise_ahs_{param_i}')
-                    csym_ahs = st.number_input(label=f"Csym:", min_value=1, value=1, step=1, key=f'csym_ahs_{param_i}')
+                    twist_ahs = st.number_input(label=f"Twist (°):", min_value=-180.0, max_value=180.0, value=float(params.get('twist',0)), step=1.0, key=f'twist_ahs_{param_i}')
+                    rise_ahs = st.number_input(label=f"Rise (Å):", min_value=0.0, value=float(params.get('rise',0)), step=1.0, key=f'rise_ahs_{param_i}')
+                    csym_ahs = st.number_input(label=f"Csym:", min_value=1, value=int(params.get('csym',1)), step=1, key=f'csym_ahs_{param_i}')
                     apix_map = st.number_input(label=f"Current map pixel size (Å):", min_value=0.0, value=apix_auto, step=1.0, key=f'apix_map_{param_i}')
                     apix_ahs = st.number_input(label=f"New map pixel size (Å):", min_value=0.0, value=apix_map, step=1.0, key=f'apix_ahs_{param_i}')
                     nz, ny, nx = data_all.shape
-                    length_ahs = st.number_input(label=f"Box length (Å):", min_value=0.0, value=apix_map*nz, step=1.0, key=f'length_ahs_{param_i}')
+                    fraction_ahs = st.number_input(label=f"Center fraction (0-1):", min_value=rise_ahs/(nz*apix_map), max_value=1.0, value=1.0, step=0.1, key=f'fraction_ahs_{param_i}')
+                    length_ahs = st.number_input(label=f"Box length (Å):", min_value=rise_ahs, value=apix_map*max(nz,nx), step=1.0, key=f'length_ahs_{param_i}')
                     width_ahs = st.number_input(label=f"Box width (Å):", min_value=0.0, value=apix_map*nx, step=1.0, key=f'width_ahs_{param_i}')                        
                     st.markdown("""---""")
                     az = st.number_input(label=f"Rotation around the helical axis (°):", min_value=0.0, max_value=360., value=0.0, step=1.0, key=f'az_{param_i}')
                     tilt = st.number_input(label=f"Tilt (°):", min_value=-180.0, max_value=180., value=0.0, step=1.0, key=f'tilt_{param_i}')
-                    noise = st.number_input(label=f"Add noise (σ):", min_value=0.0, value=0.0, step=0.1, key=f'noise_{param_i}')
+                    noise = st.number_input(label=f"Add noise (σ):", min_value=0.0, value=0.0, step=0.5, key=f'noise_{param_i}')
 
                     st.form_submit_button("Start symmetrization/projection")
                 if apply_helical_sym and rise_ahs:
                     with st.spinner('Applying helical symmetry'):
                         nz_ahs = round(length_ahs/apix_ahs)//2*2
                         nyx_ahs = round(width_ahs/apix_ahs)//2*2
-                        data_all = apply_helical_symmetry(data_all, twist_ahs, rise_ahs/apix_ahs, csym_ahs, new_size=(nz_ahs, nyx_ahs, nyx_ahs), scale=apix_map/apix_ahs)
+                        data_all = apply_helical_symmetry(data_all, twist_ahs, rise_ahs/apix_ahs, csym_ahs, fraction_ahs, new_size=(nz_ahs, nyx_ahs, nyx_ahs), scale=apix_map/apix_ahs)
                         apix_auto = apix_ahs
 
                     file_name = "helical_symmetrized.mrc.gz"
@@ -1399,14 +1400,15 @@ def generate_projection(data, az=0, tilt=0, noise=0, output_size=None):
             ret = ret2 
     ret = normalize(ret)
     if noise:
-        ret += np.random.normal(loc=0.0, scale=noise, size=ret.shape)
+        ret += np.random.normal(loc=0.0, scale=noise*np.std(data[data!=0]), size=ret.shape)
     return ret
 
 @st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
-def apply_helical_symmetry(data, twist_degree, rise_pixel, csym=1, new_size=None, scale=1.0):
+def apply_helical_symmetry(data, twist_degree, rise_pixel, csym=1, fraction=1.0, new_size=None, scale=1.0):
   from scipy.spatial.transform import Rotation as R
   from scipy.ndimage import map_coordinates
   from itertools import product
+  nz0, ny0, nx0 = data.shape
   if new_size != data.shape:
     nz0, ny0, nx0 = data.shape
     nz1, ny1, nx1 = new_size
@@ -1434,6 +1436,8 @@ def apply_helical_symmetry(data, twist_degree, rise_pixel, csym=1, new_size=None
   z_nonzeros = np.nonzero(mask)[0]
   z0 = np.min(z_nonzeros)
   z1 = np.max(z_nonzeros)
+  z0 = max(z0, nz//2-int(nz0*fraction+0.5)//2)
+  z1 = min(z1, nz//2+int(nz0*fraction+0.5)//2)
   for hci, (hi, ci) in enumerate(hcsyms):
     rot = twist_degree * hi + 360*ci/csym
     xform = R.from_euler('x', rot, degrees=True)
@@ -1443,11 +1447,10 @@ def apply_helical_symmetry(data, twist_degree, rise_pixel, csym=1, new_size=None
     zyx[:,2] += nx//2
     z_mask = (z0 <= zyx[:,0]) & (zyx[:,0] <= z1)
     vals_data = map_coordinates(data_work, zyx[z_mask, :].T, order=1)
-    vals_mask = map_coordinates(mask, zyx[z_mask, :].T, order=0)
     tmp_data = np.zeros_like(m)
     tmp_mask = np.zeros_like(m)
     tmp_data[z_mask] = vals_data
-    tmp_mask[z_mask] = vals_mask
+    tmp_mask[z_mask] = vals_data!=0
     tmp_mask_nonzeros = tmp_mask!=0
     m[tmp_mask_nonzeros] += tmp_data[tmp_mask_nonzeros]
     w[tmp_mask_nonzeros] += 1.0
