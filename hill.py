@@ -765,8 +765,8 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                 st.stop()
             
             with st.expander(label="Generate 2-D projection from the 3-D map", expanded=False):
-                with st.form("Projection"):
-                    apply_helical_sym = st.checkbox(label='Apply helical symmetry', value=0, key=f'apply_helical_symmetry_{param_i}')
+                apply_helical_sym = st.checkbox(label='Apply helical symmetry', value=0, key=f'apply_helical_sym_{param_i}')
+                if apply_helical_sym:
                     twist_ahs = st.number_input(label=f"Twist (°):", min_value=-180.0, max_value=180.0, value=float(params.get('twist',0)), step=1.0, key=f'twist_ahs_{param_i}')
                     rise_ahs = st.number_input(label=f"Rise (Å):", min_value=0.0, value=float(params.get('rise',0)), step=1.0, key=f'rise_ahs_{param_i}')
                     csym_ahs = st.number_input(label=f"Csym:", min_value=1, value=int(params.get('csym',1)), step=1, key=f'csym_ahs_{param_i}')
@@ -777,11 +777,10 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                     length_ahs = st.number_input(label=f"Box length (Å):", min_value=rise_ahs, value=apix_map*max(nz,nx), step=1.0, key=f'length_ahs_{param_i}')
                     width_ahs = st.number_input(label=f"Box width (Å):", min_value=0.0, value=apix_map*nx, step=1.0, key=f'width_ahs_{param_i}')                        
                     st.markdown("""---""")
-                    az = st.number_input(label=f"Rotation around the helical axis (°):", min_value=0.0, max_value=360., value=0.0, step=1.0, key=f'az_{param_i}')
-                    tilt = st.number_input(label=f"Tilt (°):", min_value=-180.0, max_value=180., value=0.0, step=1.0, key=f'tilt_{param_i}')
-                    noise = st.number_input(label=f"Add noise (σ):", min_value=0.0, value=0.0, step=0.5, key=f'noise_{param_i}')
+                az = st.number_input(label=f"Rotation around the helical axis (°):", min_value=0.0, max_value=360., value=0.0, step=1.0, key=f'az_{param_i}')
+                tilt = st.number_input(label=f"Tilt (°):", min_value=-180.0, max_value=180., value=0.0, step=1.0, key=f'tilt_{param_i}')
+                noise = st.number_input(label=f"Add noise (σ):", min_value=0.0, value=0.0, step=0.5, key=f'noise_{param_i}')
 
-                    st.form_submit_button("Start symmetrization/projection")
                 if apply_helical_sym and rise_ahs:
                     with st.spinner('Applying helical symmetry'):
                         nz_ahs = round(length_ahs/apix_ahs)//2*2
@@ -1405,6 +1404,7 @@ def generate_projection(data, az=0, tilt=0, noise=0, output_size=None):
 
 @st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
 def apply_helical_symmetry(data, apix, twist_degree, rise_angstrom, csym=1, fraction=1.0, new_size=None, new_apix=None):
+  if rise_angstrom<=0: return data
   from scipy.spatial.transform import Rotation as R
   from scipy.ndimage import map_coordinates
   from itertools import product
@@ -1708,20 +1708,20 @@ def set_initial_query_params(query_string):
     if len(d)<1: return
     st.session_state.update(d)
 
-int_types = ['csym', 'do_random_embid_0', 'do_random_embid_1', 'image_index_0', 'image_index_1', 'input_mode_0', 'input_mode_1', 'is_3d_0', 'is_3d_1', 'negate_0', 'negate_1', 'pnx', 'pny', 'show_LL', 'show_LL_text', 'show_phase_diff', 'show_pwr', 'show_yprofile', 'simunoise', 'transpose_0', 'transpose_1', 'share_url', 'show_qr', 'useplotsize']
-float_types = ['angle_0', 'angle_1', 'apix_0', 'apix_1', 'apix_nyquist_0', 'apix_nyquist_1', 'az_0', 'az_1', 'ball_radius', 'cutoff_res_x', 'cutoff_res_y', 'diameter', 'dx_0', 'dx_1', 'dy_0', 'dy_1', 'mask_radius_0', 'mask_radius_1', 'mask_len_0', 'mask_len_1', 'resolution', 'rise', 'simuaz', 'simunoise', 'tilt', 'tilt_0', 'tilt_1', 'twist']
-default_values = {'angle_0':0, 'angle_1':0, 'az_0':0, 'ball_radius':0, 'csym':1, 'do_random_embid_0':0, 'dx_0':0, 'dx_1':0, 'dy_0':0, 'dy_1':0, 'image_index_0':0, 'input_type_0':'image', 'is_3d_0':0, 'is_3d_1':0, 'mask_len_0':90, 'mask_len_1':90, 'negate_0':0, 'negate_1':0, 'pnx':512, 'pny':1024, 'show_LL':1, 'show_LL_text':1, 'show_phase_diff':1, 'show_pwr':1, 'show_yprofile':1, 'simuaz':0, 'simunoise':0, 'tilt':0, 'tilt_0':0, 'tilt_1':0, 'transpose_0':0, 'transpose_1':0, 'share_url':0, 'show_qr':0, 'useplotsize':0}
+int_types = {'apply_helical_sym_0':0, 'apply_helical_sym_1':0, 'csym':1, 'csym_ahs_0':1, 'csym_ahs_1':1, 'do_random_embid_0':0, 'do_random_embid_1':0, 'image_index_0':0, 'image_index_1':0, 'input_mode_0':1, 'input_mode_1':1, 'is_3d_0':0, 'is_3d_1':0, 'negate_0':0, 'negate_1':0, 'pnx':512, 'pny':1024, 'show_LL':1, 'show_LL_text':1, 'show_phase_diff':1, 'show_pwr':1, 'show_yprofile':1, 'transpose_0':0, 'transpose_1':0, 'share_url':0, 'show_qr':0, 'useplotsize':0}
+float_types = {'angle_0':0, 'angle_1':0, 'apix_0':0, 'apix_1':0, 'apix_ahs_0':0, 'apix_ahs_1':0, 'apix_map_0':0, 'apix_map_1':0, 'apix_nyquist_0':0, 'apix_nyquist_1':0, 'az_0':0, 'az_1':0, 'ball_radius':0, 'cutoff_res_x':0, 'cutoff_res_y':0, 'diameter':0, 'dx_0':0, 'dx_1':0, 'dy_0':0, 'dy_1':0, 'fraction_ahs_0':0, 'fraction_ahs_1':0, 'length_ahs_0':0, 'length_ahs_1':0, 'mask_len_0':90, 'mask_len_1':90, 'mask_radius_0':0, 'mask_radius_1':0, 'noise_0':0, 'noise_1':0, 'resolution':0, 'rise':0, 'rise_ahs_0':0, 'rise_ahs_1':0, 'simuaz':0, 'simunoise':0, 'tilt':0, 'tilt_0':0, 'tilt_1':0, 'twist':0, 'twist_ahs_0':0, 'twist_ahs_1':0, 'width_ahs_0':0, 'width_ahs_1':1}
+other_types = {'input_type_0':'image', 'input_type_1':'image'}
+
 def set_query_params_from_session_state():
     d = {}
     attrs = sorted(st.session_state.keys())
     for attr in attrs:
         v = st.session_state[attr]
-        if attr in default_values and v==default_values[attr]: continue
-        if attr in int_types or isinstance(v, bool):
+        if attr in int_types and int_types[attr]!=v:
             d[attr] = int(v)
-        elif attr in float_types:
+        elif attr in float_types and float_types[attr]!=v:
             d[attr] = f'{float(v):g}'
-        else:
+        elif attr in other_types and other_types[attr]!=v:
             d[attr] = v
     st.experimental_set_query_params(**d)
 
@@ -1732,7 +1732,7 @@ def set_session_state_from_query_params():
                 st.session_state[attr] = int(query_params[attr][0])
             elif attr in float_types:
                 st.session_state[attr] = float(query_params[attr][0])
-            else:
+            elif attr in other_types:
                 st.session_state[attr] = query_params[attr][0]
 
 def get_direct_url(url):
@@ -1856,7 +1856,7 @@ def qr_code(url=None, size = 8):
         _, host = is_hosted(return_host=True)
         if len(host)<1: return None
         if host == "streamlit":
-            url = "https://share.streamlit.io/wjiang/HILL/main/"
+            url = "https://helical-indexing-hill.streamlit.app/"
         elif host == "heroku":
             url = "https://helical-indexing-HILL.herokuapp.com/"
         else:
