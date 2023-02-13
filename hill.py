@@ -432,7 +432,8 @@ def main(args):
                 //document.location = url.href
                 history.replaceState({}, document.title, url.href)
                 if (reload) {
-                    var class_names = ["css-1cpxqw2 edgvbvh9"]
+                    var class_names = ["css-1x8cf1d edgvbvh10"]
+                    // <button kind="secondary" class="css-1x8cf1d edgvbvh10">
                     console.log(class_names)
                     var i
                     for (i=0; i<class_names.length; i++) {
