@@ -156,12 +156,14 @@ def main(args):
         tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-90.0, max_value=90.0, step=1.0, help="Only used to compute the layerline positions and to simulate the helix. Will not change the power spectra and phase differences across meridian of the input image(s)", key="tilt")
         cutoff_res_x = st.number_input('Resolution limit - X (Å)', value=3*apix, min_value=2*apix, step=1.0, help="Set the highest resolution to be displayed in the X-direction", key="cutoff_res_x")
         cutoff_res_y = st.number_input('Resolution limit - Y (Å)', value=2*apix, min_value=2.*apix, step=1.0, help="Set the highest resolution to be displayed in the Y-direction", key="cutoff_res_y")
-        with st.expander(label="Filters", expanded=False):
+        with st.expander(label="Addtional settings", expanded=False):
             log_xform = st.checkbox(label="Log(amplitude)", value=True, help="Perform log transform of the power spectra to allow clear display of layerlines at low and high resolutions")
             hp_fraction = st.number_input('Fourier high-pass (%)', value=0.4, min_value=0.0, max_value=100.0, step=0.1, format="%.2f", help="Perform high-pass Fourier filtering of the power spectra with filter=0.5 at this percentage of the Nyquist resolution") / 100.0
             lp_fraction = st.number_input('Fourier low-pass (%)', value=0.0, min_value=0.0, max_value=100.0, step=10.0, format="%.2f", help="Perform low-pass Fourier filtering of the power spectra with filter=0.5 at this percentage of the Nyquist resolution") / 100.0
             pnx = int(st.number_input('FFT X-dim size (pixels)', value=512, min_value=min(nx, 128), step=2, help="Set the size of FFT in X-dimension to this number of pixels", key="pnx"))
             pny = int(st.number_input('FFT Y-dim size (pixels)', value=1024, min_value=min(ny, 512), step=2, help="Set the size of FFT in Y-dimension to this number of pixels", key="pny"))
+            ll_colors = st.text_input('Layerline colors', value="lime cyan violet salmon silver", help="Set the colors of the ellipses/text labels representing the layerlines", key="ll_colors").split()
+            white_image = st.checkbox("Show image as white backgroud", value=False, key="white_image")
         with st.expander(label="Simulation", expanded=False):
             ball_radius = st.number_input('Gaussian radius (Å)', value=0.0, min_value=0.0, max_value=helical_radius, step=5.0, format="%.1f", help="A 3-D Gaussian function will be used to reprsent each subunit in the simulated helix. The Gaussian function will fall off from 1 to 0.5 at this radius. A value <=0 will disable the simulation", key="ball_radius")
             show_simu = True if ball_radius > 0 else False
@@ -274,7 +276,7 @@ def main(args):
 
         show_LL_text = False
         if show_pwr or show_phase_diff or show_pwr2 or show_phase_diff2 or show_pwr_simu or show_phase_diff_simu:
-            show_pseudocolor = st.checkbox(label="Color", value=True, help="Show the power spectra in pseudo color instead of grey scale")
+            show_pseudo_color = st.checkbox(label="Color", value=True, help="Show the power spectra in pseudo color instead of grey scale")
             show_LL = st.checkbox(label="LL", value=True, help="Show the layer lines at positions computed from the current values of pitch/twist, rise, csym, radius, and tilt", key="show_LL")
             if show_LL:
                 show_LL_text = st.checkbox(label="LLText", value=True, help="Show the layer lines using integer numbers for the Bessel orders instead of ellipses", key="show_LL_text")
@@ -332,7 +334,7 @@ def main(args):
             show_pwr_work, pwr_work, title_pwr_work, show_phase_work, phase_work, show_phase_diff_work, phase_diff_work, title_phase_work, show_yprofile_work = item
             if show_pwr_work:
                 tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Amp', '@image')]
-                fig = create_layerline_image_figure(pwr_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, pseudocolor=show_pseudocolor, title=title_pwr_work, yaxis_visible=False, tooltips=tooltips)
+                fig = create_layerline_image_figure(pwr_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, pseudo_color=show_pseudo_color, white_image=white_image, title=title_pwr_work, yaxis_visible=False, tooltips=tooltips)
                 figs.append(fig)
                 figs_image.append(fig)
 
@@ -357,7 +359,7 @@ def main(args):
 
             if show_phase_diff_work:
                 tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Phase Diff', '@image °')]
-                fig = create_layerline_image_figure(phase_diff_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, pseudocolor=show_pseudocolor, title=title_phase_work, yaxis_visible=False, tooltips=tooltips)
+                fig = create_layerline_image_figure(phase_diff_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, pseudo_color=show_pseudo_color, white_image=white_image, title=title_phase_work, yaxis_visible=False, tooltips=tooltips)
                 figs.append(fig)
                 figs_image.append(fig)
                 
@@ -369,8 +371,6 @@ def main(args):
         fig_ellipses = []
         if figs_image and show_LL:
             if max(m_groups[0]["LL"][0])>0:
-                color = 'white' if show_pseudocolor else 'red'
-                ll_line_dashes = 'solid dashed dotted dotdash dashdot'.split()             
                 x, y, n = m_groups[0]["LL"]
                 tmp_x = np.sort(np.unique(x))
                 width = np.mean(tmp_x[1:]-tmp_x[:-1])
@@ -381,14 +381,14 @@ def main(args):
                     if show_LL_text:
                         texts = [str(int(n)) for n in bessel_order]
                     tags = [m, bessel_order]
-                    line_dash = ll_line_dashes[abs(m)%len(ll_line_dashes)]
+                    color = ll_colors[abs(m)%len(ll_colors)]
                     for f in figs_image:
                         if show_LL_text: 
-                            text_labels = f.text(x, y, y_offset=2, text=texts, text_color="white", text_baseline="middle", text_align="center")
+                            text_labels = f.text(x, y, y_offset=2, text=texts, text_color=color, text_baseline="middle", text_align="center")
                             text_labels.tags = tags
                             fig_ellipses.append(text_labels)
                         else:
-                            ellipses = f.ellipse(x, y, width=width, height=height, line_width=2, line_color=color, line_dash=line_dash, fill_alpha=0)
+                            ellipses = f.ellipse(x, y, width=width, height=height, fill_color=color, fill_alpha=1, line_width=0)
                             ellipses.tags = tags
                             fig_ellipses.append(ellipses)
             else:
@@ -480,7 +480,7 @@ def main(args):
                         ny, nx = data.shape
                         apix_simu = apix
                     params = (movie_mode, twist, rise, csym, noise, helical_radius, ball_radius, az, ny, nx, apix_simu)
-                movie_filename = create_movie(movie_frames, tilt, params, pny, pnx, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudocolor, log_xform, lp_fraction, hp_fraction)
+                movie_filename = create_movie(movie_frames, tilt, params, pny, pnx, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudo_color, log_xform, lp_fraction, hp_fraction)
                 st.video(movie_filename) # it always show the video using the entire column width
 
         del data_all, data, figs_grid
@@ -496,8 +496,8 @@ def main(args):
         st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to Wen Jiang (jiang12 at purdue.edu)*")
 
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False, suppress_st_warning=True)
-def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudocolor, log_xform, lp_fraction, hp_fraction):
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
+def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudo_color, log_xform, lp_fraction, hp_fraction):
     if movie_mode_params[0] == 0:
         movie_mode, data_all, noise, apix = movie_mode_params
         nz, ny, nx = data_all.shape
@@ -525,13 +525,13 @@ def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radiu
 
         figs = []
         title = f"Projection"
-        fig_proj = create_layerline_image_figure(proj, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudocolor=show_pseudocolor, title=title, yaxis_visible=False, tooltips=None)
+        fig_proj = create_layerline_image_figure(proj, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudo_color=show_pseudo_color, white_image=white_image, title=title, yaxis_visible=False, tooltips=None)
         figs.append(fig_proj)
 
         proj_pwr, proj_phase = compute_power_spectra(proj, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
             output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
         title = f"Power Spectra"
-        fig_pwr = create_layerline_image_figure(proj_pwr, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudocolor=show_pseudocolor, title=title, yaxis_visible=False, tooltips=None)
+        fig_pwr = create_layerline_image_figure(proj_pwr, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudo_color=show_pseudo_color, white_image=white_image, title=title, yaxis_visible=False, tooltips=None)
         from bokeh.models import Label
         label = Label(x=0., y=0.9/cutoff_res_y, text=f"tilt = {tilt:.2f}°", text_align='center', text_color='white', text_font_size='30px', visible=True)
         fig_pwr.add_layout(label)
@@ -539,7 +539,7 @@ def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radiu
 
         phase_diff = compute_phase_difference_across_meridian(proj_phase)
         title = f"Phase Diff Across Meridian"
-        fig_phase = create_layerline_image_figure(phase_diff, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudocolor=show_pseudocolor, title=title, yaxis_visible=False, tooltips=None)
+        fig_phase = create_layerline_image_figure(phase_diff, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudo_color=show_pseudo_color, white_image=white_image, title=title, yaxis_visible=False, tooltips=None)
         figs.append(fig_phase)
 
         fig_all = gridplot(children=[figs], toolbar_location=None)
@@ -599,7 +599,7 @@ def create_image_figure(image, dx, dy, title="", title_location="below", plot_wi
         for ch in crosshair: ch.line_color = crosshair_color
     return fig
 
-def create_layerline_image_figure(data, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudocolor=True, title="", yaxis_visible=True, tooltips=None):
+def create_layerline_image_figure(data, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudo_color=True, white_image=False, title="", yaxis_visible=True, tooltips=None):
     ny, nx = data.shape
     dsy = 1/(ny//2*cutoff_res_y)
     dsx = 1/(nx//2*cutoff_res_x)
@@ -619,7 +619,10 @@ def create_layerline_image_figure(data, cutoff_res_x, cutoff_res_y, helical_radi
 
     source_data = ColumnDataSource(data=dict(image=[data.astype(np.float16)], x=[-nx//2*dsx], y=[-ny//2*dsy], dw=[nx*dsx], dh=[ny*dsy], bessel=[bessel]))
     if phase is not None: source_data["phase"] = [np.fmod(np.rad2deg(phase)+360, 360).astype(np.float16)]
-    palette = 'Viridis256' if pseudocolor else 'Greys256'
+    if white_image:
+        palette = ("white",)
+    else:
+        palette = 'Viridis256' if pseudo_color else 'Greys256'
     color_mapper = LinearColorMapper(palette=palette)    # Greys256, Viridis256
     image = fig.image(source=source_data, image='image', color_mapper=color_mapper, x='x', y='y', dw='dw', dh='dh')
     if tooltips is None:
@@ -1014,7 +1017,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
         input_params = (input_mode, (fileobj, None, None))
     return data_all, image_index, data, apix, radius_auto, mask_radius, input_type, is_3d, input_params, (image_container, image_label)
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def bessel_n_image(ny, nx, nyquist_res_x, nyquist_res_y, radius, tilt):
     def build_bessel_order_table(xmax):
         from scipy.special import jnp_zeros
@@ -1048,7 +1051,7 @@ def bessel_n_image(ny, nx, nyquist_res_x, nyquist_res_y, radius, tilt):
         indices = np.abs(table - xs).argmin(axis=-1)
         return np.tile(indices, (ny, 1)).astype(np.int16)
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def simulate_helix(twist, rise, csym, helical_radius, ball_radius, ny, nx, apix, tilt=0, az0=None):
     def simulate_projection(centers, sigma, ny, nx, apix):
         sigma2 = sigma*sigma
@@ -1088,7 +1091,7 @@ def simulate_helix(twist, rise, csym, helical_radius, ball_radius, ny, nx, apix,
     projection = simulate_projection(centers, ball_radius, ny, nx, apix)
     return projection
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m_max=-1):
     def peak_sx(bessel_order, radius):
         from scipy.special import jnp_zeros
@@ -1136,7 +1139,7 @@ def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m_
         m_groups[m[mi]] = d
     return m_groups
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def compute_phase_difference_across_meridian(phase):
     # https://numpy.org/doc/stable/reference/generated/numpy.fft.fftfreq.html
     phase_diff = phase * 0
@@ -1144,7 +1147,7 @@ def compute_phase_difference_across_meridian(phase):
     phase_diff = np.rad2deg(np.arccos(np.cos(phase_diff)))   # set the range to [0, 180]. 0 -> even order, 180 - odd order
     return phase_diff
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def resize_rescale_power_spectra(data, nyquist_res, cutoff_res=None, output_size=None, log=True, low_pass_fraction=0, high_pass_fraction=0, norm=1):
     from scipy.ndimage import map_coordinates
     ny, nx = data.shape
@@ -1160,7 +1163,7 @@ def resize_rescale_power_spectra(data, nyquist_res, cutoff_res=None, output_size
     if norm: pwr = normalize(pwr, percentile=(0, 100))
     return pwr
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def compute_power_spectra(data, apix, cutoff_res=None, output_size=None, log=True, low_pass_fraction=0, high_pass_fraction=0):
     fft = fft_rescale(data, apix=apix, cutoff_res=cutoff_res, output_size=output_size)
     fft = np.fft.fftshift(fft)  # shift fourier origin from corner to center
@@ -1173,7 +1176,7 @@ def compute_power_spectra(data, apix, cutoff_res=None, output_size=None, log=Tru
     phase = np.angle(fft, deg=False)
     return pwr, phase
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def fft_rescale(image, apix=1.0, cutoff_res=None, output_size=None):
     if cutoff_res:
         cutoff_res_y, cutoff_res_x = cutoff_res
@@ -1201,7 +1204,7 @@ def fft_rescale(image, apix=1.0, cutoff_res=None, output_size=None):
     # now fft has the same layout and phase origin (i.e. np.fft.ifft2(fft) would obtain original image)
     return fft
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def auto_correlation(data, sqrt=True, high_pass_fraction=0):
     from scipy.signal import correlate2d
     fft = np.fft.rfft2(data)
@@ -1219,7 +1222,7 @@ def auto_correlation(data, sqrt=True, high_pass_fraction=0):
     corr /= np.max(corr)
     return corr
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def low_high_pass_filter(data, low_pass_fraction=0, high_pass_fraction=0):
     fft = np.fft.fft2(data)
     ny, nx = fft.shape
@@ -1237,7 +1240,7 @@ def low_high_pass_filter(data, low_pass_fraction=0, high_pass_fraction=0):
     ret = np.abs(np.fft.ifft2(fft))
     return ret
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def generate_tapering_filter(image_size, fraction_start=[0, 0], fraction_slope=0.1):
     ny, nx = image_size
     fy, fx = fraction_start
@@ -1264,7 +1267,7 @@ def generate_tapering_filter(image_size, fraction_start=[0, 0], fraction_slope=0
         filter *= X
     return filter
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def estimate_radial_range(data, thresh_ratio=0.1):
     proj_y = np.sum(data, axis=0)
     n = len(proj_y)
@@ -1315,7 +1318,7 @@ def estimate_radial_range(data, thresh_ratio=0.1):
     rmean = 0.5 * (rmax*rmax+(w-1)*rcore*rcore) / (rmax+(w-1)*rcore)
     return float(rmean), float(mask_radius)    # pixel
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def auto_vertical_center(data, n_theta=180):
   from skimage.transform import radon
   from scipy.signal import correlate
@@ -1352,7 +1355,7 @@ def auto_vertical_center(data, n_theta=180):
   theta_best, shift_best = res
   return set_to_periodic_range(theta_best), shift_best
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def rotate_shift_image(data, angle=0, pre_shift=(0, 0), post_shift=(0, 0), rotation_center=None, order=1):
     # pre_shift/rotation_center/post_shift: [y, x]
     if angle==0 and pre_shift==[0,0] and post_shift==[0,0]: return data*1.0
@@ -1372,7 +1375,7 @@ def rotate_shift_image(data, angle=0, pre_shift=(0, 0), post_shift=(0, 0), rotat
     ret = affine_transform(data, matrix=m, offset=offset, order=order, mode='constant')
     return ret
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def generate_projection(data, az=0, tilt=0, noise=0, output_size=None):
     from scipy.spatial.transform import Rotation as R
     from scipy.ndimage import affine_transform
@@ -1403,7 +1406,7 @@ def generate_projection(data, az=0, tilt=0, noise=0, output_size=None):
         ret += np.random.normal(loc=0.0, scale=noise*np.std(data[data!=0]), size=ret.shape)
     return ret
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def apply_helical_symmetry(data, apix, twist_degree, rise_angstrom, csym=1, fraction=1.0, new_size=None, new_apix=None):
   if rise_angstrom<=0: return data
   from scipy.spatial.transform import Rotation as R
@@ -1467,14 +1470,14 @@ def apply_helical_symmetry(data, apix, twist_degree, rise_angstrom, csym=1, frac
     m = m[nz//2-nz1//2:nz//2+nz1//2, ny//2-ny1//2:ny//2+ny1//2, nx//2-nx1//2:nx//2+nx1//2]
   return m
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def normalize(data, percentile=(0, 100)):
     p0, p1 = percentile
     vmin, vmax = sorted(np.percentile(data, (p0, p1)))
     data2 = (data-vmin)/(vmax-vmin)
     return data2
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def nonzero_images(data, thresh_ratio=1e-3):
     assert(len(data.shape) == 3)
     sigmas = np.std(data, axis=(1,2))
@@ -1485,7 +1488,7 @@ def nonzero_images(data, thresh_ratio=1e-3):
     else:
         None
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def guess_if_is_phase_differences_across_meridian(data, err=30):
     if np.any(data[:, 0]):
         return False
@@ -1496,7 +1499,7 @@ def guess_if_is_phase_differences_across_meridian(data, err=30):
         return False
     return True
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def guess_if_is_power_spectra(data, thresh=15):
     median = np.median(data)
     max = np.max(data)
@@ -1504,14 +1507,14 @@ def guess_if_is_power_spectra(data, thresh=15):
     if (max-median)>thresh*sigma: return True
     else: return False
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def guess_if_is_positive_contrast(data):
     y_proj = np.sum(data, axis=0)
     mean_edge = np.mean(y_proj[[0,1,2,-3,-2,-1]])
     if np.max(y_proj)-mean_edge > abs(np.min(y_proj)-mean_edge): return True
     else: return False
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def guess_if_3d(filename, data=None):
     if filename.endswith(".mrcs"): return False
     if filename.startswith("cryosparc") and filename.endswith("_class_averages.mrc"): return False    # cryosparc_P*_J*_*_class_averages.mrc
@@ -1524,7 +1527,7 @@ def guess_if_3d(filename, data=None):
     if ny==nx and nz in [50, 100, 200]: return False
     return None
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def get_2d_image_from_uploaded_file(fileobj):
     import os, tempfile
     orignal_filename = fileobj.name
@@ -1534,7 +1537,7 @@ def get_2d_image_from_uploaded_file(fileobj):
         data, apix = get_2d_image_from_file(temp.name)
     return data.astype(np.float32), apix
 
-@st.experimental_memo(show_spinner=False, ttl=24*60*60.) # refresh every day
+@st.cache_data(show_spinner=False, ttl=24*60*60.) # refresh every day
 def get_emdb_ids():
     try:
         import pandas as pd
@@ -1546,7 +1549,7 @@ def get_emdb_ids():
         resolutions = []
     return emdb_ids, resolutions
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def get_emdb_helical_parameters(emd_id):
     try:
         emd_id2 = ''.join([s for s in str(emd_id) if s.isdigit()])
@@ -1588,7 +1591,7 @@ def get_emdb_map_url(emd_id: str):
     url = f"{server}/emdb/structures/EMD-{emd_id}/map/emd_{emd_id}.map.gz"
     return url
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def get_emdb_map(emd_id: str):
     url = get_emdb_map_url(emd_id)
     ds = np.DataSource(None)
@@ -1600,7 +1603,7 @@ def get_emdb_map(emd_id: str):
         apix = mrc.voxel_size.x.item()
     return data.astype(np.float32), apix
 
-@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False, suppress_st_warning=True)
+@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def get_2d_image_from_url(url):
     url_final = get_direct_url(url)    # convert cloud drive indirect url to direct url
     ds = np.DataSource(None)
@@ -1611,7 +1614,7 @@ def get_2d_image_from_url(url):
         data = get_2d_image_from_file(fp.name)
     return data
 
-#@st.experimental_memo(persist='disk', max_entries=1, show_spinner=False)
+#@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def get_2d_image_from_file(filename):
     try:
         import mrcfile
@@ -1643,7 +1646,7 @@ def twist2pitch(twist, rise):
 
 def pitch2twist(pitch, rise):
     if pitch>rise:
-        return 360. * rise/pitch
+        return set_to_periodic_range(360. * rise/pitch)
     else:
         return 0.
 
@@ -1666,12 +1669,13 @@ def encode_numpy(img, hflip=False, vflip=False):
     return f"data:image/jpeg;base64, {encoded}"
 
 class Data:
-    def __init__(self, twist, rise, csym, diameter, dx=0, apix_or_nqyuist=None, url=None, input_type="image"):
+    def __init__(self, twist, rise, csym, diameter, rotate=None, dx=None, apix_or_nqyuist=None, url=None, input_type="image"):
         self.input_type = input_type
         self.twist = twist
         self.rise = rise
         self.csym = csym
         self.diameter = diameter
+        self.rotate = rotate
         self.dx = dx
         if self.input_type in ["PS", "PD"]:
             self.nyquist = apix_or_nqyuist
@@ -1689,7 +1693,10 @@ def set_session_state_from_data_example():
     st.session_state.input_mode_0 = 1
     st.session_state.input_type_0 = data.input_type
     st.session_state.url_0 = data.url
-    st.session_state.dx_0 = float(data.dx)
+    if data.rotate is not None:
+        st.session_state.angle_0 = float(data.rotate)
+    if data.dx is not None:
+        st.session_state.dx_0 = float(data.dx)
     if data.input_type in ["PS", "PD"]:
         if data.nyquist is not None:
             st.session_state.apix_nyquist_0 = data.nyquist
@@ -1701,7 +1708,7 @@ def set_session_state_from_data_example():
     st.session_state.csym = int(data.csym)
     st.session_state.diameter = float(data.diameter)
 
-@st.experimental_memo(persist=None, show_spinner=False)
+@st.cache_data(persist=None, show_spinner=False)
 def set_initial_query_params(query_string):
     if len(query_string)<1: return
     from urllib.parse import parse_qs
@@ -1779,7 +1786,7 @@ def dict_recursive_search(d, key, default=None):
             stack.pop()
     return default
 
-@st.experimental_memo(persist='disk', show_spinner=False)
+@st.cache_data(persist='disk', show_spinner=False)
 def setup_anonymous_usage_tracking():
     try:
         import pathlib, stat
