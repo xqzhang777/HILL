@@ -157,13 +157,14 @@ def main(args):
         cutoff_res_x = st.number_input('Resolution limit - X (Å)', value=3*apix, min_value=2*apix, step=1.0, help="Set the highest resolution to be displayed in the X-direction", key="cutoff_res_x")
         cutoff_res_y = st.number_input('Resolution limit - Y (Å)', value=2*apix, min_value=2.*apix, step=1.0, help="Set the highest resolution to be displayed in the Y-direction", key="cutoff_res_y")
         with st.expander(label="Addtional settings", expanded=False):
+            fft_top_only = st.checkbox("Only display the top half of FFT", value=False, key="fft_top_only")
             log_xform = st.checkbox(label="Log(amplitude)", value=True, help="Perform log transform of the power spectra to allow clear display of layerlines at low and high resolutions")
+            white_image = st.checkbox("Show image as white backgroud", value=False, key="white_image")
+            ll_colors = st.text_input('Layerline colors', value="lime cyan violet salmon silver", help="Set the colors of the ellipses/text labels representing the layerlines. Here is a complete list of supported [colors](https://docs.bokeh.org/en/2.4.3/docs/reference/colors.html#bokeh-colors-named)", key="ll_colors").split()
             hp_fraction = st.number_input('Fourier high-pass (%)', value=0.4, min_value=0.0, max_value=100.0, step=0.1, format="%.2f", help="Perform high-pass Fourier filtering of the power spectra with filter=0.5 at this percentage of the Nyquist resolution") / 100.0
             lp_fraction = st.number_input('Fourier low-pass (%)', value=0.0, min_value=0.0, max_value=100.0, step=10.0, format="%.2f", help="Perform low-pass Fourier filtering of the power spectra with filter=0.5 at this percentage of the Nyquist resolution") / 100.0
             pnx = int(st.number_input('FFT X-dim size (pixels)', value=512, min_value=min(nx, 128), step=2, help="Set the size of FFT in X-dimension to this number of pixels", key="pnx"))
             pny = int(st.number_input('FFT Y-dim size (pixels)', value=1024, min_value=min(ny, 512), step=2, help="Set the size of FFT in Y-dimension to this number of pixels", key="pny"))
-            ll_colors = st.text_input('Layerline colors', value="lime cyan violet salmon silver", help="Set the colors of the ellipses/text labels representing the layerlines. Here is a complete list of supported [colors](https://docs.bokeh.org/en/2.4.3/docs/reference/colors.html#bokeh-colors-named)", key="ll_colors").split()
-            white_image = st.checkbox("Show image as white backgroud", value=False, key="white_image")
         with st.expander(label="Simulation", expanded=False):
             ball_radius = st.number_input('Gaussian radius (Å)', value=0.0, min_value=0.0, max_value=helical_radius, step=5.0, format="%.1f", help="A 3-D Gaussian function will be used to reprsent each subunit in the simulated helix. The Gaussian function will fall off from 1 to 0.5 at this radius. A value <=0 will disable the simulation", key="ball_radius")
             show_simu = True if ball_radius > 0 else False
@@ -283,14 +284,14 @@ def main(args):
 
                 st.subheader("m:")
                 m_max_auto = int(np.floor(np.abs(rise/cutoff_res_y)))+3
-                m_max = int(st.number_input(label=f"Max=", min_value=1, value=m_max_auto, step=1, help="Maximal number of layer line groups to show"))
+                m_max = int(st.number_input(label=f"Max=", min_value=1, value=m_max_auto, step=1, help="Maximal number of layer line groups to show", key="m_max"))
                 m_groups = compute_layer_line_positions(twist=twist, rise=rise, csym=csym, radius=helical_radius, tilt=tilt, cutoff_res=cutoff_res_y, m_max=m_max)
                 ng = len(m_groups)
                 show_choices = {}
                 lgs = sorted(m_groups.keys())[::-1]
                 for lgi, lg in enumerate(lgs):
                     value = True if lg in [0, 1] else False
-                    show_choices[lg] = st.checkbox(label=str(lg), value=value, help=f"Show the layer lines in group m={lg}")
+                    show_choices[lg] = st.checkbox(label=str(lg), value=value, help=f"Show the layer lines in group m={lg}", key=f"m_{lg}")
 
     if show_simu:
         proj = simulate_helix(twist, rise, csym, helical_radius=helical_radius, ball_radius=ball_radius, 
@@ -334,7 +335,7 @@ def main(args):
             show_pwr_work, pwr_work, title_pwr_work, show_phase_work, phase_work, show_phase_diff_work, phase_diff_work, title_phase_work, show_yprofile_work = item
             if show_pwr_work:
                 tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Amp', '@image')]
-                fig = create_layerline_image_figure(pwr_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, pseudo_color=show_pseudo_color, white_image=white_image, title=title_pwr_work, yaxis_visible=False, tooltips=tooltips)
+                fig = create_layerline_image_figure(pwr_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, fft_top_only=fft_top_only, pseudo_color=show_pseudo_color, white_image=white_image, title=title_pwr_work, yaxis_visible=False, tooltips=tooltips)
                 figs.append(fig)
                 figs_image.append(fig)
 
@@ -359,7 +360,7 @@ def main(args):
 
             if show_phase_diff_work:
                 tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Phase Diff', '@image °')]
-                fig = create_layerline_image_figure(phase_diff_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, pseudo_color=show_pseudo_color, white_image=white_image, title=title_phase_work, yaxis_visible=False, tooltips=tooltips)
+                fig = create_layerline_image_figure(phase_diff_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, fft_top_only=fft_top_only, pseudo_color=show_pseudo_color, white_image=white_image, title=title_phase_work, yaxis_visible=False, tooltips=tooltips)
                 figs.append(fig)
                 figs_image.append(fig)
                 
@@ -525,13 +526,13 @@ def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radiu
 
         figs = []
         title = f"Projection"
-        fig_proj = create_layerline_image_figure(proj, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudo_color=show_pseudo_color, white_image=white_image, title=title, yaxis_visible=False, tooltips=None)
+        fig_proj = create_layerline_image_figure(proj, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, fft_top_only=fft_top_only, pseudo_color=show_pseudo_color, white_image=white_image, title=title, yaxis_visible=False, tooltips=None)
         figs.append(fig_proj)
 
         proj_pwr, proj_phase = compute_power_spectra(proj, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
             output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
         title = f"Power Spectra"
-        fig_pwr = create_layerline_image_figure(proj_pwr, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudo_color=show_pseudo_color, white_image=white_image, title=title, yaxis_visible=False, tooltips=None)
+        fig_pwr = create_layerline_image_figure(proj_pwr, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, fft_top_only=fft_top_only, pseudo_color=show_pseudo_color, white_image=white_image, title=title, yaxis_visible=False, tooltips=None)
         from bokeh.models import Label
         label = Label(x=0., y=0.9/cutoff_res_y, text=f"tilt = {tilt:.2f}°", text_align='center', text_color='white', text_font_size='30px', visible=True)
         fig_pwr.add_layout(label)
@@ -539,7 +540,7 @@ def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radiu
 
         phase_diff = compute_phase_difference_across_meridian(proj_phase)
         title = f"Phase Diff Across Meridian"
-        fig_phase = create_layerline_image_figure(phase_diff, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudo_color=show_pseudo_color, white_image=white_image, title=title, yaxis_visible=False, tooltips=None)
+        fig_phase = create_layerline_image_figure(phase_diff, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, fft_top_only=fft_top_only, pseudo_color=show_pseudo_color, white_image=white_image, title=title, yaxis_visible=False, tooltips=None)
         figs.append(fig_phase)
 
         fig_all = gridplot(children=[figs], toolbar_location=None)
@@ -599,12 +600,15 @@ def create_image_figure(image, dx, dy, title="", title_location="below", plot_wi
         for ch in crosshair: ch.line_color = crosshair_color
     return fig
 
-def create_layerline_image_figure(data, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, pseudo_color=True, white_image=False, title="", yaxis_visible=True, tooltips=None):
+def create_layerline_image_figure(data, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, fft_top_only=False, pseudo_color=True, white_image=False, title="", yaxis_visible=True, tooltips=None):
     ny, nx = data.shape
     dsy = 1/(ny//2*cutoff_res_y)
     dsx = 1/(nx//2*cutoff_res_x)
     x_range = (-(nx//2+0.5)*dsx, (nx//2-0.5)*dsx)
-    y_range = (-(ny//2+0.5)*dsy, (ny//2-0.5)*dsy)
+    if fft_top_only:
+        y_range = (-(ny//2 * 0.01)*dsy, (ny//2-0.5)*dsy)
+    else:
+        y_range = (-(ny//2+0.5)*dsy, (ny//2-0.5)*dsy)
 
     bessel = bessel_n_image(ny, nx, cutoff_res_x, cutoff_res_y, helical_radius, tilt).astype(np.int16)
 
@@ -1169,6 +1173,7 @@ def compute_power_spectra(data, apix, cutoff_res=None, output_size=None, log=Tru
     fft = np.fft.fftshift(fft)  # shift fourier origin from corner to center
 
     if log: pwr = np.log1p(np.abs(fft))
+    else: pwr = np.abs(fft)
     if 0<low_pass_fraction<1 or 0<high_pass_fraction<1:
         pwr = low_high_pass_filter(pwr, low_pass_fraction=low_pass_fraction, high_pass_fraction=high_pass_fraction)
     pwr = normalize(pwr, percentile=(0, 100))
@@ -1716,7 +1721,7 @@ def set_initial_query_params(query_string):
     if len(d)<1: return
     st.session_state.update(d)
 
-int_types = {'apply_helical_sym_0':0, 'apply_helical_sym_1':0, 'csym':1, 'csym_ahs_0':1, 'csym_ahs_1':1, 'do_random_embid_0':0, 'do_random_embid_1':0, 'image_index_0':0, 'image_index_1':0, 'input_mode_0':1, 'input_mode_1':1, 'is_3d_0':0, 'is_3d_1':0, 'negate_0':0, 'negate_1':0, 'pnx':512, 'pny':1024, 'show_LL':1, 'show_LL_text':1, 'show_phase_diff':1, 'show_pwr':1, 'show_yprofile':1, 'transpose_0':0, 'transpose_1':0, 'share_url':0, 'show_qr':0, 'useplotsize':0, 'white_image':0}
+int_types = {'apply_helical_sym_0':0, 'apply_helical_sym_1':0, 'csym':1, 'csym_ahs_0':1, 'csym_ahs_1':1, 'do_random_embid_0':0, 'do_random_embid_1':0, 'fft_top_only':0, 'image_index_0':0, 'image_index_1':0, 'input_mode_0':1, 'input_mode_1':1, 'is_3d_0':0, 'is_3d_1':0, 'm_0':1, 'm_1':1, 'm_max':3, 'negate_0':0, 'negate_1':0, 'pnx':512, 'pny':1024, 'show_LL':1, 'show_LL_text':1, 'show_phase_diff':1, 'show_pwr':1, 'show_yprofile':1, 'transpose_0':0, 'transpose_1':0, 'share_url':0, 'show_qr':0, 'useplotsize':0, 'white_image':0}
 float_types = {'angle_0':0, 'angle_1':0, 'apix_0':0, 'apix_1':0, 'apix_ahs_0':0, 'apix_ahs_1':0, 'apix_map_0':0, 'apix_map_1':0, 'apix_nyquist_0':0, 'apix_nyquist_1':0, 'az_0':0, 'az_1':0, 'ball_radius':0, 'cutoff_res_x':0, 'cutoff_res_y':0, 'diameter':0, 'dx_0':0, 'dx_1':0, 'dy_0':0, 'dy_1':0, 'fraction_ahs_0':0, 'fraction_ahs_1':0, 'length_ahs_0':0, 'length_ahs_1':0, 'mask_len_0':90, 'mask_len_1':90, 'mask_radius_0':0, 'mask_radius_1':0, 'noise_0':0, 'noise_1':0, 'resolution':0, 'rise':0, 'rise_ahs_0':0, 'rise_ahs_1':0, 'simuaz':0, 'simunoise':0, 'tilt':0, 'tilt_0':0, 'tilt_1':0, 'twist':0, 'twist_ahs_0':0, 'twist_ahs_1':0, 'width_ahs_0':0, 'width_ahs_1':1}
 other_types = {'input_type_0':'image', 'input_type_1':'image', 'll_colors':'lime cyan violet salmon silver'}
 
@@ -1730,7 +1735,10 @@ def set_query_params_from_session_state():
                 if attr.endswith(f"ahs_{i}"): continue
                 if attr in [f"apix_map_{i}"]: continue
         v = st.session_state[attr]
+        if v is None: continue
         if attr in int_types and int_types[attr]!=v:
+            d[attr] = int(v)
+        elif attr[:2]=="m_" and attr[2:].lstrip("-").isdigit() and v:
             d[attr] = int(v)
         elif attr in float_types and float_types[attr]!=v:
             d[attr] = f'{float(v):g}'
@@ -1741,12 +1749,14 @@ def set_query_params_from_session_state():
 def set_session_state_from_query_params():
     query_params = st.experimental_get_query_params()
     for attr in sorted(query_params.keys()):
-            if attr in int_types:
-                st.session_state[attr] = int(query_params[attr][0])
-            elif attr in float_types:
-                st.session_state[attr] = float(query_params[attr][0])
-            elif attr in other_types:
-                st.session_state[attr] = query_params[attr][0]
+        if attr in int_types:
+            st.session_state[attr] = int(query_params[attr][0])
+        elif attr[:2]=="m_" and attr[2:].lstrip("-").isdigit():
+            st.session_state[attr] = int(query_params[attr][0])
+        elif attr in float_types:
+            st.session_state[attr] = float(query_params[attr][0])
+        elif attr in other_types:
+            st.session_state[attr] = query_params[attr][0]
 
 def get_direct_url(url):
     import re
