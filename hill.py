@@ -130,7 +130,7 @@ def main(args):
 
         ny, nx = data.shape
         max_rise = round(max(2000., max(ny, nx)*apix * 2.0), 2)
-        min_rise = round(apix/2.0, 2)
+        min_rise = round(apix/10.0, 2)
         rise = rise_empty.number_input('Rise (Å)', min_value=min_rise, max_value=max_rise, step=1.0, format="%.3f", key="rise")
 
         if "twist" not in st.session_state: st.session_state.twist = 1.0
@@ -142,7 +142,7 @@ def main(args):
             pitch_or_twist_text.markdown(f"*(twist = {st.session_state.twist:.2f} °)*")
             twist = pitch2twist(pitch, rise)
         else:
-            twist = pitch_or_twist_number_input.number_input('Twist (°)', value=st.session_state.twist, min_value=0.0, max_value=180.0, step=1.0, format="%.2f", help="pitch = 360/twist * rise", key="twist")
+            twist = pitch_or_twist_number_input.number_input('Twist (°)', value=st.session_state.twist, min_value=-180.0, max_value=180.0, step=1.0, format="%.2f", help="pitch = 360/twist * rise", key="twist")
             pitch = abs(round(twist2pitch(twist, rise), 2))
             pitch_or_twist_text.markdown(f"*(pitch = {pitch:.2f} Å)*")
 
@@ -670,10 +670,15 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
         warning_map_size = f"Due to the resource limit, the maximal map size should be {max_map_dim}x{max_map_dim}x{max_map_dim} voxels or less to avoid crashing the server process"
 
     with column:
+        def input_mode_changed():
+            if "twist" in st.session_state: del st.session_state["twist"]
+            if "rise" in st.session_state: del st.session_state["rise"]
+            if "csym" in st.session_state: del st.session_state["csym"]
+
         input_modes = {0:"upload", 1:"url", 2:"emd-xxxxx"}
         help = "Only maps in MRC (.mrc) or CCP4 (.map) format are supported. Compressed maps (.gz) will be automatically decompressed"
         if max_map_size>0: help += f". {warning_map_size}"
-        input_mode = st.radio(label="How to obtain the input image/map:", options=list(input_modes.keys()), format_func=lambda i:input_modes[i], index=1,help=help, horizontal=True, key=f'input_mode_{param_i}')
+        input_mode = st.radio(label="How to obtain the input image/map:", options=list(input_modes.keys()), format_func=lambda i:input_modes[i], index=1,help=help, horizontal=True, key=f'input_mode_{param_i}', on_change=input_mode_changed)
         is_3d = False
         is_pwr_auto = None
         is_pd_auto = None
