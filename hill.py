@@ -1,7 +1,7 @@
 """ 
 MIT License
 
-Copyright (c) 2020-2022 Wen Jiang
+Copyright (c) 2020-2023 Wen Jiang
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -110,15 +110,15 @@ def main(args):
         st.markdown(hide_streamlit_style, unsafe_allow_html=True) 
 
     with col2:
-        query_params = st.experimental_get_query_params()
-        if "pitch" in query_params and "rise" in query_params:
-            st.session_state.rise = float(query_params["rise"][0])
-            st.session_state.twist = pitch2twist(float(query_params["pitch"][0]), st.session_state.rise)
-            query_params.pop('rise', None)
-            query_params.pop('pitch', None)
-            st.experimental_set_query_params(**query_params)
-        
-        reload_button = st.button("Copy pitch/rise↶")
+        def copy_pitch_rise():
+            query_params = st.experimental_get_query_params()
+            if "pitch" in query_params and "rise" in query_params:
+                st.session_state.rise = float(query_params["rise"][0])
+                st.session_state.twist = pitch2twist(float(query_params["pitch"][0]), st.session_state.rise)
+                query_params.pop('rise', None)
+                query_params.pop('pitch', None)
+                st.experimental_set_query_params(**query_params)        
+        st.button("Copy pitch/rise↶", on_click=copy_pitch_rise)
 
         pitch_or_twist_choices = ["pitch", "twist"]
         pitch_or_twist = st.radio(label="Choose pitch or twist mode", options=pitch_or_twist_choices, index=0, label_visibility="collapsed", horizontal=True)
@@ -131,7 +131,7 @@ def main(args):
         ny, nx = data.shape
         max_rise = round(max(2000., max(ny, nx)*apix * 2.0), 2)
         min_rise = round(apix/10.0, 2)
-        rise = rise_empty.number_input('Rise (Å)', min_value=min_rise, max_value=max_rise, step=1.0, format="%.3f", key="rise")
+        rise = rise_empty.number_input('Rise (Å)', value=st.session_state.get("rise", 1.0), min_value=min_rise, max_value=max_rise, step=1.0, format="%.3f", key="rise")
 
         if "twist" not in st.session_state: st.session_state.twist = 1.0
         if use_pitch:
@@ -670,15 +670,10 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
         warning_map_size = f"Due to the resource limit, the maximal map size should be {max_map_dim}x{max_map_dim}x{max_map_dim} voxels or less to avoid crashing the server process"
 
     with column:
-        def input_mode_changed():
-            if "twist" in st.session_state: del st.session_state["twist"]
-            if "rise" in st.session_state: del st.session_state["rise"]
-            if "csym" in st.session_state: del st.session_state["csym"]
-
         input_modes = {0:"upload", 1:"url", 2:"emd-xxxxx"}
         help = "Only maps in MRC (.mrc) or CCP4 (.map) format are supported. Compressed maps (.gz) will be automatically decompressed"
         if max_map_size>0: help += f". {warning_map_size}"
-        input_mode = st.radio(label="How to obtain the input image/map:", options=list(input_modes.keys()), format_func=lambda i:input_modes[i], index=1,help=help, horizontal=True, key=f'input_mode_{param_i}', on_change=input_mode_changed)
+        input_mode = st.radio(label="How to obtain the input image/map:", options=list(input_modes.keys()), format_func=lambda i:input_modes[i], index=1,help=help, horizontal=True, key=f'input_mode_{param_i}', on_change=clear_twist_rise_csym_in_session_state)
         is_3d = False
         is_pwr_auto = None
         is_pd_auto = None
@@ -692,14 +687,14 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
             st.markdown(f'[All {len(emdb_ids)} helical structures in EMDB]({url})')
             help = "Randomly select another helical structure in EMDB"
             if max_map_size>0: help += f". {warning_map_size}"
-            button_clicked = st.button(label="Select a random EMDB ID", help=help)
+            button_clicked = st.button(label="Select a random EMDB ID", help=help, on_click=clear_twist_rise_csym_in_session_state)
             if button_clicked:
                 import random
                 st.session_state[key_emd_id] = 'emd-' + random.choice(emdb_ids)
             help = None
             if max_map_size>0: help = warning_map_size
             label = "Input an EMDB ID (emd-xxxxx):"
-            st.text_input(label=label, value="emd-10499", help=help, key=key_emd_id)
+            st.text_input(label=label, value="emd-10499", help=help, key=key_emd_id, on_change=clear_twist_rise_csym_in_session_state)
             emd_id = st.session_state[key_emd_id].lower().split("emd-")[-1]
             if emd_id not in emdb_ids:
                 emd_id_bad = emd_id
@@ -721,7 +716,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                     st.stop()
             if params and ("twist" not in st.session_state and "rise" not in st.session_state and "csym" not in st.session_state):
                 st.session_state[f"input_type_{param_i}"] = "image"
-                st.session_state.twist = abs(params['twist'])
+                st.session_state.twist = params['twist']
                 st.session_state.rise = params['rise']
                 st.session_state.csym = params['csym']
             if params:
@@ -1697,6 +1692,11 @@ data_examples = [
     Data(twist=29.40, rise=21.92, csym=6, diameter=138, url="https://tinyurl.com/y5tq9fqa"),
     Data(twist=36.0, rise=3.4, csym=1, diameter=20, dx=5, input_type="PS", apix_or_nqyuist=2.5, url="https://upload.wikimedia.org/wikipedia/en/b/b2/Photo_51_x-ray_diffraction_image.jpg")
 ]
+
+def clear_twist_rise_csym_in_session_state():
+    if "twist" in st.session_state: del st.session_state["twist"]
+    if "rise" in st.session_state: del st.session_state["rise"]
+    if "csym" in st.session_state: del st.session_state["csym"]
 
 def set_session_state_from_data_example():
     data = np.random.choice(data_examples)
