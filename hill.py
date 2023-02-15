@@ -697,10 +697,9 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
             st.text_input(label=label, value="emd-10499", help=help, key=key_emd_id, on_change=clear_twist_rise_csym_in_session_state)
             emd_id = st.session_state[key_emd_id].lower().split("emd-")[-1]
             if emd_id not in emdb_ids:
-                emd_id_bad = emd_id
                 import random
-                emd_id = random.choice(emdb_ids)
-                st.warning(f"EMD-{emd_id_bad} is not a helical structure. Please input a valid id (for example, a randomly selected valid id 'emd-{emd_id}')")
+                emd_id_random = random.choice(emdb_ids)
+                st.warning(f"EMD-{emd_id} is not a helical structure. Please input a valid id (for example, a randomly selected valid id 'emd-{emd_id_random}')")
             resolution = resolutions[emdb_ids.index(emd_id)]
             msg = f'[EMD-{emd_id}](https://www.ebi.ac.uk/emdb/entry/EMD-{emd_id}) | resolution={resolution}Å'
             params = get_emdb_helical_parameters(emd_id)
