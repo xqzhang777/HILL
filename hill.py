@@ -678,31 +678,45 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
         is_pwr_auto = None
         is_pd_auto = None
         if input_mode == 2:            
-            emdb_ids, resolutions = get_emdb_ids()
-            if not emdb_ids:
+            emdb_ids_all, emdb_ids_helical, methods, resolutions = get_emdb_ids()
+            if not emdb_ids_all:
                 st.warning("failed to obtained a list of helical structures in EMDB")
-                return
+                st.stop()
             key_emd_id = f"emd_id_{param_i}"
             url = "https://www.ebi.ac.uk/emdb/search/*%20AND%20structure_determination_method:%22helical%22?rows=10&sort=release_date%20desc"
-            st.markdown(f'[All {len(emdb_ids)} helical structures in EMDB]({url})')
+            st.markdown(f'[All {len(emdb_ids_helical)} helical structures in EMDB]({url})')
             help = "Randomly select another helical structure in EMDB"
             if max_map_size>0: help += f". {warning_map_size}"
             button_clicked = st.button(label="Select a random EMDB ID", help=help, on_click=clear_twist_rise_csym_in_session_state)
             if button_clicked:
                 import random
-                st.session_state[key_emd_id] = 'emd-' + random.choice(emdb_ids)
+                st.session_state[key_emd_id] = 'emd-' + random.choice(emdb_ids_helical)
             help = None
             if max_map_size>0: help = warning_map_size
             label = "Input an EMDB ID (emd-xxxxx):"
             st.text_input(label=label, value="emd-10499", help=help, key=key_emd_id, on_change=clear_twist_rise_csym_in_session_state)
             emd_id = st.session_state[key_emd_id].lower().split("emd-")[-1]
-            if emd_id not in emdb_ids:
+            if emd_id not in emdb_ids_all:
+                st.warning(f"EMD-{emd_id} is not a valid EMDB entry")
+                st.stop()
+            elif emd_id not in emdb_ids_helical:
+                msg = f'[EMD-{emd_id}](https://www.ebi.ac.uk/emdb/entry/EMD-{emd_id})'
                 import random
-                emd_id_random = random.choice(emdb_ids)
-                st.warning(f"EMD-{emd_id} is not a helical structure. Please input a valid id (for example, a randomly selected valid id 'emd-{emd_id_random}')")
-            resolution = resolutions[emdb_ids.index(emd_id)]
+                emd_id_random = random.choice(emdb_ids_helical)
+                st.warning(f"EMD-{emd_id} is annotated as a {methods[emdb_ids_all.index(emd_id)]}, not helical structure according to EMDB. Please input an emd-id of helica structure (for example, 'emd-{emd_id_random}')")
+            resolution = resolutions[emdb_ids_all.index(emd_id)]
             msg = f'[EMD-{emd_id}](https://www.ebi.ac.uk/emdb/entry/EMD-{emd_id}) | resolution={resolution}Å'
             params = get_emdb_helical_parameters(emd_id)
+            if params and ("twist" in params and "rise" in params and "csym" in params):                
+                msg += f"  \ntwist={params['twist']}° | rise={params['rise']}Å | c{params['csym']}"
+                st.session_state[f"input_type_{param_i}"] = "image"
+                if "twist" not in st.session_state and "rise" not in st.session_state and "csym" not in st.session_state:
+                    st.session_state.twist = params['twist']
+                    st.session_state.rise = params['rise']
+                    st.session_state.csym = params['csym']
+            else:
+                msg +=  "  \n*helical params not available*"
+            st.markdown(msg)
             if max_map_size>0 and params and "nz" in params and "ny" in params and "nx" in params:
                 nz = params["nz"]
                 ny = params["ny"]
@@ -712,17 +726,6 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                     msg_map_too_large = f"As the map size ({map_size:.1f} MB, {nx}x{ny}x{nz} voxels) is too large for the resource limit ({mem_quota():.1f} MB memory cap) of the hosting service, HILL will stop analyzing it to avoid crashing the server. Please bin/crop your map so that it is {max_map_size} MB ({max_map_dim}x{max_map_dim}x{max_map_dim} voxels) or less, and then try again. Please check the [HILL web site](https://jiang.bio.purdue.edu/hill) to learn how to run HILL on your local computer with larger memory to support large maps"
                     st.warning(msg_map_too_large)
                     st.stop()
-            if params and ("twist" not in st.session_state and "rise" not in st.session_state and "csym" not in st.session_state):
-                st.session_state[f"input_type_{param_i}"] = "image"
-                st.session_state.twist = params['twist']
-                st.session_state.rise = params['rise']
-                st.session_state.csym = params['csym']
-            if params:
-                st.session_state.resolution = params['resolution']
-                msg += f"  \ntwist={params['twist']}° | rise={params['rise']}Å | c{params['csym']}"
-            else:
-                msg +=  "  \n*helical params not available*"
-            st.markdown(msg)
             with st.spinner(f'Downloading EMD-{emd_id} from {get_emdb_map_url(emd_id)}'):
                 data_all, apix_auto = get_emdb_map(emd_id)
             if data_all is None:
@@ -1543,17 +1546,24 @@ def get_2d_image_from_uploaded_file(fileobj):
 @st.cache_data(show_spinner=False, ttl=24*60*60.) # refresh every day
 def get_emdb_ids():
     try:
+        import_with_auto_install(["pandas"])
         import pandas as pd
-        entries = pd.read_csv("https://www.ebi.ac.uk/emdb/api/search/current_status:%22REL%22%20AND%20structure_determination_method:%22helical%22?wt=csv&download=true&fl=emdb_id,resolution")
-        emdb_ids = list(entries.iloc[:,0].str.split('-', expand=True).iloc[:, 1].values)
-        resolutions = entries.iloc[:,1].values
+        entries_all = pd.read_csv('https://www.ebi.ac.uk/emdb/api/search/current_status:"REL"?wt=csv&download=true&fl=emdb_id,structure_determination_method,resolution')
+        methods = list(entries_all["structure_determination_method"])
+        resolutions = list(entries_all["resolution"])
+        entries_helical = entries_all[entries_all["structure_determination_method"]=="helical"]
+        emdb_ids_all     = list(entries_all.iloc[:,0].str.split('-', expand=True).iloc[:, 1].values)
+        emdb_ids_helical = list(entries_helical.iloc[:,0].str.split('-', expand=True).iloc[:, 1].values)
     except:
-        emdb_ids = []
+        emdb_ids_all = []
+        emdb_ids_helical = []
+        methods = []
         resolutions = []
-    return emdb_ids, resolutions
+    return emdb_ids_all, emdb_ids_helical, methods, resolutions
 
 @st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def get_emdb_helical_parameters(emd_id):
+    ret = {}
     try:
         emd_id2 = ''.join([s for s in str(emd_id) if s.isdigit()])
         url = f"https://ftp.ebi.ac.uk/pub/databases/emdb/structures/EMD-{emd_id2}/header/emd-{emd_id2}.xml"
@@ -1563,7 +1573,6 @@ def get_emdb_helical_parameters(emd_id):
         import_with_auto_install(["xmltodict"])
         import xmltodict
         data = xmltodict.parse(xml_data)
-        ret = {}
         ret['sample'] = data['emd']['sample']['name']
         ret["method"] = data['emd']['structure_determination_list']['structure_determination']['method']
         dimensions = data['emd']['map']['dimensions']
@@ -1583,9 +1592,9 @@ def get_emdb_helical_parameters(emd_id):
             ret["csym"] = int(helical_parameters['axial_symmetry'][1:])
             return ret
         else:
-            return None
+            return ret
     except:
-        return None
+        return ret
 
 def get_emdb_map_url(emd_id: str):
     server = "https://ftp.wwpdb.org/pub"    # Rutgers University, USA
