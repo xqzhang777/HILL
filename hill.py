@@ -701,7 +701,6 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                 import random
                 emd_id = random.choice(emdb_ids)
                 st.warning(f"EMD-{emd_id_bad} is not a helical structure. Please input a valid id (for example, a randomly selected valid id 'emd-{emd_id}')")
-                st.stop()
             resolution = resolutions[emdb_ids.index(emd_id)]
             msg = f'[EMD-{emd_id}](https://www.ebi.ac.uk/emdb/entry/EMD-{emd_id}) | resolution={resolution}Å'
             params = get_emdb_helical_parameters(emd_id)
