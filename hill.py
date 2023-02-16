@@ -131,7 +131,7 @@ def main(args):
         ny, nx = data.shape
         max_rise = round(max(2000., max(ny, nx)*apix * 2.0), 2)
         min_rise = round(apix/10.0, 2)
-        rise = rise_empty.number_input('Rise (Å)', value=st.session_state.get("rise", 1.0), min_value=min_rise, max_value=max_rise, step=1.0, format="%.3f", key="rise")
+        rise = rise_empty.number_input('Rise (Å)', value=st.session_state.get("rise", min_rise), min_value=min_rise, max_value=max_rise, step=1.0, format="%.3f", key="rise")
 
         if "twist" not in st.session_state: st.session_state.twist = 1.0
         if use_pitch:
