@@ -1597,8 +1597,8 @@ def get_emdb_helical_parameters(emd_id):
         return ret
 
 def get_emdb_map_url(emd_id: str):
-    server = "https://ftp.wwpdb.org/pub"    # Rutgers University, USA
-    #server = "https://ftp.ebi.ac.uk/pub/databases" # European Bioinformatics Institute, England
+    #server = "https://ftp.wwpdb.org/pub"    # Rutgers University, USA
+    server = "https://ftp.ebi.ac.uk/pub/databases" # European Bioinformatics Institute, England
     #server = "http://ftp.pdbj.org/pub" # Osaka University, Japan
     url = f"{server}/emdb/structures/EMD-{emd_id}/map/emd_{emd_id}.map.gz"
     return url
@@ -1735,9 +1735,13 @@ def set_initial_query_params(query_string):
 
 int_types = {'apply_helical_sym_0':0, 'apply_helical_sym_1':0, 'csym':1, 'csym_ahs_0':1, 'csym_ahs_1':1, 'do_random_embid_0':0, 'do_random_embid_1':0, 'fft_top_only':0, 'image_index_0':0, 'image_index_1':0, 'input_mode_0':1, 'input_mode_1':1, 'is_3d_0':0, 'is_3d_1':0, 'm_0':1, 'm_1':1, 'm_max':3, 'negate_0':0, 'negate_1':0, 'pnx':512, 'pny':1024, 'show_LL':1, 'show_LL_text':1, 'show_phase_diff':1, 'show_pwr':1, 'show_yprofile':1, 'transpose_0':0, 'transpose_1':0, 'share_url':0, 'show_qr':0, 'useplotsize':0, 'white_image':0}
 float_types = {'angle_0':0, 'angle_1':0, 'apix_0':0, 'apix_1':0, 'apix_ahs_0':0, 'apix_ahs_1':0, 'apix_map_0':0, 'apix_map_1':0, 'apix_nyquist_0':0, 'apix_nyquist_1':0, 'az_0':0, 'az_1':0, 'ball_radius':0, 'cutoff_res_x':0, 'cutoff_res_y':0, 'diameter':0, 'dx_0':0, 'dx_1':0, 'dy_0':0, 'dy_1':0, 'fraction_ahs_0':0, 'fraction_ahs_1':0, 'length_ahs_0':0, 'length_ahs_1':0, 'mask_len_0':90, 'mask_len_1':90, 'mask_radius_0':0, 'mask_radius_1':0, 'noise_0':0, 'noise_1':0, 'resolution':0, 'rise':0, 'rise_ahs_0':0, 'rise_ahs_1':0, 'simuaz':0, 'simunoise':0, 'tilt':0, 'tilt_0':0, 'tilt_1':0, 'twist':0, 'twist_ahs_0':0, 'twist_ahs_1':0, 'width_ahs_0':0, 'width_ahs_1':1}
-other_types = {'input_type_0':'image', 'input_type_1':'image', 'll_colors':'lime cyan violet salmon silver'}
+other_types = {'emd_id_0':'', 'emd_id_1':'', 'input_type_0':'image', 'input_type_1':'image', 'll_colors':'lime cyan violet salmon silver', 'url_0':'', 'url_0':''}
 
 def set_query_params_from_session_state():
+    for im in 'input_mode_0 input_mode_1'.split():
+        if st.session_state.get(im, None) == 0: 
+            st.warning("WARNING: the shared url for 'upload' input will NOT include complete information that can be used as a bookmark")
+            break
     d = {}
     attrs = sorted(st.session_state.keys())
     for attr in attrs:
@@ -1748,12 +1752,12 @@ def set_query_params_from_session_state():
                 if attr in [f"apix_map_{i}"]: continue
         v = st.session_state[attr]
         if v is None: continue
-        if attr in int_types and int_types[attr]!=v:
-            d[attr] = int(v)
-        elif attr[:2]=="m_" and attr[2:].lstrip("-").isdigit() and v:
-            d[attr] = int(v)
-        elif attr in float_types and float_types[attr]!=v:
-            d[attr] = f'{float(v):g}'
+        if attr in int_types:
+            if int_types[attr]!=v: d[attr] = int(v)
+        elif attr[:2]=="m_" and attr[2:].lstrip("-").isdigit():
+            if v: d[attr] = int(v)
+        elif attr in float_types:
+            if float_types[attr]!=v: d[attr] = f'{float(v):g}'
         elif attr in other_types and other_types[attr]!=v:
             d[attr] = v
     st.experimental_set_query_params(**d)
