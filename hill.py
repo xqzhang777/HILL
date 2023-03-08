@@ -159,7 +159,7 @@ def main(args):
         with st.expander(label="Addtional settings", expanded=False):
             fft_top_only = st.checkbox("Only display the top half of FFT", value=False, key="fft_top_only")
             log_xform = st.checkbox(label="Log(amplitude)", value=True, help="Perform log transform of the power spectra to allow clear display of layerlines at low and high resolutions")
-            white_image = st.checkbox("Show image as white backgroud", value=False, key="white_image")
+            const_image_color = st.text_input("Flatten the PS/PD image in this color", value="", placeholder="white", key="const_image_color")
             ll_colors = st.text_input('Layerline colors', value="lime cyan violet salmon silver", help="Set the colors of the ellipses/text labels representing the layerlines. Here is a complete list of supported [colors](https://docs.bokeh.org/en/2.4.3/docs/reference/colors.html#bokeh-colors-named)", key="ll_colors").split()
             hp_fraction = st.number_input('Fourier high-pass (%)', value=0.4, min_value=0.0, max_value=100.0, step=0.1, format="%.2f", help="Perform high-pass Fourier filtering of the power spectra with filter=0.5 at this percentage of the Nyquist resolution") / 100.0
             lp_fraction = st.number_input('Fourier low-pass (%)', value=0.0, min_value=0.0, max_value=100.0, step=10.0, format="%.2f", help="Perform low-pass Fourier filtering of the power spectra with filter=0.5 at this percentage of the Nyquist resolution") / 100.0
@@ -335,7 +335,7 @@ def main(args):
             show_pwr_work, pwr_work, title_pwr_work, show_phase_work, phase_work, show_phase_diff_work, phase_diff_work, title_phase_work, show_yprofile_work = item
             if show_pwr_work:
                 tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Amp', '@image')]
-                fig = create_layerline_image_figure(pwr_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, fft_top_only=fft_top_only, pseudo_color=show_pseudo_color, white_image=white_image, title=title_pwr_work, yaxis_visible=False, tooltips=tooltips)
+                fig = create_layerline_image_figure(pwr_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, fft_top_only=fft_top_only, pseudo_color=show_pseudo_color, const_image_color=const_image_color, title=title_pwr_work, yaxis_visible=False, tooltips=tooltips)
                 figs.append(fig)
                 figs_image.append(fig)
 
@@ -360,7 +360,7 @@ def main(args):
 
             if show_phase_diff_work:
                 tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Phase Diff', '@image °')]
-                fig = create_layerline_image_figure(phase_diff_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, fft_top_only=fft_top_only, pseudo_color=show_pseudo_color, white_image=white_image, title=title_phase_work, yaxis_visible=False, tooltips=tooltips)
+                fig = create_layerline_image_figure(phase_diff_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, fft_top_only=fft_top_only, pseudo_color=show_pseudo_color, const_image_color=const_image_color, title=title_phase_work, yaxis_visible=False, tooltips=tooltips)
                 figs.append(fig)
                 figs_image.append(fig)
                 
@@ -481,7 +481,7 @@ def main(args):
                         ny, nx = data.shape
                         apix_simu = apix
                     params = (movie_mode, twist, rise, csym, noise, helical_radius, ball_radius, az, ny, nx, apix_simu)
-                movie_filename = create_movie(movie_frames, tilt, params, pny, pnx, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudo_color, log_xform, lp_fraction, hp_fraction)
+                movie_filename = create_movie(movie_frames, tilt, params, pny, pnx, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudo_color, const_image_color, log_xform, lp_fraction, hp_fraction)
                 st.video(movie_filename) # it always show the video using the entire column width
 
         del data_all, data, figs_grid
@@ -498,7 +498,7 @@ def main(args):
 
 
 @st.cache_data(persist='disk', max_entries=1, show_spinner=False)
-def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudo_color, log_xform, lp_fraction, hp_fraction):
+def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudo_color, const_image_color, log_xform, lp_fraction, hp_fraction):
     if movie_mode_params[0] == 0:
         movie_mode, data_all, noise, apix = movie_mode_params
         nz, ny, nx = data_all.shape
@@ -526,13 +526,13 @@ def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radiu
 
         figs = []
         title = f"Projection"
-        fig_proj = create_layerline_image_figure(proj, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, fft_top_only=fft_top_only, pseudo_color=show_pseudo_color, white_image=white_image, title=title, yaxis_visible=False, tooltips=None)
+        fig_proj = create_layerline_image_figure(proj, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, fft_top_only=fft_top_only, pseudo_color=show_pseudo_color, const_image_color=const_image_color, title=title, yaxis_visible=False, tooltips=None)
         figs.append(fig_proj)
 
         proj_pwr, proj_phase = compute_power_spectra(proj, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
             output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
         title = f"Power Spectra"
-        fig_pwr = create_layerline_image_figure(proj_pwr, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, fft_top_only=fft_top_only, pseudo_color=show_pseudo_color, white_image=white_image, title=title, yaxis_visible=False, tooltips=None)
+        fig_pwr = create_layerline_image_figure(proj_pwr, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, fft_top_only=fft_top_only, pseudo_color=show_pseudo_color, const_image_color=const_image_color, title=title, yaxis_visible=False, tooltips=None)
         from bokeh.models import Label
         label = Label(x=0., y=0.9/cutoff_res_y, text=f"tilt = {tilt:.2f}°", text_align='center', text_color='white', text_font_size='30px', visible=True)
         fig_pwr.add_layout(label)
@@ -540,7 +540,7 @@ def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radiu
 
         phase_diff = compute_phase_difference_across_meridian(proj_phase)
         title = f"Phase Diff Across Meridian"
-        fig_phase = create_layerline_image_figure(phase_diff, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, fft_top_only=fft_top_only, pseudo_color=show_pseudo_color, white_image=white_image, title=title, yaxis_visible=False, tooltips=None)
+        fig_phase = create_layerline_image_figure(phase_diff, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, fft_top_only=fft_top_only, pseudo_color=show_pseudo_color, const_image_color=const_image_color, title=title, yaxis_visible=False, tooltips=None)
         figs.append(fig_phase)
 
         fig_all = gridplot(children=[figs], toolbar_location=None)
@@ -600,7 +600,7 @@ def create_image_figure(image, dx, dy, title="", title_location="below", plot_wi
         for ch in crosshair: ch.line_color = crosshair_color
     return fig
 
-def create_layerline_image_figure(data, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, fft_top_only=False, pseudo_color=True, white_image=False, title="", yaxis_visible=True, tooltips=None):
+def create_layerline_image_figure(data, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, fft_top_only=False, pseudo_color=True, const_image_color="", title="", yaxis_visible=True, tooltips=None):
     ny, nx = data.shape
     dsy = 1/(ny//2*cutoff_res_y)
     dsx = 1/(nx//2*cutoff_res_x)
@@ -623,8 +623,8 @@ def create_layerline_image_figure(data, cutoff_res_x, cutoff_res_y, helical_radi
 
     source_data = ColumnDataSource(data=dict(image=[data.astype(np.float16)], x=[-nx//2*dsx], y=[-ny//2*dsy], dw=[nx*dsx], dh=[ny*dsy], bessel=[bessel]))
     if phase is not None: source_data["phase"] = [np.fmod(np.rad2deg(phase)+360, 360).astype(np.float16)]
-    if white_image:
-        palette = ("white",)
+    if const_image_color:
+        palette = (const_image_color,)
     else:
         palette = 'Viridis256' if pseudo_color else 'Greys256'
     color_mapper = LinearColorMapper(palette=palette)    # Greys256, Viridis256
@@ -1721,9 +1721,9 @@ def set_initial_query_params(query_string):
     if len(d)<1: return
     st.session_state.update(d)
 
-int_types = {'apply_helical_sym_0':0, 'apply_helical_sym_1':0, 'csym':1, 'csym_ahs_0':1, 'csym_ahs_1':1, 'do_random_embid_0':0, 'do_random_embid_1':0, 'fft_top_only':0, 'image_index_0':0, 'image_index_1':0, 'input_mode_0':1, 'input_mode_1':1, 'is_3d_0':0, 'is_3d_1':0, 'm_0':1, 'm_1':1, 'm_max':3, 'negate_0':0, 'negate_1':0, 'pnx':512, 'pny':1024, 'show_LL':1, 'show_LL_text':1, 'show_phase_diff':1, 'show_pwr':1, 'show_yprofile':1, 'transpose_0':0, 'transpose_1':0, 'share_url':0, 'show_qr':0, 'useplotsize':0, 'white_image':0}
+int_types = {'apply_helical_sym_0':0, 'apply_helical_sym_1':0, 'csym':1, 'csym_ahs_0':1, 'csym_ahs_1':1, 'do_random_embid_0':0, 'do_random_embid_1':0, 'fft_top_only':0, 'image_index_0':0, 'image_index_1':0, 'input_mode_0':1, 'input_mode_1':1, 'is_3d_0':0, 'is_3d_1':0, 'm_0':1, 'm_1':1, 'm_max':3, 'negate_0':0, 'negate_1':0, 'pnx':512, 'pny':1024, 'show_LL':1, 'show_LL_text':1, 'show_phase_diff':1, 'show_pwr':1, 'show_yprofile':1, 'transpose_0':0, 'transpose_1':0, 'share_url':0, 'show_qr':0, 'useplotsize':0}
 float_types = {'angle_0':0, 'angle_1':0, 'apix_0':0, 'apix_1':0, 'apix_ahs_0':0, 'apix_ahs_1':0, 'apix_map_0':0, 'apix_map_1':0, 'apix_nyquist_0':0, 'apix_nyquist_1':0, 'az_0':0, 'az_1':0, 'ball_radius':0, 'cutoff_res_x':0, 'cutoff_res_y':0, 'diameter':0, 'dx_0':0, 'dx_1':0, 'dy_0':0, 'dy_1':0, 'fraction_ahs_0':0, 'fraction_ahs_1':0, 'length_ahs_0':0, 'length_ahs_1':0, 'mask_len_0':90, 'mask_len_1':90, 'mask_radius_0':0, 'mask_radius_1':0, 'noise_0':0, 'noise_1':0, 'resolution':0, 'rise':0, 'rise_ahs_0':0, 'rise_ahs_1':0, 'simuaz':0, 'simunoise':0, 'tilt':0, 'tilt_0':0, 'tilt_1':0, 'twist':0, 'twist_ahs_0':0, 'twist_ahs_1':0, 'width_ahs_0':0, 'width_ahs_1':1}
-other_types = {'emd_id_0':'', 'emd_id_1':'', 'input_type_0':'image', 'input_type_1':'image', 'll_colors':'lime cyan violet salmon silver', 'url_0':'', 'url_0':''}
+other_types = {'const_image_color':'', 'emd_id_0':'', 'emd_id_1':'', 'input_type_0':'image', 'input_type_1':'image', 'll_colors':'lime cyan violet salmon silver', 'url_0':'', 'url_0':''}
 
 def set_query_params_from_session_state():
     for im in 'input_mode_0 input_mode_1'.split():
