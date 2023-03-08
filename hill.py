@@ -494,7 +494,7 @@ def main(args):
         else:
             st.experimental_set_query_params()
 
-        st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to Wen Jiang (jiang12 at purdue.edu)*")
+        st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to [HILL@GitHub](https://github.com/jianglab/hill/issues)*")
 
 
 @st.cache_data(persist='disk', max_entries=1, show_spinner=False)
@@ -905,9 +905,9 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
 
         with original_image:
             if is_3d:
-                image_label = f"Orignal image ({nx}x{ny})"
+                image_label = f"Original image ({nx}x{ny})"
             else:
-                image_label = f"Orignal image {image_index+1}/{nz} ({nx}x{ny})"
+                image_label = f"Original image {image_index+1}/{nz} ({nx}x{ny})"
             #st.image(normalize(data), use_column_width=True, caption=image_label)
             fig = create_image_figure(data, apix, apix, title=image_label, title_location="below", plot_width=None, plot_height=None, x_axis_label=None, y_axis_label=None, tooltips=None, show_axis=False, show_toolbar=False, crosshair_color="white")
             st.bokeh_chart(fig, use_container_width=True)
@@ -1022,20 +1022,19 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
         input_params = (input_mode, (fileobj, None, None))
     return data_all, image_index, data, apix, radius_auto, mask_radius, input_type, is_3d, input_params, (image_container, image_label)
 
+@st.cache_data(show_spinner=False)
+def bessel_1st_peak_positions(n_max:int = 100):
+    import numpy as np
+    ret = np.zeros(n_max+1, dtype=np.float32)
+    from scipy.special import jnp_zeros
+    for i in range(1, n_max+1):
+        ret[i] = jnp_zeros(i, 1)[0]
+    return ret
+
 @st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def bessel_n_image(ny, nx, nyquist_res_x, nyquist_res_y, radius, tilt):
-    def build_bessel_order_table(xmax):
-        from scipy.special import jnp_zeros
-        table = [0]
-        n = 1
-        while 1:
-            peak_x = jnp_zeros(n, 1)[0] # first peak
-            if peak_x<xmax: table.append(peak_x)
-            else: break
-            n += 1
-        return np.asarray(table)
-
     import numpy as np
+    table = bessel_1st_peak_positions()
     if tilt:
         dsx = 1./(nyquist_res_x*nx//2)
         dsy = 1./(nyquist_res_x*ny//2)
@@ -1044,15 +1043,13 @@ def bessel_n_image(ny, nx, nyquist_res_x, nyquist_res_y, radius, tilt):
         X = 2*np.pi * np.abs(X)*dsx * radius
         Y /= np.cos(np.deg2rad(tilt))
         X = np.hypot(X, Y*np.sin(np.deg2rad(tilt)))
-        table = build_bessel_order_table(X.max())        
         X = np.expand_dims(X.flatten(), axis=-1)
         indices = np.abs(table - X).argmin(axis=-1)
         return np.reshape(indices, (ny, nx)).astype(np.int16)
     else:
         ds = 1./(nyquist_res_x*nx//2)
         xs = 2*np.pi * np.abs(np.arange(nx)-nx//2)*ds * radius
-        table = build_bessel_order_table(xs.max())        
-        xs = np.expand_dims(xs, axis=-1) 
+        xs = np.expand_dims(xs, axis=-1)
         indices = np.abs(table - xs).argmin(axis=-1)
         return np.tile(indices, (ny, 1)).astype(np.int16)
 
@@ -1098,16 +1095,7 @@ def simulate_helix(twist, rise, csym, helical_radius, ball_radius, ny, nx, apix,
 
 @st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m_max=-1):
-    def peak_sx(bessel_order, radius):
-        from scipy.special import jnp_zeros
-        sx = np.zeros(len(bessel_order))
-        for bi in range(len(bessel_order)):
-            if bessel_order[bi]==0:
-                sx[bi]=0
-                continue
-            peak1 = jnp_zeros(bessel_order[bi], 1)[0] # first peak of first visible layerline (n=csym)
-            sx[bi] = peak1/(2*np.pi*radius)
-        return sx
+    table = bessel_1st_peak_positions()/(2*np.pi*radius)
 
     if m_max<1:
         m_max = int(np.floor(np.abs(rise/cutoff_res)))+3
@@ -1128,9 +1116,9 @@ def compute_layer_line_positions(twist, rise, csym, radius, tilt, cutoff_res, m_
         ds_p = 1/p
         ll_i_top = int(np.abs(smax - sy0)/ds_p) * 2
         ll_i_bottom = -int(np.abs(-smax - sy0)/ds_p) * 2
-        ll_i = np.array([i for i in range(ll_i_bottom, ll_i_top+1) if not i%csym], dtype=np.float32)
+        ll_i = np.array([i for i in range(ll_i_bottom, ll_i_top+1) if not i%csym], dtype=np.int32)
         sy = sy0 + ll_i * ds_p
-        sx = peak_sx(bessel_order=ll_i, radius=radius)
+        sx = table[np.clip(np.abs(ll_i), 0, len(table)-1)]
         if tilt:
             sy = np.array(sy, dtype=np.float32) * tf
             sx = np.sqrt(np.power(np.array(sx, dtype=np.float32), 2) - np.power(sy*tf2, 2))
@@ -1536,8 +1524,8 @@ def guess_if_3d(filename, data=None):
 @st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def get_2d_image_from_uploaded_file(fileobj):
     import os, tempfile
-    orignal_filename = fileobj.name
-    suffix = os.path.splitext(orignal_filename)[-1]
+    original_filename = fileobj.name
+    suffix = os.path.splitext(original_filename)[-1]
     with tempfile.NamedTemporaryFile(suffix=suffix) as temp:
         temp.write(fileobj.read())
         data, apix = get_2d_image_from_file(temp.name)
