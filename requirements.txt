@@ -1,6 +1,6 @@
-streamlit==1.19
+streamlit==1.20.0
 st-clickable-images==0.0.3
-numpy==1.24.0
+numpy==1.24.2
 scipy==1.9.3
 bokeh==2.4.3
 scikit_image==0.19.3

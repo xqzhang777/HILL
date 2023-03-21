@@ -1,5 +1,5 @@
 # HILL: <em>H</em>elical <em>I</em>ndexing using <em>L</em>ayer <em>L</em>ines
-**HILL** is a Web app that allows the user to interactively index the parameters (twist, rise, csym) of a helical structure. It matches the layer lines expected for the candidate parameters (twist, rise, csym) to the layer lines in the power spectra of a projection image of the helical structure. 
+**HILL** is a Web app that allows the user to interactively index the parameters (pitch/twist, rise, csym) of a helical structure. It matches the layer lines expected for the candidate parameters (pitch/twist, rise, csym) to the layer lines in the power spectra of a projection image of the helical structure. 
 
 No software installation is needed. Just [click me](https://helical-indexing-hill.streamlit.app) to index your helical structure!</a>
 
