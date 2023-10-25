@@ -35,17 +35,18 @@ def import_with_auto_install(packages, scope=locals()):
             import subprocess
             subprocess.call(f'pip install {package_pip_name}', shell=True)
             scope[package_import_name] =  __import__(package_import_name)
-required_packages = "streamlit numpy scipy bokeh skimage:scikit_image mrcfile finufft xmltodict st_clickable_images".split()
+required_packages = "streamlit numpy scipy numba bokeh skimage:scikit_image mrcfile finufft xmltodict st_clickable_images".split()
 import_with_auto_install(required_packages)
 
 import streamlit as st
 import numpy as np
+from numba import jit, set_num_threads, prange
 from bokeh.plotting import figure
 from bokeh.models import CustomJS, Span, LinearColorMapper
 from bokeh.models import ColumnDataSource, HoverTool, CrosshairTool
 from bokeh.events import MouseMove, DoubleTap
 from bokeh.layouts import gridplot
-import math, random, gc
+import gc
 gc.enable()
 
 #from memory_profiler import profile
@@ -68,7 +69,7 @@ def main(args):
     if "input_mode_0" not in st.session_state:
         set_session_state_from_data_example()
     
-    col1, col2, col3, col4 = st.columns((1., 0.6, 0.4, 4.0))
+    col1, col2, col3, col4 = st.columns((1.2, 0.6, 0.4, 4.0))
 
     with col1:
         with st.expander(label="README", expanded=False):
@@ -835,6 +836,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                     img_style={"margin": "2px", "height": "128px"},
                     key=f"image_index_{param_i}"
                 )
+     
                 if image_index<0: image_index = 0
                 image_index = data_to_show[image_index]
             else:
@@ -1401,68 +1403,76 @@ def generate_projection(data, az=0, tilt=0, noise=0, output_size=None):
     return ret
 
 @st.cache_data(persist='disk', max_entries=1, show_spinner=False)
-def apply_helical_symmetry(data, apix, twist_degree, rise_angstrom, csym=1, fraction=1.0, new_size=None, new_apix=None):
-  if rise_angstrom<=0: return data
-  from scipy.spatial.transform import Rotation as R
-  from scipy.ndimage import map_coordinates
-  from itertools import product
-  if new_apix is None: new_apix = apix
+#@jit(nopython=True, cache=True, nogil=True, parallel=True)
+def apply_helical_symmetry(data, apix, twist_degree, rise_angstrom, csym=1, fraction=1.0, new_size=None, new_apix=None, cpu=1):
+  if new_apix is None: new_apix = apix  
   nz0, ny0, nx0 = data.shape
   if new_size != data.shape:
-    nz0, ny0, nx0 = data.shape
     nz1, ny1, nx1 = new_size
     nz2, ny2, nx2 = max(nz0, nz1), max(ny0, ny1), max(nx0, nx1)
     data_work = np.zeros((nz2, ny2, nx2), dtype=np.float32)
-    data_work[nz2//2-nz0//2:nz2//2+nz0//2, ny2//2-ny0//2:ny2//2+ny0//2, nx2//2-nx0//2:nx2//2+nx0//2] = data
   else:
-    data_work = data
+    data_work = np.zeros((nz0, ny0, nx0), dtype=np.float32)
+
   nz, ny, nx = data_work.shape
-  k = np.arange(0, nz, dtype=np.int32)-nz//2
-  j = np.arange(0, ny, dtype=np.int32)-ny//2
-  i = np.arange(0, nx, dtype=np.int32)-nx//2
-  Z, Y, X = np.meshgrid(k*new_apix, j*new_apix, i*new_apix, indexing='ij')
-  ZYX = np.vstack((Z.ravel(), Y.ravel(), X.ravel())).transpose()
+  w = np.zeros((nz, ny, nx), dtype=np.float32)
 
-  w = np.zeros_like(data_work).ravel()
-  m = np.zeros_like(data_work).ravel()
-
-  hsym_max = max(1, int(nz/2*new_apix/rise_angstrom))
+  hsym_max = max(1, int(nz*new_apix/rise_angstrom))
   hsyms = range(-hsym_max, hsym_max+1)
   csyms = range(csym)
-  hcsyms = list(product(hsyms, csyms))
 
-  mask = (data_work!=0)*1
+  mask = (data!=0)*1
   z_nonzeros = np.nonzero(mask)[0]
   z0 = np.min(z_nonzeros)
   z1 = np.max(z_nonzeros)
-  z0 = max(z0, nz//2-int(nz0*fraction+0.5)//2)
-  z1 = min(z1, nz//2+int(nz0*fraction+0.5)//2)
-  for hci, (hi, ci) in enumerate(hcsyms):
-    rot = twist_degree * hi + 360*ci/csym
-    xform = R.from_euler('x', rot, degrees=True)
-    zyx = xform.apply(ZYX, inverse=False)
-    zyx[:,0] -= hi*rise_angstrom
-    zyx /= apix
-    zyx[:,0] += nz//2
-    zyx[:,1] += ny//2
-    zyx[:,2] += nx//2
-    z_mask = (z0 <= zyx[:,0]) & (zyx[:,0] <= z1)
-    vals_data = map_coordinates(data_work, zyx[z_mask, :].T, order=1)
-    tmp_data = np.zeros_like(m)
-    tmp_mask = np.zeros_like(m)
-    tmp_data[z_mask] = vals_data
-    tmp_mask[z_mask] = vals_data!=0
-    tmp_mask_nonzeros = tmp_mask!=0
-    m[tmp_mask_nonzeros] += tmp_data[tmp_mask_nonzeros]
-    w[tmp_mask_nonzeros] += 1.0
+  z0 = max(z0, nz0//2-int(nz0*fraction+0.5)//2)
+  z1 = min(nz0-1, min(z1, nz0//2+int(nz0*fraction+0.5)//2))
+
+  set_num_threads(cpu)
+
+  for hi in hsyms:
+    for k in prange(nz):
+      k2 = ((k-nz//2)*new_apix + hi * rise_angstrom)/apix + nz0//2
+      if k2 < z0 or k2 >= z1: continue
+      k2_floor, k2_ceil = int(np.floor(k2)), int(np.ceil(k2))
+      wk = k2 - k2_floor
+
+      for ci in csyms:
+        rot = np.deg2rad(twist_degree * hi + 360*ci/csym)
+        m = np.array([
+              [ np.cos(rot),  np.sin(rot)],
+              [-np.sin(rot),  np.cos(rot)]
+            ])
+        for j in prange(ny):
+          for i in prange(nx):
+            j2 = (m[0,0]*(j-ny//2) + m[0,1]*(i-nx/2))*new_apix/apix + ny0//2
+            i2 = (m[1,0]*(j-ny//2) + m[1,1]*(i-nx/2))*new_apix/apix + nx0//2
+
+            j2_floor, j2_ceil = int(np.floor(j2)), int(np.ceil(j2))
+            i2_floor, i2_ceil = int(np.floor(i2)), int(np.ceil(i2))
+            if j2_floor<0 or j2_floor>=ny0-1: continue
+            if i2_floor<0 or i2_floor>=nx0-1: continue
+
+            wj = j2 - j2_floor
+            wi = i2 - i2_floor
+
+            data_work[k, j, i] += (
+                (1 - wk) * (1 - wj) * (1 - wi) * data[k2_floor, j2_floor, i2_floor] +
+                (1 - wk) * (1 - wj) * wi * data[k2_floor, j2_floor, i2_ceil] +
+                (1 - wk) * wj * (1 - wi) * data[k2_floor, j2_ceil, i2_floor] +
+                (1 - wk) * wj * wi * data[k2_floor, j2_ceil, i2_ceil] +
+                wk * (1 - wj) * (1 - wi) * data[k2_ceil, j2_floor, i2_floor] +
+                wk * (1 - wj) * wi * data[k2_ceil, j2_floor, i2_ceil] +
+                wk * wj * (1 - wi) * data[k2_ceil, j2_ceil, i2_floor] +
+                wk * wj * wi * data[k2_ceil, j2_ceil, i2_ceil]
+            )
+            w[k, j, i] += 1.0
   mask = w>0
-  m[mask] /= w[mask]
-  m[~mask] = 0
-  m = m.reshape((nz, ny, nx))
-  if m.shape != new_size:
+  data_work = np.where(mask, data_work / w, data_work)
+  if data_work.shape != new_size:
     nz1, ny1, nx1 = new_size
-    m = m[nz//2-nz1//2:nz//2+nz1//2, ny//2-ny1//2:ny//2+ny1//2, nx//2-nx1//2:nx//2+nx1//2]
-  return m
+    data_work = data_work[nz//2-nz1//2:nz//2+nz1//2, ny//2-ny1//2:ny//2+ny1//2, nx//2-nx1//2:nx//2+nx1//2]
+  return data_work
 
 @st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def normalize(data, percentile=(0, 100)):
@@ -1585,7 +1595,7 @@ def get_emdb_helical_parameters(emd_id):
         return ret
 
 def get_emdb_map_url(emd_id: str):
-    #server = "https://ftp.wwpdb.org/pub"    # Rutgers University, USA
+    #server = "https://files.wwpdb.org/pub"    # Rutgers University, USA
     server = "https://ftp.ebi.ac.uk/pub/databases" # European Bioinformatics Institute, England
     #server = "http://ftp.pdbj.org/pub" # Osaka University, Japan
     url = f"{server}/emdb/structures/EMD-{emd_id}/map/emd_{emd_id}.map.gz"
