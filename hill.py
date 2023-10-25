@@ -1403,7 +1403,7 @@ def generate_projection(data, az=0, tilt=0, noise=0, output_size=None):
     return ret
 
 @st.cache_data(persist='disk', max_entries=1, show_spinner=False)
-#@jit(nopython=True, cache=True, nogil=True, parallel=True)
+@jit(nopython=True, cache=True, nogil=True, parallel=True)
 def apply_helical_symmetry(data, apix, twist_degree, rise_angstrom, csym=1, fraction=1.0, new_size=None, new_apix=None, cpu=1):
   if new_apix is None: new_apix = apix  
   nz0, ny0, nx0 = data.shape
