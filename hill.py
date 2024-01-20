@@ -1,7 +1,7 @@
 """ 
 MIT License
 
-Copyright (c) 2020-2023 Wen Jiang
+Copyright (c) 2020-2024 Wen Jiang
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -112,13 +112,12 @@ def main(args):
 
     with col2:
         def copy_pitch_rise():
-            query_params = st.experimental_get_query_params()
-            if "pitch" in query_params and "rise" in query_params:
-                st.session_state.rise = float(query_params["rise"][0])
-                st.session_state.twist = pitch2twist(float(query_params["pitch"][0]), st.session_state.rise)
-                query_params.pop('rise', None)
-                query_params.pop('pitch', None)
-                st.experimental_set_query_params(**query_params)        
+            if "pitch" in st.query_params and "rise" in st.query_params:
+                st.session_state.rise = float(st.query_params["rise"])
+                st.session_state.pitch = float(st.query_params["pitch"])
+                st.session_state.twist = pitch2twist(float(st.query_params["pitch"]), st.session_state.rise)
+                st.query_params.pop('rise', None)
+                st.query_params.pop('pitch', None)
         st.button("Copy pitch/rise↶", on_click=copy_pitch_rise)
 
         pitch_or_twist_choices = ["pitch", "twist"]
@@ -137,14 +136,15 @@ def main(args):
         if "twist" not in st.session_state: st.session_state.twist = 1.0
         if use_pitch:
             min_pitch = abs(rise)
-            value = max(min_pitch, twist2pitch(st.session_state.twist, rise))
-            pitch = pitch_or_twist_number_input.number_input('Pitch (Å)', value=value, min_value=min_pitch, step=1.0, format="%.2f", help="twist = 360 / (pitch/rise)")
-            st.session_state.twist = pitch2twist(pitch, rise)
-            pitch_or_twist_text.markdown(f"*(twist = {st.session_state.twist:.2f} °)*")
+            pitch = pitch_or_twist_number_input.number_input('Pitch (Å)', value=st.session_state.get("pitch", min_pitch), min_value=min_pitch, step=1.0, format="%.2f", help="twist = 360 / (pitch/rise)")
+            st.session_state.pitch = pitch
             twist = pitch2twist(pitch, rise)
+            st.session_state.twist = twist
+            pitch_or_twist_text.markdown(f"*(twist = {st.session_state.twist:.2f} °)*")
         else:
             twist = pitch_or_twist_number_input.number_input('Twist (°)', value=st.session_state.twist, min_value=-180.0, max_value=180.0, step=1.0, format="%.2f", help="pitch = 360/twist * rise", key="twist")
             pitch = abs(round(twist2pitch(twist, rise), 2))
+            st.session_state.pitch = pitch
             pitch_or_twist_text.markdown(f"*(pitch = {pitch:.2f} Å)*")
 
         csym = st.number_input('Csym', min_value=1, step=1, help="Cyclic symmetry around the helical axis", key="csym")
@@ -493,7 +493,7 @@ def main(args):
                 qr_image = qr_code()
                 st.image(qr_image)
         else:
-            st.experimental_set_query_params()
+            st.query_params.clear()
 
         st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to [HILL@GitHub](https://github.com/jianglab/hill/issues)*")
 
@@ -829,13 +829,14 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                 st.markdown('<div style="text-align: center;">Click to choose an image:</div>', unsafe_allow_html=True)
                 from st_clickable_images import clickable_images
                 images = [encode_numpy(data_all[i], vflip=True) for i in data_to_show]
-                image_index = clickable_images(
-                    images,
-                    titles=[f"{i+1}" for i in data_to_show],
-                    div_style={"display": "flex", "justify-content": "center", "flex-wrap": "wrap"},
-                    img_style={"margin": "2px", "height": "128px"},
-                    key=f"image_index_{param_i}"
-                )
+                with st.container(height=600):
+                    image_index = clickable_images(
+                        images,
+                        titles=[f"{i+1}" for i in data_to_show],
+                        div_style={"display": "flex", "justify-content": "center", "flex-wrap": "wrap"},
+                        img_style={"margin": "2px", "height": "128px"},
+                        key=f"image_index_{param_i}"
+                    )
      
                 if image_index<0: image_index = 0
                 image_index = data_to_show[image_index]
@@ -1758,19 +1759,18 @@ def set_query_params_from_session_state():
             if float_types[attr]!=v: d[attr] = f'{float(v):g}'
         elif attr in other_types and other_types[attr]!=v:
             d[attr] = v
-    st.experimental_set_query_params(**d)
+    st.query_params.update(d)
 
 def set_session_state_from_query_params():
-    query_params = st.experimental_get_query_params()
-    for attr in sorted(query_params.keys()):
+    for attr in sorted(st.query_params.keys()):
         if attr in int_types:
-            st.session_state[attr] = int(query_params[attr][0])
+            st.session_state[attr] = int(st.query_params[attr][0])
         elif attr[:2]=="m_" and attr[2:].lstrip("-").isdigit():
-            st.session_state[attr] = int(query_params[attr][0])
+            st.session_state[attr] = int(st.query_params[attr][0])
         elif attr in float_types:
-            st.session_state[attr] = float(query_params[attr][0])
+            st.session_state[attr] = float(st.query_params[attr][0])
         elif attr in other_types:
-            st.session_state[attr] = query_params[attr][0]
+            st.session_state[attr] = st.query_params[attr][0]
 
 def get_direct_url(url):
     import re
@@ -1899,7 +1899,7 @@ def qr_code(url=None, size = 8):
         else:
             url = f"http://{host}:8501/"
         import urllib
-        params = st.experimental_get_query_params()
+        params = st.query_params
         d = {k:params[k][0] for k in params}
         url += "?" + urllib.parse.urlencode(d)
     if not url: return None
