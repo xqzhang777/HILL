@@ -1,6 +1,7 @@
 bokeh==2.4.3
 finufft==2.2.0
 moviepy==1.0.3
+mrcfile==1.5.0
 numpy==1.26.3
 numba==0.58.1
 psutil==5.9.8
