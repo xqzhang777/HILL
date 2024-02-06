@@ -136,7 +136,7 @@ def main(args):
         if "twist" not in st.session_state: st.session_state.twist = 1.0
         if use_pitch:
             min_pitch = abs(rise)
-            pitch = pitch_or_twist_number_input.number_input('Pitch (Å)', value=st.session_state.get("pitch", min_pitch), min_value=min_pitch, step=1.0, format="%.2f", help="twist = 360 / (pitch/rise)")
+            pitch = pitch_or_twist_number_input.number_input('Pitch (Å)', value=max(min_pitch, st.session_state.get("pitch", min_pitch)), min_value=min_pitch, step=1.0, format="%.2f", help="twist = 360 / (pitch/rise)")
             st.session_state.pitch = pitch
             twist = pitch2twist(pitch, rise)
             st.session_state.twist = twist
@@ -408,6 +408,10 @@ def main(args):
             slider_pitch = Slider(start=pitch/2, end=pitch*2.0, value=pitch, step=pitch*0.002, title="Pitch (Å)", width=pnx)
             slider_rise = Slider(start=rise/2, end=min(max_rise, rise*2.0), value=rise, step=min(max_rise, rise*2.0)*0.001, title="Rise (Å)", width=pnx)
             callback_code = """
+                var twist = 360/(slider_pitch.value/slider_rise.value) % 360
+                if (twist>180) twist = twist-360
+                slider_pitch.title = "Pitch="+slider_pitch.value.toFixed(2).toString()+"Å | Twist="+twist.toFixed(2).toString()+"°"
+                slider_pitch.show_value = false
                 var pitch_inv = 1./slider_pitch.value
                 var rise_inv = 1./slider_rise.value
                 for (var fi = 0; fi < fig_ellipses.length; fi++) {
@@ -711,10 +715,10 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
             if params and ("twist" in params and "rise" in params and "csym" in params):                
                 msg += f"  \ntwist={params['twist']}° | rise={params['rise']}Å | c{params['csym']}"
                 st.session_state[f"input_type_{param_i}"] = "image"
-                if "twist" not in st.session_state and "rise" not in st.session_state and "csym" not in st.session_state:
-                    st.session_state.twist = params['twist']
-                    st.session_state.rise = params['rise']
-                    st.session_state.csym = params['csym']
+                st.session_state.rise = params['rise']
+                st.session_state.twist = params['twist']
+                st.session_state.pitch = twist2pitch(twist=st.session_state.twist, rise=st.session_state.rise)
+                st.session_state.csym = params['csym']
             else:
                 msg +=  "  \n*helical params not available*"
             st.markdown(msg)
@@ -1721,6 +1725,7 @@ def set_session_state_from_data_example():
             st.session_state.apix_0 = data.apix
     st.session_state.rise = float(data.rise)
     st.session_state.twist = float(abs(data.twist))
+    st.session_state.pitch = twist2pitch(twist=st.session_state.twist, rise=st.session_state.rise)
     st.session_state.csym = int(data.csym)
     st.session_state.diameter = float(data.diameter)
 
