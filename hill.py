@@ -111,14 +111,14 @@ def main(args):
         st.markdown(hide_streamlit_style, unsafe_allow_html=True) 
 
     with col2:
-        def copy_pitch_rise():
-            if "pitch" in st.query_params and "rise" in st.query_params:
+        button = st.button("Copy twist/rise↶")
+        if button:
+            if "twist" in st.query_params and "rise" in st.query_params:
                 st.session_state.rise = float(st.query_params["rise"])
-                st.session_state.pitch = float(st.query_params["pitch"])
-                st.session_state.twist = pitch2twist(float(st.query_params["pitch"]), st.session_state.rise)
+                st.session_state.twist = float(st.query_params["twist"])
+                st.session_state.pitch = twist2pitch(st.session_state.twist, st.session_state.rise)
                 st.query_params.pop('rise', None)
-                st.query_params.pop('pitch', None)
-        st.button("Copy pitch/rise↶", on_click=copy_pitch_rise)
+                st.query_params.pop('twist', None)
 
         pitch_or_twist_choices = ["pitch", "twist"]
         pitch_or_twist = st.radio(label="Choose pitch or twist mode", options=pitch_or_twist_choices, index=0, label_visibility="collapsed", horizontal=True)
@@ -332,6 +332,7 @@ def main(args):
 
         figs = []
         figs_image = []
+        figs_with = 0
         for item in items:
             show_pwr_work, pwr_work, title_pwr_work, show_phase_work, phase_work, show_phase_diff_work, phase_diff_work, title_phase_work, show_yprofile_work = item
             if show_pwr_work:
@@ -339,6 +340,7 @@ def main(args):
                 fig = create_layerline_image_figure(pwr_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, fft_top_only=fft_top_only, pseudo_color=show_pseudo_color, const_image_color=const_image_color, title=title_pwr_work, yaxis_visible=False, tooltips=tooltips)
                 figs.append(fig)
                 figs_image.append(fig)
+                figs_with += pwr_work.shape[-1]
 
             if show_yprofile_work:
                 ny, nx = pwr_work.shape
@@ -352,18 +354,19 @@ def main(args):
                 source_data = ColumnDataSource(data=dict(yprofile=yprofile, y=y, resy=yinv))
                 tools = 'box_zoom,hover,pan,reset,save,wheel_zoom'
                 tooltips = [('Res y', '@resyÅ'), ('Amp', '$x')]
-                fig = figure(frame_width=nx//2, frame_height=figs[-1].frame_height, y_range=figs[-1].y_range, y_axis_location = "right", 
-                    title=None, tools=tools, tooltips=tooltips)
+                fig = figure(frame_width=nx//2, frame_height=figs[-1].frame_height, y_range=figs[-1].y_range, y_axis_location = "right", title=None, tools=tools, tooltips=tooltips)
                 fig.line(source=source_data, x='yprofile', y='y', line_width=2, color='blue')
                 fig.yaxis.visible = False
                 fig.hover[0].attachment="vertical"
                 figs.append(fig)
+                figs_with += nx//2
 
             if show_phase_diff_work:
                 tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Phase Diff', '@image °')]
                 fig = create_layerline_image_figure(phase_diff_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, fft_top_only=fft_top_only, pseudo_color=show_pseudo_color, const_image_color=const_image_color, title=title_phase_work, yaxis_visible=False, tooltips=tooltips)
                 figs.append(fig)
                 figs_image.append(fig)
+                figs_with += phase_diff_work.shape[-1]
                 
         figs[-1].yaxis.fixed_location = figs[-1].x_range.end
         figs[-1].yaxis.visible = True
@@ -404,14 +407,13 @@ def main(args):
         figs[0].js_on_event(MouseEnter, title_js)
 
         if fig_ellipses:
+            slider_width = figs_with//3
             from bokeh.models import Slider, CustomJS
-            slider_pitch = Slider(start=pitch/2, end=pitch*2.0, value=pitch, step=pitch*0.002, title="Pitch (Å)", width=pnx)
-            slider_rise = Slider(start=rise/2, end=min(max_rise, rise*2.0), value=rise, step=min(max_rise, rise*2.0)*0.001, title="Rise (Å)", width=pnx)
+            slider_twist = Slider(start=-180, end=180, value=twist, step=0.01, title="Twist (°)", width=slider_width)
+            slider_pitch = Slider(start=pitch/2, end=pitch*2.0, value=pitch, step=pitch*0.002, title="Pitch (Å)", width=slider_width)
+            slider_rise = Slider(start=rise/2, end=min(max_rise, rise*2.0), value=rise, step=min(max_rise, rise*2.0)*0.001, title="Rise (Å)", width=slider_width)
             callback_code = """
-                var twist = 360/(slider_pitch.value/slider_rise.value) % 360
-                if (twist>180) twist = twist-360
-                slider_pitch.title = "Pitch="+slider_pitch.value.toFixed(2).toString()+"Å | Twist="+twist.toFixed(2).toString()+"°"
-                slider_pitch.show_value = false
+                slider_twist.value = 360/(slider_pitch.value/slider_rise.value)
                 var pitch_inv = 1./slider_pitch.value
                 var rise_inv = 1./slider_rise.value
                 for (var fi = 0; fi < fig_ellipses.length; fi++) {
@@ -426,14 +428,19 @@ def main(args):
                     ellipses.data_source.change.emit()
                 }
             """
-            callback = CustomJS(args=dict(fig_ellipses=fig_ellipses, slider_pitch=slider_pitch, slider_rise=slider_rise), code=callback_code)
+            callback_twist_code = """
+                slider_pitch.value = Math.abs(360/slider_twist.value * slider_rise.value)
+            """
+            callback = CustomJS(args=dict(fig_ellipses=fig_ellipses, slider_twist=slider_twist,slider_pitch=slider_pitch, slider_rise=slider_rise), code=callback_code)
+            callback_twist = CustomJS(args=dict(slider_twist=slider_twist, slider_pitch=slider_pitch, slider_rise=slider_rise), code=callback_twist_code)
+            slider_twist.js_on_change('value', callback_twist)
             slider_pitch.js_on_change('value', callback)
             slider_rise.js_on_change('value', callback)
 
             callback_code = """
                 let url = new URL(document.location)
                 let params = url.searchParams
-                params.set("pitch", Math.round(slider_pitch.value*100.)/100.)
+                params.set("twist", Math.round(slider_twist.value*100.)/100.)
                 params.set("rise", Math.round(slider_rise.value*100.)/100.)
                 //document.location = url.href
                 history.replaceState({}, document.title, url.href)
@@ -454,19 +461,20 @@ def main(args):
                 }
             """
             reload = input_mode in [1, 2, 3] and input_mode2 in [None, 1, 2, 3]
-            callback = CustomJS(args=dict(slider_pitch=slider_pitch, slider_rise=slider_rise, reload=reload), code=callback_code)
+            callback = CustomJS(args=dict(slider_twist=slider_twist, slider_pitch=slider_pitch, slider_rise=slider_rise, reload=reload), code=callback_code)
+            slider_twist.js_on_change('value_throttled', callback)
             slider_pitch.js_on_change('value_throttled', callback)
             slider_rise.js_on_change('value_throttled', callback)
 
             if len(figs)==1:
                 from bokeh.layouts import column
                 figs[0].toolbar_location="right"
-                figs_grid = column(children=[slider_pitch, slider_rise, figs[0]])
+                figs_grid = column(children=[slider_twist, slider_pitch, slider_rise, figs[0]])
                 override_height = pny+180
             else:
                 from bokeh.layouts import layout
                 figs_row = gridplot(children=[figs], toolbar_location='right')
-                figs_grid = layout(children=[[slider_pitch, slider_rise], figs_row])
+                figs_grid = layout(children=[[slider_twist, slider_pitch, slider_rise], figs_row])
                 override_height = pny+120
         else:
             figs_grid = gridplot(children=[figs], toolbar_location='right')
@@ -683,7 +691,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
         is_pwr_auto = None
         is_pd_auto = None
         if input_mode == 2:            
-            emdb_ids_all, emdb_ids_helical, methods, resolutions = get_emdb_ids()
+            emdb_ids_all, methods, resolutions, emdb_helical, emdb_ids_helical = get_emdb_ids()
             if not emdb_ids_all:
                 st.warning("failed to obtained a list of helical structures in EMDB")
                 st.stop()
@@ -1551,53 +1559,31 @@ def get_emdb_ids():
     try:
         import_with_auto_install(["pandas"])
         import pandas as pd
-        entries_all = pd.read_csv('https://www.ebi.ac.uk/emdb/api/search/current_status:"REL"?wt=csv&download=true&fl=emdb_id,structure_determination_method,resolution')
+        entries_all = pd.read_csv('https://www.ebi.ac.uk/emdb/api/search/current_status:"REL"?wt=csv&download=true&fl=emdb_id,structure_determination_method,resolution,image_reconstruction_helical_delta_z_value,image_reconstruction_helical_delta_phi_value,image_reconstruction_helical_axial_symmetry_details')
+        entries_all["emdb_id"] = entries_all["emdb_id"].str.split("-", expand=True).iloc[:, 1].astype(str)
+        emdb_ids_all = list(entries_all["emdb_id"])
         methods = list(entries_all["structure_determination_method"])
         resolutions = list(entries_all["resolution"])
-        entries_helical = entries_all[entries_all["structure_determination_method"]=="helical"]
-        emdb_ids_all     = list(entries_all.iloc[:,0].str.split('-', expand=True).iloc[:, 1].values)
-        emdb_ids_helical = list(entries_helical.iloc[:,0].str.split('-', expand=True).iloc[:, 1].values)
+        emdb_helical = entries_all[entries_all["structure_determination_method"]=="helical"].rename(columns={"image_reconstruction_helical_delta_z_value": "rise", "image_reconstruction_helical_delta_phi_value": "twist", "image_reconstruction_helical_axial_symmetry_details": "csym"}).reset_index()
+        emdb_ids_helical = list(emdb_helical["emdb_id"])
     except:
         emdb_ids_all = []
-        emdb_ids_helical = []
         methods = []
         resolutions = []
-    return emdb_ids_all, emdb_ids_helical, methods, resolutions
+        emdb_helical = None
+        emdb_ids_helical = []
+    return emdb_ids_all, methods, resolutions, emdb_helical, emdb_ids_helical
 
 @st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def get_emdb_helical_parameters(emd_id):
-    ret = {}
-    try:
-        emd_id2 = ''.join([s for s in str(emd_id) if s.isdigit()])
-        url = f"https://ftp.ebi.ac.uk/pub/databases/emdb/structures/EMD-{emd_id2}/header/emd-{emd_id2}.xml"
-        from urllib.request import urlopen
-        with urlopen(url) as response:
-            xml_data = response.read()
-        import_with_auto_install(["xmltodict"])
-        import xmltodict
-        data = xmltodict.parse(xml_data)
-        ret['sample'] = data['emd']['sample']['name']
-        ret["method"] = data['emd']['structure_determination_list']['structure_determination']['method']
-        dimensions = data['emd']['map']['dimensions']
-        ret["nz"] = int(dimensions["sec"])
-        ret["ny"] = int(dimensions["row"])
-        ret["nx"] = int(dimensions["col"])
-        res_dict = dict_recursive_search(data, 'resolution')
-        if res_dict:
-            ret["resolution"] = float(res_dict['#text'])
-        if ret["method"] == 'helical':
-            #ret["resolution"] = float(data['emd']['structure_determination_list']['structure_determination']['helical_processing']['final_reconstruction']['resolution']['#text'])
-            helical_parameters = data['emd']['structure_determination_list']['structure_determination']['helical_processing']['final_reconstruction']['applied_symmetry']['helical_parameters']
-            #assert(helical_parameters['delta_phi']['@units'] == 'deg')
-            #assert(helical_parameters['delta_z']['@units'] == 'Å')
-            ret["twist"] = float(helical_parameters['delta_phi']['#text'])
-            ret["rise"] = float(helical_parameters['delta_z']['#text'])
-            ret["csym"] = int(helical_parameters['axial_symmetry'][1:])
-            return ret
-        else:
-            return ret
-    except:
-        return ret
+    emdb_helical, emdb_ids_helical = get_emdb_ids()[-2:]
+    if emdb_helical is not None and emd_id in emdb_ids_helical:
+        row_index = emdb_helical.index[emdb_helical["emdb_id"] == emd_id].tolist()[0]
+        row = emdb_helical.iloc[row_index]
+        ret = {"resolution":row.resolution, "twist":float(row.twist), "rise":float(row.rise), "csym":int(row.csym[1:])}
+    else:
+        ret = {}
+    return ret
 
 def get_emdb_map_url(emd_id: str):
     #server = "https://files.wwpdb.org/pub"    # Rutgers University, USA
