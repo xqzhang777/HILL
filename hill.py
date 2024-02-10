@@ -723,10 +723,11 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
             if params and ("twist" in params and "rise" in params and "csym" in params):                
                 msg += f"  \ntwist={params['twist']}° | rise={params['rise']}Å | c{params['csym']}"
                 st.session_state[f"input_type_{param_i}"] = "image"
-                st.session_state.rise = params['rise']
-                st.session_state.twist = params['twist']
-                st.session_state.pitch = twist2pitch(twist=st.session_state.twist, rise=st.session_state.rise)
-                st.session_state.csym = params['csym']
+                if "twist" not in st.session_state and "rise" not in st.session_state:
+                    st.session_state.rise = params['rise']
+                    st.session_state.twist = params['twist']
+                    st.session_state.pitch = twist2pitch(twist=st.session_state.twist, rise=st.session_state.rise)
+                    st.session_state.csym = params['csym']
             else:
                 msg +=  "  \n*helical params not available*"
             st.markdown(msg)
@@ -789,9 +790,17 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
             with st.expander(label="Generate 2-D projection from the 3-D map", expanded=False):
                 apply_helical_sym = st.checkbox(label='Apply helical symmetry', value=0, key=f'apply_helical_sym_{param_i}')
                 if apply_helical_sym:
-                    twist_ahs = st.number_input(label=f"Twist (°):", min_value=-180.0, max_value=180.0, value=float(params.get('twist',0)), step=1.0, key=f'twist_ahs_{param_i}')
-                    rise_ahs = st.number_input(label=f"Rise (Å):", min_value=0.0, value=float(params.get('rise',0)), step=1.0, key=f'rise_ahs_{param_i}')
-                    csym_ahs = st.number_input(label=f"Csym:", min_value=1, value=int(params.get('csym',1)), step=1, key=f'csym_ahs_{param_i}')
+                    try:
+                        twist_ahs = float(params["twist"])
+                        rise_ahs = float(params["rise"])
+                        csym_ahs = max(1, int(params["csym"]))
+                    except:
+                        twist_ahs = st.session_state.twist
+                        rise_ahs = st.session_state.rise
+                        csym_ahs = max(1, int(st.session_state.csym))
+                    twist_ahs = st.number_input(label=f"Twist (°):", min_value=-180.0, max_value=180.0, value=twist_ahs, step=1.0, key=f'twist_ahs_{param_i}')
+                    rise_ahs = st.number_input(label=f"Rise (Å):", min_value=0.0, value=rise_ahs, step=1.0, key=f'rise_ahs_{param_i}')
+                    csym_ahs = st.number_input(label=f"Csym:", min_value=1, value=csym_ahs, step=1, key=f'csym_ahs_{param_i}')
                     apix_map = st.number_input(label=f"Current map pixel size (Å):", min_value=0.0, value=apix_auto, step=1.0, key=f'apix_map_{param_i}')
                     apix_ahs = st.number_input(label=f"New map pixel size (Å):", min_value=0.0, value=apix_map, step=1.0, key=f'apix_ahs_{param_i}')
                     nz, ny, nx = data_all.shape
