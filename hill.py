@@ -69,7 +69,7 @@ def main(args):
     if "input_mode_0" not in st.session_state:
         set_session_state_from_data_example()
     
-    col1, col2, col3, col4 = st.columns((1.2, 0.6, 0.4, 4.0))
+    col1, (col2, col3, col4) = st.sidebar, st.columns((1.0, 0.55, 4.0), gap='small')
 
     with col1:
         with st.expander(label="README", expanded=False):
@@ -407,7 +407,7 @@ def main(args):
         figs[0].js_on_event(MouseEnter, title_js)
 
         if fig_ellipses:
-            slider_width = figs_with//3
+            slider_width = figs_with//3 if len(figs)>1 else figs_with
             from bokeh.models import Slider, CustomJS
             slider_twist = Slider(start=-180, end=180, value=twist, step=0.01, title="Twist (°)", width=slider_width)
             slider_pitch = Slider(start=pitch/2, end=pitch*2.0, value=pitch, step=pitch*0.002, title="Pitch (Å)", width=slider_width)
@@ -635,7 +635,7 @@ def create_layerline_image_figure(data, cutoff_res_x, cutoff_res_y, helical_radi
     fig.yaxis.visible = yaxis_visible   # leaving yaxis on will make the crosshair x-position out of sync with other figures
 
     source_data = ColumnDataSource(data=dict(image=[data.astype(np.float16)], x=[-nx//2*dsx], y=[-ny//2*dsy], dw=[nx*dsx], dh=[ny*dsy], bessel=[bessel]))
-    if phase is not None: source_data["phase"] = [np.fmod(np.rad2deg(phase)+360, 360).astype(np.float16)]
+    if phase is not None: source_data.add(data=[np.fmod(np.rad2deg(phase)+360, 360).astype(np.float16)], name="phase")
     if const_image_color:
         palette = (const_image_color,)
     else:
@@ -847,17 +847,19 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
 
             nz, ny, nx = data_all.shape
             if len(data_to_show)>1:
-                st.markdown('<div style="text-align: center;">Click to choose an image:</div>', unsafe_allow_html=True)
-                from st_clickable_images import clickable_images
-                images = [encode_numpy(data_all[i], vflip=True) for i in data_to_show]
-                with st.container(height=600):
-                    image_index = clickable_images(
-                        images,
-                        titles=[f"{i+1}" for i in data_to_show],
-                        div_style={"display": "flex", "justify-content": "center", "flex-wrap": "wrap"},
-                        img_style={"margin": "2px", "height": "128px"},
-                        key=f"image_index_{param_i}"
-                    )
+                with st.expander(label="Choose an image", expanded=True):
+                    from st_clickable_images import clickable_images
+                    images = [encode_numpy(data_all[i], vflip=True) for i in data_to_show]
+                    thumbnail_size = 128
+                    n_per_row = 400//thumbnail_size
+                    with st.container(height=min(500, len(images)*thumbnail_size//n_per_row), border=False):
+                        image_index = clickable_images(
+                            images,
+                            titles=[f"{i+1}" for i in data_to_show],
+                            div_style={"display": "flex", "justify-content": "center", "flex-wrap": "wrap"},
+                            img_style={"margin": "1px", "height": f"{thumbnail_size}px"},
+                            key=f"image_index_{param_i}"
+                        )
      
                 if image_index<0: image_index = 0
                 image_index = data_to_show[image_index]
