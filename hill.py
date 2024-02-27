@@ -46,8 +46,62 @@ from bokeh.models import CustomJS, Span, LinearColorMapper
 from bokeh.models import ColumnDataSource, HoverTool, CrosshairTool
 from bokeh.events import MouseMove, DoubleTap
 from bokeh.layouts import gridplot
-import gc
+import math, random, gc
+from streamlit_drawable_canvas import st_canvas
+from PIL import Image
+
+import matplotlib.pyplot as plt
+from scipy import ndimage as ndi
+from astropy.convolution import Gaussian2DKernel
+import scipy.fftpack as fp
+import mrcfile
+from scipy.spatial.transform import Rotation as R
+from scipy.ndimage import affine_transform
+from scipy.signal import correlate, convolve, find_peaks
+from scipy.interpolate import splrep, splev, BSpline
+from scipy.interpolate import RegularGridInterpolator
+from matplotlib import cm
+
 gc.enable()
+
+canvas_json_template={"version":"4.4.0", "objects":[]}
+dot_json_template={
+    "type":"circle",
+    "version":"4.4.0",
+    "originX":"left",
+    "originY":"top",
+    "left":128,
+    "top":128,
+    "width":6,
+    "height":6,
+    "fill":"rgba(255, 0, 0, 0.3)",
+    "stroke":"#FF0000",
+    "strokeWidth":3,
+    "strokeDashArray":None,
+    "strokeLineCap":"butt",
+    "strokeDashOffset":0,
+    "strokeLineJoin":"miter",
+    "strokeUniform":False,
+    "strokeMiterLimit":4,
+    "scaleX":1,
+    "scaleY":1,
+    "angle":0,
+    "flipX":False,
+    "flipY":False,
+    "opacity":0.3,
+    "shadow":None,
+    "visible":True,
+    "backgroundColor":"",
+    "fillRule":"nonzero",
+    "paintFirst":"fill",
+    "globalCompositeOperation":"source-over",
+    "skewX":0,
+    "skewY":0,
+    "radius":3,
+    "startAngle":0,
+    "endAngle":6.283185307179586
+}
+
 
 #from memory_profiler import profile
 #@profile(precision=4)
@@ -68,14 +122,14 @@ def main(args):
 
     if "input_mode_0" not in st.session_state:
         set_session_state_from_data_example()
-    
-    col1, (col2, col3, col4) = st.sidebar, st.columns((1.0, 0.55, 4.0), gap='small')
 
-    with col1:
+    out_col1 = st.sidebar
+
+    with out_col1:
         with st.expander(label="README", expanded=False):
             st.write("This Web app considers a biological helical structure as the product of a continous helix and a set of parallel planes. Based on the covolution theory, the Fourier Transform (FT) of a helical structure would be the convolution of the FT of the continous helix and the FT of the planes.  \nThe FT of a continous helix consists of equally spaced layer planes (3D) or layerlines (2D projection) that can be described by Bessel functions of increasing orders (0, ±1, ±2, ...) from the Fourier origin (i.e. equator). The spacing between the layer planes/lines is determined by the helical pitch (i.e. the shift along the helical axis for a 360° turn of the helix). If the structure has additional cyclic symmetry (for example, C6) around the helical axis, only the layer plane/line orders of integer multiplier of the symmetry (e.g. 0, ±6, ±12, ...) are visible. The primary peaks of the layer lines in the power spectra form a pattern similar to a X symbol.  \nThe FT of the parallel planes consists of equally spaced points along the helical axis (i.e. meridian) with the spacing being determined by the helical rise.  \nThe convolution of these two components (X-shaped pattern of layer lines and points along the meridian) generates the layer line patterns seen in the power spectra of the projection images of helical structures. The helical indexing task is thus to identify the helical rise, pitch (or twist), and cyclic symmetry that would predict a layer line pattern to explain the observed layer lines in the power spectra. This Web app allows you to interactively change the helical parameters and superimpose the predicted layer liines on the power spectra to complete the helical indexing task.  \n  \nPS: power spectra; PD: phase differences across the meridian; YP: Y-axis power spectra profile; LL: layer lines; m: indices of the X-patterns along the meridian; Jn: Bessel order")
 
-        data_all, image_index, data, apix, radius_auto, mask_radius, input_type, is_3d, input_params, (image_container, image_label) = obtain_input_image(col1, param_i=0)
+        data_all, image_index, data, apix, radius_auto, mask_radius, input_type, is_3d, input_params, (image_container, image_label) = obtain_input_image(out_col1, param_i=0)
         input_mode, (uploaded_filename, url, emd_id) = input_params
 
         if input_type in ["image"]:
@@ -86,11 +140,13 @@ def main(args):
             label = f"Load amplitudes from another image"
         input_image2 = st.checkbox(label=label, value=False)        
         if input_image2:
-            _, image_index2, data2, apix2, radius_auto2, mask_radius2, input_type2, is_3d2, input_params2, _ = obtain_input_image(col1, param_i=1, image_index_sync=image_index+1)
+            _, image_index2, data2, apix2, radius_auto2, mask_radius2, input_type2, is_3d2, input_params2, _ = obtain_input_image(out_col1, param_i=1, image_index_sync=image_index + 1)
             input_mode2, (uploaded_filename2, url2, emd_id2) = input_params2
         else:
             image_index2, data2, apix2, radius_auto2, mask_radius2, input_type2, is_3d2 = [None] * 7
             input_mode2, (uploaded_filename2, url2, emd_id2) = None, (None, None, None)
+
+        show_straightening_options = st.checkbox(label="Show Filament Straightening Options", value=False)
 
         with st.expander(label="Server info", expanded=False):
             server_info_empty = st.empty()
@@ -110,404 +166,513 @@ def main(args):
         """
         st.markdown(hide_streamlit_style, unsafe_allow_html=True) 
 
-    with col2:
-        button = st.button("Copy twist/rise↶")
-        if button:
-            if "twist" in st.query_params and "rise" in st.query_params:
-                st.session_state.rise = float(st.query_params["rise"])
-                st.session_state.twist = float(st.query_params["twist"])
-                st.session_state.pitch = twist2pitch(st.session_state.twist, st.session_state.rise)
-                st.query_params.pop('rise', None)
-                st.query_params.pop('twist', None)
-
-        pitch_or_twist_choices = ["pitch", "twist"]
-        pitch_or_twist = st.radio(label="Choose pitch or twist mode", options=pitch_or_twist_choices, index=0, label_visibility="collapsed", horizontal=True)
-        use_pitch = 1 if pitch_or_twist=="pitch" else 0
-
-        pitch_or_twist_number_input = st.empty()
-        pitch_or_twist_text = st.empty()
-        rise_empty = st.empty()
-
-        ny, nx = data.shape
-        max_rise = round(max(2000., max(ny, nx)*apix * 2.0), 2)
-        min_rise = round(apix/10.0, 2)
-        rise = rise_empty.number_input('Rise (Å)', value=st.session_state.get("rise", min_rise), min_value=min_rise, max_value=max_rise, step=1.0, format="%.3f", key="rise")
-
-        if "twist" not in st.session_state: st.session_state.twist = 1.0
-        if use_pitch:
-            min_pitch = abs(rise)
-            pitch = pitch_or_twist_number_input.number_input('Pitch (Å)', value=max(min_pitch, st.session_state.get("pitch", min_pitch)), min_value=min_pitch, step=1.0, format="%.2f", help="twist = 360 / (pitch/rise)")
-            st.session_state.pitch = pitch
-            twist = pitch2twist(pitch, rise)
-            st.session_state.twist = twist
-            pitch_or_twist_text.markdown(f"*(twist = {st.session_state.twist:.2f} °)*")
-        else:
-            twist = pitch_or_twist_number_input.number_input('Twist (°)', value=st.session_state.twist, min_value=-180.0, max_value=180.0, step=1.0, format="%.2f", help="pitch = 360/twist * rise", key="twist")
-            pitch = abs(round(twist2pitch(twist, rise), 2))
-            st.session_state.pitch = pitch
-            pitch_or_twist_text.markdown(f"*(pitch = {pitch:.2f} Å)*")
-
-        csym = st.number_input('Csym', min_value=1, step=1, help="Cyclic symmetry around the helical axis", key="csym")
-
-        if input_image2: value = max(radius_auto*apix, radius_auto2*apix2)
-        else: value = radius_auto*apix
-        value = max(min(500.0, value), 1.0)
-        helical_radius = 0.5*st.number_input('Filament/tube diameter (Å)', value=value*2, min_value=1.0, max_value=1000.0, step=10., format="%.1f", help="Mean radius of the tube/filament density from the helical axis", key="diameter")
-        
-        tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-90.0, max_value=90.0, step=1.0, help="Only used to compute the layerline positions and to simulate the helix. Will not change the power spectra and phase differences across meridian of the input image(s)", key="tilt")
-        cutoff_res_x = st.number_input('Resolution limit - X (Å)', value=3*apix, min_value=2*apix, step=1.0, help="Set the highest resolution to be displayed in the X-direction", key="cutoff_res_x")
-        cutoff_res_y = st.number_input('Resolution limit - Y (Å)', value=2*apix, min_value=2.*apix, step=1.0, help="Set the highest resolution to be displayed in the Y-direction", key="cutoff_res_y")
-        with st.expander(label="Addtional settings", expanded=False):
-            fft_top_only = st.checkbox("Only display the top half of FFT", value=False, key="fft_top_only")
-            log_xform = st.checkbox(label="Log(amplitude)", value=True, help="Perform log transform of the power spectra to allow clear display of layerlines at low and high resolutions")
-            const_image_color = st.text_input("Flatten the PS/PD image in this color", value="", placeholder="white", key="const_image_color")
-            ll_colors = st.text_input('Layerline colors', value="lime cyan violet salmon silver", help="Set the colors of the ellipses/text labels representing the layerlines. Here is a complete list of supported [colors](https://docs.bokeh.org/en/2.4.3/docs/reference/colors.html#bokeh-colors-named)", key="ll_colors").split()
-            hp_fraction = st.number_input('Fourier high-pass (%)', value=0.4, min_value=0.0, max_value=100.0, step=0.1, format="%.2f", help="Perform high-pass Fourier filtering of the power spectra with filter=0.5 at this percentage of the Nyquist resolution") / 100.0
-            lp_fraction = st.number_input('Fourier low-pass (%)', value=0.0, min_value=0.0, max_value=100.0, step=10.0, format="%.2f", help="Perform low-pass Fourier filtering of the power spectra with filter=0.5 at this percentage of the Nyquist resolution") / 100.0
-            pnx = int(st.number_input('FFT X-dim size (pixels)', value=512, min_value=min(nx, 128), step=2, help="Set the size of FFT in X-dimension to this number of pixels", key="pnx"))
-            pny = int(st.number_input('FFT Y-dim size (pixels)', value=1024, min_value=min(ny, 512), step=2, help="Set the size of FFT in Y-dimension to this number of pixels", key="pny"))
-        with st.expander(label="Simulation", expanded=False):
-            ball_radius = st.number_input('Gaussian radius (Å)', value=0.0, min_value=0.0, max_value=helical_radius, step=5.0, format="%.1f", help="A 3-D Gaussian function will be used to reprsent each subunit in the simulated helix. The Gaussian function will fall off from 1 to 0.5 at this radius. A value <=0 will disable the simulation", key="ball_radius")
-            show_simu = True if ball_radius > 0 else False
-            noise=0.0
-            use_plot_size=False
-            if show_simu:
-                az = st.number_input('Azimuthal angle (°)', value=0.0, min_value=0.0, max_value=360.0, step=1.0, format="%.2f", help="Position the Gaussian in the central Z-section at this azimuthal angle", key="simuaz")
-                noise = st.number_input('Noise (sigma)', value=0.001, min_value=0., step=1., format="%.2f", help="Add random noise to the simulated helix image", key="simunoise")
-                use_plot_size = st.checkbox('Use plot size', value=False, help="If checked, the simulated helix image will use the image size of the displayed power spectra instead of the size of the input image", key="useplotsize")
-        
-        movie_frames = 0
-        if is_3d or show_simu:
-            with st.expander(label="Tilt movie", expanded=False):
-                movie_frames = st.number_input('Movie frame #', value=0, min_value=0, max_value=1000, step=1, help="Set the number of movies frames that will be generated to show the morphing of the power spectra and phase differences across meridian images of the simulated helix at different tilt angles in the range from 0 to the value specified in the *Out-of-plane tilt (°)* input box. A value <=0 will not generate a movie")
-                if movie_frames>0:
-                    if is_3d and show_simu:
-                        movie_modes = {0:"3D map", 1:"simulation"}
-                        movie_mode = st.radio(label="Tilt:", options=list(movie_modes.keys()), format_func=lambda i:movie_modes[i], index=0, help="Tilt the input 3D map to different angles instead of simulating a helix at different tilt angles", horizontal=True)
-                    elif is_3d:
-                        movie_mode = 0
-                    else:
-                        movie_mode = 1
-                    if movie_mode == 0:
-                        movie_noise = st.number_input('Noise (sigma)', value=0., min_value=0., step=1., format="%.2f", help="Add random noise to the projection images")
-        
-        share_url = st.checkbox('Show sharable URL', value=False, help="Include relevant parameters in the browser URL to allow you to share the URL and reproduce the plots", key="share_url")
-        if share_url:
-            show_qr = st.checkbox('Show QR code of the URL', value=False, help="Display the QR code of the sharable URL", key="show_qr")
-        else:
-            show_qr = False
-
-    if input_type in ["PS"]:
-        pwr = resize_rescale_power_spectra(data, nyquist_res=2*apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
-                output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction, norm=1)
-        phase = None
-        phase_diff = None
-    elif input_type in ["PD"]:
-        pwr = None
-        phase = None
-        phase_diff = resize_rescale_power_spectra(data, nyquist_res=2*apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
-                output_size=(pny, pnx), log=0, low_pass_fraction=0, high_pass_fraction=0, norm=0)
+    if show_straightening_options:
+        tab1, tab2 = st.tabs(["Filament Straightening","HILL"])
+        display_tab=tab2
     else:
-        pwr, phase = compute_power_spectra(data, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
-                output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
-        phase_diff = compute_phase_difference_across_meridian(phase)                
-    
-    if input_image2:
-        if input_type2 in ["PS"]:
-            pwr2 = resize_rescale_power_spectra(data2, nyquist_res=2*apix2, cutoff_res=(cutoff_res_y, cutoff_res_x), 
+        tab3, _ = st.tabs(["HILL"," "])
+        display_tab=tab3
+    if show_straightening_options:
+        with tab1:
+            data[np.isnan(data)] = 0
+            ny, nx = data.shape
+            n_samples = st.number_input("Number of auto-sampled dots:", value=10, min_value=4, max_value=int(ny),
+                                        help="Number of center points automatically sampled on the image. The dots are used to fit the spline as the curved helical axis.")
+            r_filament = st.number_input("Filament radius (Å):", value=radius_auto * apix, max_value=int(nx) * apix,
+                                            help="Radius of filament. Used to generate the row template for determining the center points of the filament at different rows with cross-correlation.")
+            r_filament_pixel = int(r_filament / apix)
+
+            aspect_ratio = float(nx / ny)
+            anisotropic_ratio = 10
+            lp_x = st.number_input("Low-pass filter Gaussian X Std:", value=2 * anisotropic_ratio * aspect_ratio,
+                                    help="Standard deviation along the X axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for center point sampling")
+            lp_y = st.number_input("Low-pass filter Gaussian Y Std:", value=2,
+                                    help="Standard deviation along the Y axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for center point sampling")
+
+            # when the image width is larger than the column length, the canvas cannot be shown as a whole
+            xs, ys = sample_axis_dots(data, nx, ny, r_filament_pixel, n_samples, lp_x, lp_y)
+            canvas_scale_factor = 1
+            point_display_radius = r_filament_pixel * canvas_scale_factor
+            init_canvas_json = canvas_json_template.copy()
+
+            for i in range(len(xs)):
+                tmp_dot = dot_json_template.copy()
+                tmp_dot["left"] = int(xs[i]) * canvas_scale_factor - point_display_radius
+                tmp_dot["top"] = int(ys[i]) * canvas_scale_factor - point_display_radius
+                tmp_dot["radius"] = point_display_radius
+                init_canvas_json["objects"].append(tmp_dot)
+
+            point_display_radius = r_filament_pixel * canvas_scale_factor
+
+            st.write("---")
+            drawing_mode = st.radio("Canvas Mode:", ("Move current dots", "Place new dots"))
+            if drawing_mode == "Place new dots":
+                drawing_mode = "point"
+                initial_drawing = None
+            if drawing_mode == "Move current dots":
+                drawing_mode = "transform"
+                initial_drawing = init_canvas_json
+
+            min_data = np.min(data)
+            max_data = np.max(data)
+
+            import scipy.fftpack as fp
+            data_fft = fp.fftshift(fp.fft2(data))
+
+            kernel = Gaussian2DKernel(lp_x, lp_y, 0, x_size=nx, y_size=ny).array
+            max_k = np.max(kernel)
+            min_k = np.min(kernel)
+            kernel = (kernel - min_k) / (max_k - min_k)
+            kernel_shape = np.shape(kernel)
+
+            data_fft_filtered = np.multiply(data_fft, kernel)
+            data_filtered = fp.ifft2(fp.ifftshift(data_fft_filtered)).real
+
+            # bg_img=Image.fromarray(np.uint8((data-min_data)/(max_data-min_data)*255),'L')
+            min_data = np.min(data_filtered)
+            max_data = np.max(data_filtered)
+
+            bg_img = Image.fromarray(np.uint8((data_filtered - min_data) / (max_data - min_data) * 255), 'L')
+
+            # Create a canvas component
+            canvas_result = st_canvas(
+                fill_color="rgba(255, 0, 0, 0.3)",  # Fixed fill color with some opacity
+                stroke_width=1,
+                stroke_color="#FF0000",
+                background_image=bg_img,
+                height=int(ny * canvas_scale_factor),
+                width=int(nx * canvas_scale_factor),
+                update_streamlit=False,
+                drawing_mode=drawing_mode,
+                initial_drawing=initial_drawing,
+                point_display_radius=point_display_radius if drawing_mode == 'point' else 0,
+                key="canvas",
+            )
+
+            st.info("Please click the first button from the left on the canvas tool bar to update your changes.")
+            do_straightening = st.checkbox(label="Straighten filament", value=False)
+            if do_straightening:
+                xs = []
+                ys = []
+                for dot in sorted(canvas_result.json_data["objects"], key=lambda x: x['top']):
+                    xs.append((dot["left"] + point_display_radius) / canvas_scale_factor)
+                    ys.append((dot["top"] + point_display_radius) / canvas_scale_factor)
+                st.write(len(xs))
+
+                try:
+                    test_canvas_json = canvas_json_template.copy()
+                    for i in range(len(xs)):
+                        tmp_dot = dot_json_template.copy()
+                        tmp_dot["left"] = int(xs[i]) * canvas_scale_factor
+                        tmp_dot["top"] = int(ys[i]) * canvas_scale_factor
+                        test_canvas_json["objects"].append(tmp_dot)
+
+                    new_xs, tck = fit_spline(data, xs, ys, display=True)
+                    data = filament_straighten(data, tck, new_xs, ys, r_filament_pixel)
+                except TypeError:
+                    st.error(
+                        "Too few dots. There must be at least 4 dots to fit the spline. Please click the first button from the left on the canvas tool bar after you make changes to the canvas.")
+    with display_tab:
+        col2, col3, col4 = st.columns((1.0, 0.55, 4.0), gap='small')
+
+        with col2:
+            button = st.button("Copy twist/rise↶")
+            if button:
+                if "twist" in st.query_params and "rise" in st.query_params:
+                    st.session_state.rise = float(st.query_params["rise"])
+                    st.session_state.twist = float(st.query_params["twist"])
+                    st.session_state.pitch = twist2pitch(st.session_state.twist, st.session_state.rise)
+                    st.query_params.pop('rise', None)
+                    st.query_params.pop('twist', None)
+
+            pitch_or_twist_choices = ["pitch", "twist"]
+            pitch_or_twist = st.radio(label="Choose pitch or twist mode", options=pitch_or_twist_choices, index=0, label_visibility="collapsed", horizontal=True)
+            use_pitch = 1 if pitch_or_twist=="pitch" else 0
+
+            pitch_or_twist_number_input = st.empty()
+            pitch_or_twist_text = st.empty()
+            rise_empty = st.empty()
+
+            ny, nx = data.shape
+            max_rise = round(max(2000., max(ny, nx)*apix * 2.0), 2)
+            min_rise = round(apix/10.0, 2)
+            rise = rise_empty.number_input('Rise (Å)', value=st.session_state.get("rise", min_rise), min_value=min_rise, max_value=max_rise, step=1.0, format="%.3f", key="rise")
+
+            if "twist" not in st.session_state: st.session_state.twist = 1.0
+            if use_pitch:
+                min_pitch = abs(rise)
+                pitch = pitch_or_twist_number_input.number_input('Pitch (Å)', value=max(min_pitch, st.session_state.get("pitch", min_pitch)), min_value=min_pitch, step=1.0, format="%.2f", help="twist = 360 / (pitch/rise)")
+                st.session_state.pitch = pitch
+                twist = pitch2twist(pitch, rise)
+                st.session_state.twist = twist
+                pitch_or_twist_text.markdown(f"*(twist = {st.session_state.twist:.2f} °)*")
+            else:
+                twist = pitch_or_twist_number_input.number_input('Twist (°)', value=st.session_state.twist, min_value=-180.0, max_value=180.0, step=1.0, format="%.2f", help="pitch = 360/twist * rise", key="twist")
+                pitch = abs(round(twist2pitch(twist, rise), 2))
+                st.session_state.pitch = pitch
+                pitch_or_twist_text.markdown(f"*(pitch = {pitch:.2f} Å)*")
+
+            csym = st.number_input('Csym', min_value=1, step=1, help="Cyclic symmetry around the helical axis", key="csym")
+
+            if input_image2: value = max(radius_auto*apix, radius_auto2*apix2)
+            else: value = radius_auto*apix
+            value = max(min(500.0, value), 1.0)
+            helical_radius = 0.5*st.number_input('Filament/tube diameter (Å)', value=value*2, min_value=1.0, max_value=1000.0, step=10., format="%.1f", help="Mean radius of the tube/filament density from the helical axis", key="diameter")
+            
+            tilt = st.number_input('Out-of-plane tilt (°)', value=0.0, min_value=-90.0, max_value=90.0, step=1.0, help="Only used to compute the layerline positions and to simulate the helix. Will not change the power spectra and phase differences across meridian of the input image(s)", key="tilt")
+            cutoff_res_x = st.number_input('Resolution limit - X (Å)', value=3*apix, min_value=2*apix, step=1.0, help="Set the highest resolution to be displayed in the X-direction", key="cutoff_res_x")
+            cutoff_res_y = st.number_input('Resolution limit - Y (Å)', value=2*apix, min_value=2.*apix, step=1.0, help="Set the highest resolution to be displayed in the Y-direction", key="cutoff_res_y")
+            with st.expander(label="Addtional settings", expanded=False):
+                fft_top_only = st.checkbox("Only display the top half of FFT", value=False, key="fft_top_only")
+                log_xform = st.checkbox(label="Log(amplitude)", value=True, help="Perform log transform of the power spectra to allow clear display of layerlines at low and high resolutions")
+                const_image_color = st.text_input("Flatten the PS/PD image in this color", value="", placeholder="white", key="const_image_color")
+                ll_colors = st.text_input('Layerline colors', value="lime cyan violet salmon silver", help="Set the colors of the ellipses/text labels representing the layerlines. Here is a complete list of supported [colors](https://docs.bokeh.org/en/2.4.3/docs/reference/colors.html#bokeh-colors-named)", key="ll_colors").split()
+                hp_fraction = st.number_input('Fourier high-pass (%)', value=0.4, min_value=0.0, max_value=100.0, step=0.1, format="%.2f", help="Perform high-pass Fourier filtering of the power spectra with filter=0.5 at this percentage of the Nyquist resolution") / 100.0
+                lp_fraction = st.number_input('Fourier low-pass (%)', value=0.0, min_value=0.0, max_value=100.0, step=10.0, format="%.2f", help="Perform low-pass Fourier filtering of the power spectra with filter=0.5 at this percentage of the Nyquist resolution") / 100.0
+                pnx = int(st.number_input('FFT X-dim size (pixels)', value=512, min_value=min(nx, 128), step=2, help="Set the size of FFT in X-dimension to this number of pixels", key="pnx"))
+                pny = int(st.number_input('FFT Y-dim size (pixels)', value=1024, min_value=min(ny, 512), step=2, help="Set the size of FFT in Y-dimension to this number of pixels", key="pny"))
+            with st.expander(label="Simulation", expanded=False):
+                ball_radius = st.number_input('Gaussian radius (Å)', value=0.0, min_value=0.0, max_value=helical_radius, step=5.0, format="%.1f", help="A 3-D Gaussian function will be used to reprsent each subunit in the simulated helix. The Gaussian function will fall off from 1 to 0.5 at this radius. A value <=0 will disable the simulation", key="ball_radius")
+                show_simu = True if ball_radius > 0 else False
+                noise=0.0
+                use_plot_size=False
+                if show_simu:
+                    az = st.number_input('Azimuthal angle (°)', value=0.0, min_value=0.0, max_value=360.0, step=1.0, format="%.2f", help="Position the Gaussian in the central Z-section at this azimuthal angle", key="simuaz")
+                    noise = st.number_input('Noise (sigma)', value=0.001, min_value=0., step=1., format="%.2f", help="Add random noise to the simulated helix image", key="simunoise")
+                    use_plot_size = st.checkbox('Use plot size', value=False, help="If checked, the simulated helix image will use the image size of the displayed power spectra instead of the size of the input image", key="useplotsize")
+            
+            movie_frames = 0
+            if is_3d or show_simu:
+                with st.expander(label="Tilt movie", expanded=False):
+                    movie_frames = st.number_input('Movie frame #', value=0, min_value=0, max_value=1000, step=1, help="Set the number of movies frames that will be generated to show the morphing of the power spectra and phase differences across meridian images of the simulated helix at different tilt angles in the range from 0 to the value specified in the *Out-of-plane tilt (°)* input box. A value <=0 will not generate a movie")
+                    if movie_frames>0:
+                        if is_3d and show_simu:
+                            movie_modes = {0:"3D map", 1:"simulation"}
+                            movie_mode = st.radio(label="Tilt:", options=list(movie_modes.keys()), format_func=lambda i:movie_modes[i], index=0, help="Tilt the input 3D map to different angles instead of simulating a helix at different tilt angles", horizontal=True)
+                        elif is_3d:
+                            movie_mode = 0
+                        else:
+                            movie_mode = 1
+                        if movie_mode == 0:
+                            movie_noise = st.number_input('Noise (sigma)', value=0., min_value=0., step=1., format="%.2f", help="Add random noise to the projection images")
+            
+            share_url = st.checkbox('Show sharable URL', value=False, help="Include relevant parameters in the browser URL to allow you to share the URL and reproduce the plots", key="share_url")
+            if share_url:
+                show_qr = st.checkbox('Show QR code of the URL', value=False, help="Display the QR code of the sharable URL", key="show_qr")
+            else:
+                show_qr = False
+
+        if input_type in ["PS"]:
+            pwr = resize_rescale_power_spectra(data, nyquist_res=2*apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
                     output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction, norm=1)
-            phase2 = None
-            phase_diff2 = None
-        elif input_type2 in ["PD"]:
+            phase = None
+            phase_diff = None
+        elif input_type in ["PD"]:
+            pwr = None
+            phase = None
+            phase_diff = resize_rescale_power_spectra(data, nyquist_res=2*apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
+                    output_size=(pny, pnx), log=0, low_pass_fraction=0, high_pass_fraction=0, norm=0)
+        else:
+            pwr, phase = compute_power_spectra(data, apix=apix, cutoff_res=(cutoff_res_y, cutoff_res_x), 
+                    output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
+            phase_diff = compute_phase_difference_across_meridian(phase)                
+        
+        if input_image2:
+            if input_type2 in ["PS"]:
+                pwr2 = resize_rescale_power_spectra(data2, nyquist_res=2*apix2, cutoff_res=(cutoff_res_y, cutoff_res_x), 
+                        output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction, norm=1)
+                phase2 = None
+                phase_diff2 = None
+            elif input_type2 in ["PD"]:
+                pwr2 = None
+                phase2 = None
+                phase_diff2 = resize_rescale_power_spectra(data2, nyquist_res=2*apix2, cutoff_res=(cutoff_res_y, cutoff_res_x), 
+                    output_size=(pny, pnx), log=0, low_pass_fraction=0, high_pass_fraction=0, norm=0)
+            else:
+                pwr2, phase2 = compute_power_spectra(data2, apix=apix2, cutoff_res=(cutoff_res_y, cutoff_res_x), 
+                        output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
+                phase_diff2 = compute_phase_difference_across_meridian(phase2)                
+        else:
             pwr2 = None
             phase2 = None
-            phase_diff2 = resize_rescale_power_spectra(data2, nyquist_res=2*apix2, cutoff_res=(cutoff_res_y, cutoff_res_x), 
-                output_size=(pny, pnx), log=0, low_pass_fraction=0, high_pass_fraction=0, norm=0)
-        else:
-            pwr2, phase2 = compute_power_spectra(data2, apix=apix2, cutoff_res=(cutoff_res_y, cutoff_res_x), 
-                    output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
-            phase_diff2 = compute_phase_difference_across_meridian(phase2)                
-    else:
-        pwr2 = None
-        phase2 = None
-        phase_diff2 = None
+            phase_diff2 = None
 
-    with col3:
-        st.subheader("Display:")
-        show_pwr = False
-        show_phase = False
-        show_phase_diff = False
-        show_yprofile = False
-        if input_type in ["image", "PS"]:
-            show_pwr = st.checkbox(label="PS", value=True, help="Show the power spectra", key="show_pwr")
-        if show_pwr:
-            show_yprofile = st.checkbox(label="YP", value=True, help="Show the Y-profile of the power spectra (i.e. horizontal projection of the power spectra", key="show_yprofile")
-        if input_type in ["image"]:
-            show_phase = st.checkbox(label="Phase", value=False, help="Show the phase values in the hover tooltips of the displayed power spectra and phase differences across meridian")
-        if input_type in ["image", "PD"]:
-            show_phase_diff = st.checkbox(label="PD", value=True, help="Show the phase differences across meridian", key="show_phase_diff")
-        
-        show_pwr2 = False
-        show_phase2 = False
-        show_phase_diff2 = False
-        show_yprofile2 = False
-        if input_image2:
-            if input_type2 in ["image", "PS"]:
-                if input_type2 in ["PS"]: value = True
-                else: value = not show_pwr
-                show_pwr2 = st.checkbox(label="PS2", value=value, help="Show the power spectra of the 2nd input image")
-            if show_pwr2:
-                show_yprofile2 = st.checkbox(label="YP2", value=show_yprofile, help="Show the Y-profile of the power spectra of the 2nd input image (i.e. horizontal projection of the power spectra")
-            if input_type2 in ["image"]:
-                if show_pwr2: show_phase2 = st.checkbox(label="Phase2", value=False)
-            if input_type2 in ["image", "PD"]:
-                if input_type2 in ["PD"]: value = True
-                else: value = not show_phase_diff
-                show_phase_diff2 = st.checkbox(label="PD2", value=value, help="Show the phase differences across meridian of the 2nd input image")
+        with col3:
+            st.subheader("Display:")
+            show_pwr = False
+            show_phase = False
+            show_phase_diff = False
+            show_yprofile = False
+            if input_type in ["image", "PS"]:
+                show_pwr = st.checkbox(label="PS", value=True, help="Show the power spectra", key="show_pwr")
+            if show_pwr:
+                show_yprofile = st.checkbox(label="YP", value=True, help="Show the Y-profile of the power spectra (i.e. horizontal projection of the power spectra", key="show_yprofile")
+            if input_type in ["image"]:
+                show_phase = st.checkbox(label="Phase", value=False, help="Show the phase values in the hover tooltips of the displayed power spectra and phase differences across meridian")
+            if input_type in ["image", "PD"]:
+                show_phase_diff = st.checkbox(label="PD", value=True, help="Show the phase differences across meridian", key="show_phase_diff")
+            
+            show_pwr2 = False
+            show_phase2 = False
+            show_phase_diff2 = False
+            show_yprofile2 = False
+            if input_image2:
+                if input_type2 in ["image", "PS"]:
+                    if input_type2 in ["PS"]: value = True
+                    else: value = not show_pwr
+                    show_pwr2 = st.checkbox(label="PS2", value=value, help="Show the power spectra of the 2nd input image")
+                if show_pwr2:
+                    show_yprofile2 = st.checkbox(label="YP2", value=show_yprofile, help="Show the Y-profile of the power spectra of the 2nd input image (i.e. horizontal projection of the power spectra")
+                if input_type2 in ["image"]:
+                    if show_pwr2: show_phase2 = st.checkbox(label="Phase2", value=False)
+                if input_type2 in ["image", "PD"]:
+                    if input_type2 in ["PD"]: value = True
+                    else: value = not show_phase_diff
+                    show_phase_diff2 = st.checkbox(label="PD2", value=value, help="Show the phase differences across meridian of the 2nd input image")
 
-        show_pwr_simu = False
-        show_phase_simu = False
-        show_phase_diff_simu = False
-        show_yprofile_simu = False
+            show_pwr_simu = False
+            show_phase_simu = False
+            show_phase_diff_simu = False
+            show_yprofile_simu = False
+            if show_simu:
+                show_pwr_simu = st.checkbox(label="PSSimu", value=show_pwr or show_pwr2)
+                if show_pwr_simu:
+                    show_yprofile_simu = st.checkbox(label="YPSimu", value=show_yprofile or show_yprofile2)
+                    show_phase_simu = st.checkbox(label="PhaseSimu", value=show_phase or show_phase2)
+                show_phase_diff_simu = st.checkbox(label="PDSimu", value=show_phase_diff or show_phase_diff2)
+
+            show_LL_text = False
+            if show_pwr or show_phase_diff or show_pwr2 or show_phase_diff2 or show_pwr_simu or show_phase_diff_simu:
+                show_pseudo_color = st.checkbox(label="Color", value=True, help="Show the power spectra in pseudo color instead of grey scale")
+                show_LL = st.checkbox(label="LL", value=True, help="Show the layer lines at positions computed from the current values of pitch/twist, rise, csym, radius, and tilt", key="show_LL")
+                if show_LL:
+                    show_LL_text = st.checkbox(label="LLText", value=True, help="Show the layer lines using integer numbers for the Bessel orders instead of ellipses", key="show_LL_text")
+
+                    st.subheader("m:")
+                    m_max_auto = int(np.floor(np.abs(rise/cutoff_res_y)))+3
+                    m_max = int(st.number_input(label=f"Max=", min_value=1, value=m_max_auto, step=1, help="Maximal number of layer line groups to show", key="m_max"))
+                    m_groups = compute_layer_line_positions(twist=twist, rise=rise, csym=csym, radius=helical_radius, tilt=tilt, cutoff_res=cutoff_res_y, m_max=m_max)
+                    ng = len(m_groups)
+                    show_choices = {}
+                    lgs = sorted(m_groups.keys())[::-1]
+                    for lgi, lg in enumerate(lgs):
+                        value = True if lg in [0, 1] else False
+                        show_choices[lg] = st.checkbox(label=str(lg), value=value, help=f"Show the layer lines in group m={lg}", key=f"m_{lg}")
+
         if show_simu:
-            show_pwr_simu = st.checkbox(label="PSSimu", value=show_pwr or show_pwr2)
-            if show_pwr_simu:
-                show_yprofile_simu = st.checkbox(label="YPSimu", value=show_yprofile or show_yprofile2)
-                show_phase_simu = st.checkbox(label="PhaseSimu", value=show_phase or show_phase2)
-            show_phase_diff_simu = st.checkbox(label="PDSimu", value=show_phase_diff or show_phase_diff2)
+            proj = simulate_helix(twist, rise, csym, helical_radius=helical_radius, ball_radius=ball_radius, 
+                    ny=data.shape[0], nx=data.shape[1], apix=apix, tilt=tilt, az0=az)
+            if noise>0:
+                sigma = np.std(proj[np.nonzero(proj)])
+                proj = proj + np.random.normal(loc=0.0, scale=noise*sigma, size=proj.shape)
+            fraction_x = mask_radius/(proj.shape[1]//2*apix)
+            tapering_image = generate_tapering_filter(image_size=proj.shape, fraction_start=[0.8, fraction_x], fraction_slope=0.1)
+            proj = proj * tapering_image
+            with image_container:
+                st.image([normalize(data), normalize(proj)], use_column_width=True, caption=[image_label, "Simulated"])
 
-        show_LL_text = False
-        if show_pwr or show_phase_diff or show_pwr2 or show_phase_diff2 or show_pwr_simu or show_phase_diff_simu:
-            show_pseudo_color = st.checkbox(label="Color", value=True, help="Show the power spectra in pseudo color instead of grey scale")
-            show_LL = st.checkbox(label="LL", value=True, help="Show the layer lines at positions computed from the current values of pitch/twist, rise, csym, radius, and tilt", key="show_LL")
-            if show_LL:
-                show_LL_text = st.checkbox(label="LLText", value=True, help="Show the layer lines using integer numbers for the Bessel orders instead of ellipses", key="show_LL_text")
+        with col4:
+            if not (show_pwr or show_phase_diff or show_pwr2 or show_phase_diff2 or show_pwr_simu or show_phase_diff_simu): return
 
-                st.subheader("m:")
-                m_max_auto = int(np.floor(np.abs(rise/cutoff_res_y)))+3
-                m_max = int(st.number_input(label=f"Max=", min_value=1, value=m_max_auto, step=1, help="Maximal number of layer line groups to show", key="m_max"))
-                m_groups = compute_layer_line_positions(twist=twist, rise=rise, csym=csym, radius=helical_radius, tilt=tilt, cutoff_res=cutoff_res_y, m_max=m_max)
-                ng = len(m_groups)
-                show_choices = {}
-                lgs = sorted(m_groups.keys())[::-1]
-                for lgi, lg in enumerate(lgs):
-                    value = True if lg in [0, 1] else False
-                    show_choices[lg] = st.checkbox(label=str(lg), value=value, help=f"Show the layer lines in group m={lg}", key=f"m_{lg}")
+            items = [ (show_pwr, pwr, "Power Spectra", show_phase, phase, show_phase_diff, phase_diff, "Phase Diff Across Meridian", show_yprofile), 
+                    (show_pwr2, pwr2, "Power Spectra - 2", show_phase2, phase2, show_phase_diff2, phase_diff2, "Phase Diff Across Meridian - 2", show_yprofile2)
+                    ]
+            if show_pwr_simu or show_phase_diff_simu:
+                if use_plot_size:
+                    apix_simu = min(cutoff_res_y, cutoff_res_x)/2
+                    proj = simulate_helix(twist, rise, csym, helical_radius=helical_radius, ball_radius=ball_radius, 
+                            ny=pny, nx=pnx, apix=apix_simu, tilt=tilt, az0=az)
+                    if noise>0:
+                        sigma = np.std(proj[np.nonzero(proj)])
+                        proj = proj + np.random.normal(loc=0.0, scale=noise*sigma, size=proj.shape)
+                    fraction_x = mask_radius/(proj.shape[1]//2*apix_simu)
+                    tapering_image = generate_tapering_filter(image_size=proj.shape, fraction_start=[0.8, fraction_x], fraction_slope=0.1)
+                    proj = proj * tapering_image
+                else:
+                    apix_simu = apix
+                proj_pwr, proj_phase = compute_power_spectra(proj, apix=apix_simu, cutoff_res=(cutoff_res_y, cutoff_res_x), 
+                        output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
+                proj_phase_diff = compute_phase_difference_across_meridian(proj_phase)                
+                items += [(show_pwr_simu, proj_pwr, "Simulated Power Spectra", show_phase_simu, proj_phase, show_phase_diff_simu, proj_phase_diff, "Simulated Phase Diff Across Meridian", show_yprofile_simu)]
 
-    if show_simu:
-        proj = simulate_helix(twist, rise, csym, helical_radius=helical_radius, ball_radius=ball_radius, 
-                ny=data.shape[0], nx=data.shape[1], apix=apix, tilt=tilt, az0=az)
-        if noise>0:
-            sigma = np.std(proj[np.nonzero(proj)])
-            proj = proj + np.random.normal(loc=0.0, scale=noise*sigma, size=proj.shape)
-        fraction_x = mask_radius/(proj.shape[1]//2*apix)
-        tapering_image = generate_tapering_filter(image_size=proj.shape, fraction_start=[0.8, fraction_x], fraction_slope=0.1)
-        proj = proj * tapering_image
-        with image_container:
-            st.image([normalize(data), normalize(proj)], use_column_width=True, caption=[image_label, "Simulated"])
+            figs = []
+            figs_image = []
+            figs_with = 0
+            for item in items:
+                show_pwr_work, pwr_work, title_pwr_work, show_phase_work, phase_work, show_phase_diff_work, phase_diff_work, title_phase_work, show_yprofile_work = item
+                if show_pwr_work:
+                    tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Amp', '@image')]
+                    fig = create_layerline_image_figure(pwr_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, fft_top_only=fft_top_only, pseudo_color=show_pseudo_color, const_image_color=const_image_color, title=title_pwr_work, yaxis_visible=False, tooltips=tooltips)
+                    figs.append(fig)
+                    figs_image.append(fig)
+                    figs_with += pwr_work.shape[-1]
 
-    with col4:
-        if not (show_pwr or show_phase_diff or show_pwr2 or show_phase_diff2 or show_pwr_simu or show_phase_diff_simu): return
+                if show_yprofile_work:
+                    ny, nx = pwr_work.shape
+                    dsy = 1/(ny//2*cutoff_res_y)
+                    y=np.arange(-ny//2, ny//2)*dsy
+                    yinv = y*1.0
+                    yinv[yinv==0] = 1e-10
+                    yinv = 1/np.abs(yinv)
+                    yprofile = np.mean(pwr_work, axis=1)
+                    yprofile /= yprofile.max()
+                    source_data = ColumnDataSource(data=dict(yprofile=yprofile, y=y, resy=yinv))
+                    tools = 'box_zoom,hover,pan,reset,save,wheel_zoom'
+                    tooltips = [('Res y', '@resyÅ'), ('Amp', '$x')]
+                    fig = figure(frame_width=nx//2, frame_height=figs[-1].frame_height, y_range=figs[-1].y_range, y_axis_location = "right", title=None, tools=tools, tooltips=tooltips)
+                    fig.line(source=source_data, x='yprofile', y='y', line_width=2, color='blue')
+                    fig.yaxis.visible = False
+                    fig.hover[0].attachment="vertical"
+                    figs.append(fig)
+                    figs_with += nx//2
 
-        items = [ (show_pwr, pwr, "Power Spectra", show_phase, phase, show_phase_diff, phase_diff, "Phase Diff Across Meridian", show_yprofile), 
-                  (show_pwr2, pwr2, "Power Spectra - 2", show_phase2, phase2, show_phase_diff2, phase_diff2, "Phase Diff Across Meridian - 2", show_yprofile2)
-                ]
-        if show_pwr_simu or show_phase_diff_simu:
-            if use_plot_size:
-                apix_simu = min(cutoff_res_y, cutoff_res_x)/2
-                proj = simulate_helix(twist, rise, csym, helical_radius=helical_radius, ball_radius=ball_radius, 
-                        ny=pny, nx=pnx, apix=apix_simu, tilt=tilt, az0=az)
-                if noise>0:
-                    sigma = np.std(proj[np.nonzero(proj)])
-                    proj = proj + np.random.normal(loc=0.0, scale=noise*sigma, size=proj.shape)
-                fraction_x = mask_radius/(proj.shape[1]//2*apix_simu)
-                tapering_image = generate_tapering_filter(image_size=proj.shape, fraction_start=[0.8, fraction_x], fraction_slope=0.1)
-                proj = proj * tapering_image
-            else:
-                apix_simu = apix
-            proj_pwr, proj_phase = compute_power_spectra(proj, apix=apix_simu, cutoff_res=(cutoff_res_y, cutoff_res_x), 
-                    output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
-            proj_phase_diff = compute_phase_difference_across_meridian(proj_phase)                
-            items += [(show_pwr_simu, proj_pwr, "Simulated Power Spectra", show_phase_simu, proj_phase, show_phase_diff_simu, proj_phase_diff, "Simulated Phase Diff Across Meridian", show_yprofile_simu)]
+                if show_phase_diff_work:
+                    tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Phase Diff', '@image °')]
+                    fig = create_layerline_image_figure(phase_diff_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, fft_top_only=fft_top_only, pseudo_color=show_pseudo_color, const_image_color=const_image_color, title=title_phase_work, yaxis_visible=False, tooltips=tooltips)
+                    figs.append(fig)
+                    figs_image.append(fig)
+                    figs_with += phase_diff_work.shape[-1]
+                    
+            figs[-1].yaxis.fixed_location = figs[-1].x_range.end
+            figs[-1].yaxis.visible = True
+            add_linked_crosshair_tool(figs, dimensions="width")
+            add_linked_crosshair_tool(figs_image, dimensions="both")
 
-        figs = []
-        figs_image = []
-        figs_with = 0
-        for item in items:
-            show_pwr_work, pwr_work, title_pwr_work, show_phase_work, phase_work, show_phase_diff_work, phase_diff_work, title_phase_work, show_yprofile_work = item
-            if show_pwr_work:
-                tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Amp', '@image')]
-                fig = create_layerline_image_figure(pwr_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, fft_top_only=fft_top_only, pseudo_color=show_pseudo_color, const_image_color=const_image_color, title=title_pwr_work, yaxis_visible=False, tooltips=tooltips)
-                figs.append(fig)
-                figs_image.append(fig)
-                figs_with += pwr_work.shape[-1]
+            fig_ellipses = []
+            if figs_image and show_LL:
+                if max(m_groups[0]["LL"][0])>0:
+                    x, y, n = m_groups[0]["LL"]
+                    tmp_x = np.sort(np.unique(x))
+                    width = np.mean(tmp_x[1:]-tmp_x[:-1])
+                    height = width/5
+                    for mi, m in enumerate(m_groups.keys()):
+                        if not show_choices[m]: continue
+                        x, y, bessel_order = m_groups[m]["LL"]
+                        if show_LL_text:
+                            texts = [str(int(n)) for n in bessel_order]
+                        tags = [m, bessel_order]
+                        color = ll_colors[abs(m)%len(ll_colors)]
+                        for f in figs_image:
+                            if show_LL_text: 
+                                text_labels = f.text(x, y, y_offset=2, text=texts, text_color=color, text_baseline="middle", text_align="center")
+                                text_labels.tags = tags
+                                fig_ellipses.append(text_labels)
+                            else:
+                                ellipses = f.ellipse(x, y, width=width, height=height, fill_color=color, fill_alpha=1, line_width=0)
+                                ellipses.tags = tags
+                                fig_ellipses.append(ellipses)
+                else:
+                    st.warning(f"No off-equator layer lines to draw for Pitch={pitch:.2f} Csym={csym} combinations. Consider increasing Pitch or reducing Csym")
 
-            if show_yprofile_work:
-                ny, nx = pwr_work.shape
-                dsy = 1/(ny//2*cutoff_res_y)
-                y=np.arange(-ny//2, ny//2)*dsy
-                yinv = y*1.0
-                yinv[yinv==0] = 1e-10
-                yinv = 1/np.abs(yinv)
-                yprofile = np.mean(pwr_work, axis=1)
-                yprofile /= yprofile.max()
-                source_data = ColumnDataSource(data=dict(yprofile=yprofile, y=y, resy=yinv))
-                tools = 'box_zoom,hover,pan,reset,save,wheel_zoom'
-                tooltips = [('Res y', '@resyÅ'), ('Amp', '$x')]
-                fig = figure(frame_width=nx//2, frame_height=figs[-1].frame_height, y_range=figs[-1].y_range, y_axis_location = "right", title=None, tools=tools, tooltips=tooltips)
-                fig.line(source=source_data, x='yprofile', y='y', line_width=2, color='blue')
-                fig.yaxis.visible = False
-                fig.hover[0].attachment="vertical"
-                figs.append(fig)
-                figs_with += nx//2
+            from bokeh.models import CustomJS
+            from bokeh.events import MouseEnter
+            title_js = CustomJS(args=dict(title=title), code="""
+                document.title=title
+            """)
+            figs[0].js_on_event(MouseEnter, title_js)
 
-            if show_phase_diff_work:
-                tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Phase Diff', '@image °')]
-                fig = create_layerline_image_figure(phase_diff_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, fft_top_only=fft_top_only, pseudo_color=show_pseudo_color, const_image_color=const_image_color, title=title_phase_work, yaxis_visible=False, tooltips=tooltips)
-                figs.append(fig)
-                figs_image.append(fig)
-                figs_with += phase_diff_work.shape[-1]
-                
-        figs[-1].yaxis.fixed_location = figs[-1].x_range.end
-        figs[-1].yaxis.visible = True
-        add_linked_crosshair_tool(figs, dimensions="width")
-        add_linked_crosshair_tool(figs_image, dimensions="both")
-
-        fig_ellipses = []
-        if figs_image and show_LL:
-            if max(m_groups[0]["LL"][0])>0:
-                x, y, n = m_groups[0]["LL"]
-                tmp_x = np.sort(np.unique(x))
-                width = np.mean(tmp_x[1:]-tmp_x[:-1])
-                height = width/5
-                for mi, m in enumerate(m_groups.keys()):
-                    if not show_choices[m]: continue
-                    x, y, bessel_order = m_groups[m]["LL"]
-                    if show_LL_text:
-                        texts = [str(int(n)) for n in bessel_order]
-                    tags = [m, bessel_order]
-                    color = ll_colors[abs(m)%len(ll_colors)]
-                    for f in figs_image:
-                        if show_LL_text: 
-                            text_labels = f.text(x, y, y_offset=2, text=texts, text_color=color, text_baseline="middle", text_align="center")
-                            text_labels.tags = tags
-                            fig_ellipses.append(text_labels)
-                        else:
-                            ellipses = f.ellipse(x, y, width=width, height=height, fill_color=color, fill_alpha=1, line_width=0)
-                            ellipses.tags = tags
-                            fig_ellipses.append(ellipses)
-            else:
-                st.warning(f"No off-equator layer lines to draw for Pitch={pitch:.2f} Csym={csym} combinations. Consider increasing Pitch or reducing Csym")
-
-        from bokeh.models import CustomJS
-        from bokeh.events import MouseEnter
-        title_js = CustomJS(args=dict(title=title), code="""
-            document.title=title
-        """)
-        figs[0].js_on_event(MouseEnter, title_js)
-
-        if fig_ellipses:
-            slider_width = figs_with//3 if len(figs)>1 else figs_with
-            from bokeh.models import Slider, CustomJS
-            slider_twist = Slider(start=-180, end=180, value=twist, step=0.01, title="Twist (°)", width=slider_width)
-            slider_pitch = Slider(start=pitch/2, end=pitch*2.0, value=pitch, step=pitch*0.002, title="Pitch (Å)", width=slider_width)
-            slider_rise = Slider(start=rise/2, end=min(max_rise, rise*2.0), value=rise, step=min(max_rise, rise*2.0)*0.001, title="Rise (Å)", width=slider_width)
-            callback_code = """
-                slider_twist.value = 360/(slider_pitch.value/slider_rise.value)
-                var pitch_inv = 1./slider_pitch.value
-                var rise_inv = 1./slider_rise.value
-                for (var fi = 0; fi < fig_ellipses.length; fi++) {
-                    var ellipses = fig_ellipses[fi]
-                    const m = ellipses.tags[0]
-                    const ns = ellipses.tags[1]
-                    var y = ellipses.data_source.data.y
-                    for (var i = 0; i < ns.length; i++) {
-                        const n = ns[i]
-                        y[i] = m * rise_inv + n * pitch_inv
+            if fig_ellipses:
+                slider_width = figs_with//3 if len(figs)>1 else figs_with
+                from bokeh.models import Slider, CustomJS
+                slider_twist = Slider(start=-180, end=180, value=twist, step=0.01, title="Twist (°)", width=slider_width)
+                slider_pitch = Slider(start=pitch/2, end=pitch*2.0, value=pitch, step=pitch*0.002, title="Pitch (Å)", width=slider_width)
+                slider_rise = Slider(start=rise/2, end=min(max_rise, rise*2.0), value=rise, step=min(max_rise, rise*2.0)*0.001, title="Rise (Å)", width=slider_width)
+                callback_code = """
+                    slider_twist.value = 360/(slider_pitch.value/slider_rise.value)
+                    var pitch_inv = 1./slider_pitch.value
+                    var rise_inv = 1./slider_rise.value
+                    for (var fi = 0; fi < fig_ellipses.length; fi++) {
+                        var ellipses = fig_ellipses[fi]
+                        const m = ellipses.tags[0]
+                        const ns = ellipses.tags[1]
+                        var y = ellipses.data_source.data.y
+                        for (var i = 0; i < ns.length; i++) {
+                            const n = ns[i]
+                            y[i] = m * rise_inv + n * pitch_inv
+                        }
+                        ellipses.data_source.change.emit()
                     }
-                    ellipses.data_source.change.emit()
-                }
-            """
-            callback_twist_code = """
-                slider_pitch.value = Math.abs(360/slider_twist.value * slider_rise.value)
-            """
-            callback = CustomJS(args=dict(fig_ellipses=fig_ellipses, slider_twist=slider_twist,slider_pitch=slider_pitch, slider_rise=slider_rise), code=callback_code)
-            callback_twist = CustomJS(args=dict(slider_twist=slider_twist, slider_pitch=slider_pitch, slider_rise=slider_rise), code=callback_twist_code)
-            slider_twist.js_on_change('value', callback_twist)
-            slider_pitch.js_on_change('value', callback)
-            slider_rise.js_on_change('value', callback)
+                """
+                callback_twist_code = """
+                    slider_pitch.value = Math.abs(360/slider_twist.value * slider_rise.value)
+                """
+                callback = CustomJS(args=dict(fig_ellipses=fig_ellipses, slider_twist=slider_twist,slider_pitch=slider_pitch, slider_rise=slider_rise), code=callback_code)
+                callback_twist = CustomJS(args=dict(slider_twist=slider_twist, slider_pitch=slider_pitch, slider_rise=slider_rise), code=callback_twist_code)
+                slider_twist.js_on_change('value', callback_twist)
+                slider_pitch.js_on_change('value', callback)
+                slider_rise.js_on_change('value', callback)
 
-            callback_code = """
-                let url = new URL(document.location)
-                let params = url.searchParams
-                params.set("twist", Math.round(slider_twist.value*100.)/100.)
-                params.set("rise", Math.round(slider_rise.value*100.)/100.)
-                //document.location = url.href
-                history.replaceState({}, document.title, url.href)
-                if (reload) {
-                    var class_names = ["css-1x8cf1d edgvbvh10"]
-                    // <button kind="secondary" class="css-1x8cf1d edgvbvh10">
-                    console.log(class_names)
-                    var i
-                    for (i=0; i<class_names.length; i++) {
-                        console.log(i, class_names[i])
-                        let reload_buttons = document.getElementsByClassName(class_names[i])
-                        console.log(reload_buttons)
-                        if (reload_buttons.length>0) {
-                            reload_buttons[reload_buttons.length-1].click()
-                            break
+                callback_code = """
+                    let url = new URL(document.location)
+                    let params = url.searchParams
+                    params.set("twist", Math.round(slider_twist.value*100.)/100.)
+                    params.set("rise", Math.round(slider_rise.value*100.)/100.)
+                    //document.location = url.href
+                    history.replaceState({}, document.title, url.href)
+                    if (reload) {
+                        var class_names = ["css-1x8cf1d edgvbvh10"]
+                        // <button kind="secondary" class="css-1x8cf1d edgvbvh10">
+                        console.log(class_names)
+                        var i
+                        for (i=0; i<class_names.length; i++) {
+                            console.log(i, class_names[i])
+                            let reload_buttons = document.getElementsByClassName(class_names[i])
+                            console.log(reload_buttons)
+                            if (reload_buttons.length>0) {
+                                reload_buttons[reload_buttons.length-1].click()
+                                break
+                            }
                         }
                     }
-                }
-            """
-            reload = input_mode in [1, 2, 3] and input_mode2 in [None, 1, 2, 3]
-            callback = CustomJS(args=dict(slider_twist=slider_twist, slider_pitch=slider_pitch, slider_rise=slider_rise, reload=reload), code=callback_code)
-            slider_twist.js_on_change('value_throttled', callback)
-            slider_pitch.js_on_change('value_throttled', callback)
-            slider_rise.js_on_change('value_throttled', callback)
+                """
+                reload = input_mode in [1, 2, 3] and input_mode2 in [None, 1, 2, 3]
+                callback = CustomJS(args=dict(slider_twist=slider_twist, slider_pitch=slider_pitch, slider_rise=slider_rise, reload=reload), code=callback_code)
+                slider_twist.js_on_change('value_throttled', callback)
+                slider_pitch.js_on_change('value_throttled', callback)
+                slider_rise.js_on_change('value_throttled', callback)
 
-            if len(figs)==1:
-                from bokeh.layouts import column
-                figs[0].toolbar_location="right"
-                figs_grid = column(children=[slider_twist, slider_pitch, slider_rise, figs[0]])
-                override_height = pny+180
+                if len(figs)==1:
+                    from bokeh.layouts import column
+                    figs[0].toolbar_location="right"
+                    figs_grid = column(children=[slider_twist, slider_pitch, slider_rise, figs[0]])
+                    override_height = pny+180
+                else:
+                    from bokeh.layouts import layout
+                    figs_row = gridplot(children=[figs], toolbar_location='right')
+                    figs_grid = layout(children=[[slider_twist, slider_pitch, slider_rise], figs_row])
+                    override_height = pny+120
             else:
-                from bokeh.layouts import layout
-                figs_row = gridplot(children=[figs], toolbar_location='right')
-                figs_grid = layout(children=[[slider_twist, slider_pitch, slider_rise], figs_row])
+                figs_grid = gridplot(children=[figs], toolbar_location='right')
                 override_height = pny+120
-        else:
-            figs_grid = gridplot(children=[figs], toolbar_location='right')
-            override_height = pny+120
 
-        st.bokeh_chart(figs_grid, use_container_width=False)
+            st.bokeh_chart(figs_grid, use_container_width=False)
 
-        if movie_frames>0:
-            with st.spinner(text="Generating movie of tilted power spectra/phases ..."):
-                if movie_mode==0:
-                    params = (movie_mode, data_all, movie_noise, apix)
-                if movie_mode==1:
-                    if use_plot_size:
-                        ny, nx = pny, pnx
-                        apix_simu = min(cutoff_res_y, cutoff_res_x)/2
-                    else:
-                        ny, nx = data.shape
-                        apix_simu = apix
-                    params = (movie_mode, twist, rise, csym, noise, helical_radius, ball_radius, az, ny, nx, apix_simu)
-                movie_filename = create_movie(movie_frames, tilt, params, pny, pnx, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudo_color, const_image_color, log_xform, lp_fraction, hp_fraction)
-                st.video(movie_filename) # it always show the video using the entire column width
+            if movie_frames>0:
+                with st.spinner(text="Generating movie of tilted power spectra/phases ..."):
+                    if movie_mode==0:
+                        params = (movie_mode, data_all, movie_noise, apix)
+                    if movie_mode==1:
+                        if use_plot_size:
+                            ny, nx = pny, pnx
+                            apix_simu = min(cutoff_res_y, cutoff_res_x)/2
+                        else:
+                            ny, nx = data.shape
+                            apix_simu = apix
+                        params = (movie_mode, twist, rise, csym, noise, helical_radius, ball_radius, az, ny, nx, apix_simu)
+                    movie_filename = create_movie(movie_frames, tilt, params, pny, pnx, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudo_color, const_image_color, log_xform, lp_fraction, hp_fraction)
+                    st.video(movie_filename) # it always show the video using the entire column width
 
-        del data_all, data, figs_grid
+            #del data_all, data, figs_grid
 
-        if share_url:
-            set_query_params_from_session_state()
-            if show_qr:
-                qr_image = qr_code()
-                st.image(qr_image)
-        else:
-            st.query_params.clear()
+            if share_url:
+                set_query_params_from_session_state()
+                if show_qr:
+                    qr_image = qr_code()
+                    st.image(qr_image)
+            else:
+                st.query_params.clear()
 
-        st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to [HILL@GitHub](https://github.com/jianglab/hill/issues)*")
+            st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to [HILL@GitHub](https://github.com/jianglab/hill/issues)*")
 
 
 @st.cache_data(persist='disk', max_entries=1, show_spinner=False)
@@ -1908,6 +2073,199 @@ def qr_code(url=None, size = 8):
     img = qrcode.make(url)  # qrcode.image.pil.PilImage
     data = np.array(img.convert("RGBA"))
     return data
+
+def read_mrc_data(mrc):
+    # read mrc data
+    mrc_data = mrcfile.open(mrc, 'r+')
+    mrc_data.set_image_stack
+
+    v_size=mrc_data.voxel_size
+    nx=mrc_data.header['nx']
+    ny=mrc_data.header['ny']
+    nz=mrc_data.header['nz']
+    apix=v_size['x']
+
+    data=mrc_data.data
+    return data, nx, ny
+
+@st.cache_data(persist='disk', show_spinner=False)
+def sample_axis_dots(data, nx, ny, filament_r, num_samples, lp_x, lp_y):
+    # fill in potential black backgrounds with helical boxer
+    data_slice_mean=np.median(data)
+    for i in range(ny):
+        for j in range(nx):
+            if data[i,j]==0:
+                data[i,j]=data_slice_mean
+            else:
+                break
+        for j in range(nx):
+            if data[i,-(j+1)]==0:
+                data[i,-(j+1)]=data_slice_mean
+            else:
+                break
+
+
+    # apply low pass filter
+    data_fft=fp.fftshift(fp.fft2(data))
+
+    kernel = Gaussian2DKernel(lp_x,lp_y,0,x_size=nx,y_size=ny).array
+    max_k=np.max(kernel)
+    min_k=np.min(kernel)
+    kernel=(kernel-min_k)/(max_k-min_k)
+    kernel_shape=np.shape(kernel)
+
+    data_fft_filtered=np.multiply(data_fft,kernel)
+
+    data_filtered=fp.ifft2(fp.ifftshift(data_fft_filtered)).real
+
+    # normalize
+    data_filtered=(data_filtered-np.mean(data_filtered))/np.std(data_filtered)
+
+    # first cc
+    template_rows=1
+    sample_row_temp=np.zeros((template_rows,nx))
+    sample_row_temp[:,int(nx/2)-filament_r:int(nx/2)+filament_r]=1
+
+    cc=correlate(data_filtered,sample_row_temp,mode='same')
+
+    # second cc
+    # renormalize
+    cc=(cc-np.mean(cc))/np.std(cc)
+    cc_r=5
+    cc_template_rows=5
+
+    sample_row_temp=np.zeros((cc_template_rows,nx))
+    sample_row_temp[:,int(nx/2)-cc_r:int(nx/2)+cc_r]=1
+
+    cc=correlate(cc,sample_row_temp,mode='same')
+
+
+    ####################################################################
+    # center point detection
+    dots=np.zeros(np.shape(data))
+    centers=cc.argmax(axis=1)
+
+    xs=[]
+    ys=[]
+    row_offset=10
+    #num_samples=10
+    for i in range(row_offset,ny,int(ny/num_samples)):
+        xs.append(centers[i])
+        ys.append(i)
+    #xs.append(centers[-1])
+    #ys.append(ny-1)
+
+
+    xs=np.array(xs)
+    ys=np.array(ys)
+
+    return xs, ys
+
+@st.cache_data(persist='disk', show_spinner=False)
+def fit_spline(data,xs,ys,display=False):
+    # fit spline
+    ny,nx=data.shape
+    tck = splrep(ys,xs,s=20)
+
+    new_xs=splev(ys,tck)
+
+    if display:
+        fig,ax=plt.subplots()
+        ax.imshow(data,cmap='gray')
+        ax.plot(new_xs,ys,'r-')
+        ax.plot(xs,ys,'ro')
+        plt.xlim([0,nx])
+        plt.ylim([0,ny])
+        plt.gca().invert_yaxis()
+        plt.axis('off')
+        plt.title("Fitted Spline")
+
+        input_resize = 1
+        resize = input_resize * 0.9
+        col1, _ = st.columns((resize / (1 - resize), 1), gap="small")
+        col1.pyplot(fig)
+    return new_xs,tck
+
+@st.cache_data(persist='disk', show_spinner=False)
+def filament_straighten(data,tck,new_xs,ys,r_filament_pixel):
+    ny,nx=data.shape
+    # resample pixels
+    y0=0
+    x0=splev(y0,tck)
+    for i in range(ny):
+        dxdy=splev(y0,tck,der=1)
+        orthog_dxdy=-(1.0/dxdy)
+        tangent_x0y0=lambda y: dxdy*y + (x0-dxdy*y0)
+        normal_x0y0=lambda y: orthog_dxdy*y + (x0-orthog_dxdy*y0)
+        rev_normal_x0y0=lambda x: (x+orthog_dxdy*y0-x0)/orthog_dxdy
+        #new_row_xs=np.arange(-int(nx/2),int(nx/2),1).T*np.abs(orthog_dxdy)/np.sqrt(1+orthog_dxdy*orthog_dxdy)+x0
+        new_row_xs = np.arange(-int(1.5 * r_filament_pixel), int(1.5* r_filament_pixel), 1).T * np.abs(orthog_dxdy) / np.sqrt(
+            1 + orthog_dxdy * orthog_dxdy) + x0
+        new_row_ys=rev_normal_x0y0(new_row_xs)
+        y0=y0+np.sqrt((1-dxdy*dxdy))
+        x0=splev(y0,tck)
+
+    # interpolate resampled pixles
+    x_coord=np.arange(0,nx,1)
+    y_coord=np.arange(0,ny,1)
+    interpol=RegularGridInterpolator((x_coord,y_coord),np.transpose(data),bounds_error=False,fill_value=0)
+
+    nx = 2*int(1.5 * r_filament_pixel)
+
+    new_im=np.zeros((ny,nx));
+    y_init=0
+    x_init=splev(y_init,tck)
+    curr_y=y_init
+    curr_x=x_init
+    curr_y_plus=curr_y
+    curr_x_plus=curr_x
+    curr_y_minus=curr_y
+    curr_x_minus=curr_x
+
+    for row in range(0,ny):
+        dxdy=splev(curr_y,tck,der=1)
+        orthog_dxdy=-(1.0/dxdy)
+        tangent_x0y0=lambda y: dxdy*y + (curr_x-dxdy*curr_y)
+        normal_x0y0=lambda y: orthog_dxdy*y + (curr_x-orthog_dxdy*curr_y)
+        rev_normal_x0y0=lambda x: (x+orthog_dxdy*curr_y-curr_x)/orthog_dxdy
+        #new_row_xs=np.arange(-int(nx/2),int(nx/2),1).T*np.abs(orthog_dxdy)/np.sqrt(1+orthog_dxdy*orthog_dxdy)+curr_x
+        new_row_xs = np.arange(-int(1.5 * r_filament_pixel), int(1.5* r_filament_pixel), 1).T * np.abs(orthog_dxdy) / np.sqrt(
+            1 + orthog_dxdy * orthog_dxdy) + curr_x
+        new_row_ys=rev_normal_x0y0(new_row_xs)
+        new_row_coords=np.vstack([new_row_xs,new_row_ys]).T
+        new_row=interpol(new_row_coords)
+        new_im[row,:]=new_row
+
+        curr_y=curr_y+np.sqrt((1-dxdy*dxdy))
+        curr_x=splev(curr_y,tck)
+
+
+
+    # fill the zeros on the edge again
+    data_slice_mean=np.median(data)
+    for i in range(ny):
+        for j in range(nx):
+            if new_im[i,j]==0:
+                new_im[i,j]=data_slice_mean
+            else:
+                break
+        for j in range(nx):
+            if new_im[i,-(j+1)]==0:
+                new_im[i,-(j+1)]=data_slice_mean
+            else:
+                break
+    fig,ax=plt.subplots()
+    ax.imshow(new_im,cmap='gray')
+    plt.axis('off')
+    #plt.gca().invert_yaxis()
+    plt.title("Straightened")
+
+    input_resize = 1
+    resize = input_resize * 0.9
+    col1, _ = st.columns((resize / (1 - resize), 1), gap="small")
+    col1.pyplot(fig)
+
+    return new_im
 
 if __name__ == "__main__":
     setup_anonymous_usage_tracking()
