@@ -15,3 +15,4 @@ uptime==3.0.1
 xmltodict==0.13.0
 astropy==6.0.0
 streamlit-drawable-canvas==0.9.3
+matplotlib==3.8.2
