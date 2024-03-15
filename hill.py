@@ -273,6 +273,7 @@ def main(args):
                 max_data = np.max(data_filtered)
 
                 bg_img = Image.fromarray(np.uint8((data_filtered - min_data) / (max_data - min_data) * 255), 'L')
+                st.image(bg_img)
 
                 # Create a canvas component
                 canvas_result = st_canvas(
