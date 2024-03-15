@@ -102,6 +102,44 @@ dot_json_template={
     "endAngle":6.283185307179586
 }
 
+rect_json_template={
+    "type":"rect",
+    "version":"4.4.0",
+    "originX":"left",
+    "originY":"top",
+    "left":128,
+    "top":128,
+    "width":6,
+    "height":6,
+    "fill":"rgba(255, 0, 0, 0.3)",
+    "stroke":"#FF0000",
+    "strokeWidth":3,
+    "strokeDashArray":None,
+    "strokeLineCap":"butt",
+    "strokeDashOffset":0,
+    "strokeLineJoin":"miter",
+    "strokeUniform":False,
+    "strokeMiterLimit":4,
+    "scaleX":1,
+    "scaleY":1,
+    "angle":0,
+    "flipX":False,
+    "flipY":False,
+    "opacity":0.3,
+    "shadow":None,
+    "visible":True,
+    "backgroundColor":"",
+    "fillRule":"nonzero",
+    "paintFirst":"fill",
+    "globalCompositeOperation":"source-over",
+    "skewX":0,
+    "skewY":0,
+    "rx":0,
+    "ry":0,
+    "radius":3,
+    "startAngle":0,
+    "endAngle":6.283185307179586
+}
 
 #from memory_profiler import profile
 #@profile(precision=4)
@@ -129,7 +167,7 @@ def main(args):
         with st.expander(label="README", expanded=False):
             st.write("This Web app considers a biological helical structure as the product of a continous helix and a set of parallel planes. Based on the covolution theory, the Fourier Transform (FT) of a helical structure would be the convolution of the FT of the continous helix and the FT of the planes.  \nThe FT of a continous helix consists of equally spaced layer planes (3D) or layerlines (2D projection) that can be described by Bessel functions of increasing orders (0, ±1, ±2, ...) from the Fourier origin (i.e. equator). The spacing between the layer planes/lines is determined by the helical pitch (i.e. the shift along the helical axis for a 360° turn of the helix). If the structure has additional cyclic symmetry (for example, C6) around the helical axis, only the layer plane/line orders of integer multiplier of the symmetry (e.g. 0, ±6, ±12, ...) are visible. The primary peaks of the layer lines in the power spectra form a pattern similar to a X symbol.  \nThe FT of the parallel planes consists of equally spaced points along the helical axis (i.e. meridian) with the spacing being determined by the helical rise.  \nThe convolution of these two components (X-shaped pattern of layer lines and points along the meridian) generates the layer line patterns seen in the power spectra of the projection images of helical structures. The helical indexing task is thus to identify the helical rise, pitch (or twist), and cyclic symmetry that would predict a layer line pattern to explain the observed layer lines in the power spectra. This Web app allows you to interactively change the helical parameters and superimpose the predicted layer liines on the power spectra to complete the helical indexing task.  \n  \nPS: power spectra; PD: phase differences across the meridian; YP: Y-axis power spectra profile; LL: layer lines; m: indices of the X-patterns along the meridian; Jn: Bessel order")
 
-        data_all, image_index, data, apix, radius_auto, mask_radius, input_type, is_3d, input_params, (image_container, image_label) = obtain_input_image(out_col1, param_i=0)
+        show_straightening_options, data_all, image_index, data, apix, radius_auto, mask_radius, input_type, is_3d, input_params, (image_container, image_label) = obtain_input_image(out_col1, param_i=0)
         input_mode, (uploaded_filename, url, emd_id) = input_params
 
         if input_type in ["image"]:
@@ -140,13 +178,11 @@ def main(args):
             label = f"Load amplitudes from another image"
         input_image2 = st.checkbox(label=label, value=False)        
         if input_image2:
-            _, image_index2, data2, apix2, radius_auto2, mask_radius2, input_type2, is_3d2, input_params2, _ = obtain_input_image(out_col1, param_i=1, image_index_sync=image_index + 1)
+            show_straightening_options, _, image_index2, data2, apix2, radius_auto2, mask_radius2, input_type2, is_3d2, input_params2, _ = obtain_input_image(out_col1, param_i=1, image_index_sync=image_index + 1)
             input_mode2, (uploaded_filename2, url2, emd_id2) = input_params2
         else:
             image_index2, data2, apix2, radius_auto2, mask_radius2, input_type2, is_3d2 = [None] * 7
             input_mode2, (uploaded_filename2, url2, emd_id2) = None, (None, None, None)
-
-        show_straightening_options = st.checkbox(label="Show Filament Straightening Options", value=False)
 
         with st.expander(label="Server info", expanded=False):
             server_info_empty = st.empty()
@@ -170,110 +206,114 @@ def main(args):
         tab1, tab2 = st.tabs(["Filament Straightening","HILL"])
         display_tab=tab2
     else:
-        tab3, _ = st.tabs(["HILL"," "])
+        tab3 = st.empty()
         display_tab=tab3
     if show_straightening_options:
         with tab1:
-            data[np.isnan(data)] = 0
-            ny, nx = data.shape
-            n_samples = st.number_input("Number of auto-sampled dots:", value=10, min_value=4, max_value=int(ny),
-                                        help="Number of center points automatically sampled on the image. The dots are used to fit the spline as the curved helical axis.")
-            r_filament = st.number_input("Filament radius (Å):", value=radius_auto * apix, max_value=int(nx) * apix,
-                                            help="Radius of filament. Used to generate the row template for determining the center points of the filament at different rows with cross-correlation.")
-            r_filament_pixel = int(r_filament / apix)
+            straightening_setting_tab, straightening_disp_tab_1,straightening_disp_tab_2,straightening_disp_tab_3 = st.columns((0.5,1.35,1.35,1.35),gap='small')
+            with straightening_setting_tab:
+                data[np.isnan(data)] = 0
+                ny, nx = data.shape
+                n_samples = st.number_input("Number of auto-sampled markers:", value=10, min_value=4, max_value=int(ny),
+                                        help="Number of center points automatically sampled on the image. The markers are used to fit the spline as the curved helical axis.")
+                r_filament = st.number_input("Template radius (Å):", value=radius_auto * apix * 1.2, max_value=int(nx) * apix,
+                                            help="Radius of filament template. Used to generate the row template for determining the center points of the filament at different rows with cross-correlation.")
+                r_filament_pixel = int(r_filament / apix)
 
-            aspect_ratio = float(nx / ny)
-            anisotropic_ratio = 10
-            lp_x = st.number_input("Low-pass filter Gaussian X Std:", value=2 * anisotropic_ratio * aspect_ratio,
+                aspect_ratio = float(nx / ny)
+                anisotropic_ratio = 10
+                lp_x = st.number_input("Low-pass filter Gaussian X Std:", value=2 * anisotropic_ratio * aspect_ratio,
                                     help="Standard deviation along the X axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for center point sampling")
-            lp_y = st.number_input("Low-pass filter Gaussian Y Std:", value=2,
+                lp_y = st.number_input("Low-pass filter Gaussian Y Std:", value=2,
                                     help="Standard deviation along the Y axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for center point sampling")
+                r_filament_angst_display = st.number_input("Display radius (Å):", value=radius_auto * apix * 1.5, max_value=int(nx) * apix,
+                                            help="Radius of filament template. Used to generate the row template for determining the center points of the filament at different rows with cross-correlation.")
 
-            # when the image width is larger than the column length, the canvas cannot be shown as a whole
-            xs, ys = sample_axis_dots(data, nx, ny, r_filament_pixel, n_samples, lp_x, lp_y)
-            canvas_scale_factor = 1
-            point_display_radius = r_filament_pixel * canvas_scale_factor
-            init_canvas_json = canvas_json_template.copy()
+                # when the image width is larger than the column length, the canvas cannot be shown as a whole
+                xs, ys = sample_axis_dots(data, apix, nx, ny, r_filament_pixel, n_samples, lp_x, lp_y)
+                canvas_scale_factor = 1
+                point_display_radius = r_filament_pixel * canvas_scale_factor
+                init_canvas_json = canvas_json_template.copy()
 
-            for i in range(len(xs)):
-                tmp_dot = dot_json_template.copy()
-                tmp_dot["left"] = int(xs[i]) * canvas_scale_factor - point_display_radius
-                tmp_dot["top"] = int(ys[i]) * canvas_scale_factor - point_display_radius
-                tmp_dot["radius"] = point_display_radius
-                init_canvas_json["objects"].append(tmp_dot)
+                for i in range(len(xs)):
+                    tmp_dot = dot_json_template.copy()
+                    tmp_dot["left"] = int(xs[i]) * canvas_scale_factor - point_display_radius
+                    tmp_dot["top"] = int(ys[i]) * canvas_scale_factor - point_display_radius
+                    tmp_dot["radius"] = point_display_radius
+                    init_canvas_json["objects"].append(tmp_dot)
 
-            point_display_radius = r_filament_pixel * canvas_scale_factor
+                point_display_radius = r_filament_pixel * canvas_scale_factor
 
-            st.write("---")
-            drawing_mode = st.radio("Canvas Mode:", ("Move current dots", "Place new dots"))
-            if drawing_mode == "Place new dots":
-                drawing_mode = "point"
-                initial_drawing = None
-            if drawing_mode == "Move current dots":
-                drawing_mode = "transform"
-                initial_drawing = init_canvas_json
+            with straightening_disp_tab_1:
+                drawing_mode = st.radio("Canvas Mode:", ("Move current markers", "Place new markers from scratch"))
+                if drawing_mode == "Place new markers from scratch":
+                    drawing_mode = "point"
+                    initial_drawing = None
+                if drawing_mode == "Move current markers":
+                    drawing_mode = "transform"
+                    initial_drawing = init_canvas_json
 
-            min_data = np.min(data)
-            max_data = np.max(data)
+                min_data = np.min(data)
+                max_data = np.max(data)
 
-            import scipy.fftpack as fp
-            data_fft = fp.fftshift(fp.fft2(data))
+                import scipy.fftpack as fp
+                data_fft = fp.fftshift(fp.fft2(data))
 
-            kernel = Gaussian2DKernel(lp_x, lp_y, 0, x_size=nx, y_size=ny).array
-            max_k = np.max(kernel)
-            min_k = np.min(kernel)
-            kernel = (kernel - min_k) / (max_k - min_k)
-            kernel_shape = np.shape(kernel)
+                kernel = Gaussian2DKernel(lp_x, lp_y, 0, x_size=nx, y_size=ny).array
+                max_k = np.max(kernel)
+                min_k = np.min(kernel)
+                kernel = (kernel - min_k) / (max_k - min_k)
+                kernel_shape = np.shape(kernel)
 
-            data_fft_filtered = np.multiply(data_fft, kernel)
-            data_filtered = fp.ifft2(fp.ifftshift(data_fft_filtered)).real
+                data_fft_filtered = np.multiply(data_fft, kernel)
+                data_filtered = fp.ifft2(fp.ifftshift(data_fft_filtered)).real
 
-            # bg_img=Image.fromarray(np.uint8((data-min_data)/(max_data-min_data)*255),'L')
-            min_data = np.min(data_filtered)
-            max_data = np.max(data_filtered)
+                # bg_img=Image.fromarray(np.uint8((data-min_data)/(max_data-min_data)*255),'L')
+                min_data = np.min(data_filtered)
+                max_data = np.max(data_filtered)
 
-            bg_img = Image.fromarray(np.uint8((data_filtered - min_data) / (max_data - min_data) * 255), 'L')
+                bg_img = Image.fromarray(np.uint8((data_filtered - min_data) / (max_data - min_data) * 255), 'L')
 
-            st.image(bg_img)
+                # Create a canvas component
+                canvas_result = st_canvas(
+                    fill_color="rgba(255, 0, 0, 0.3)",  # Fixed fill color with some opacity
+                    stroke_width=1,
+                    stroke_color="#FF0000",
+                    background_image=bg_img,
+                    height=int(ny * canvas_scale_factor),
+                    width=int(nx * canvas_scale_factor),
+                    update_streamlit=False,
+                    drawing_mode=drawing_mode,
+                    initial_drawing=initial_drawing,
+                    point_display_radius=point_display_radius if drawing_mode == 'point' else 0,
+                    key="canvas",
+                )
 
-            # Create a canvas component
-            canvas_result = st_canvas(
-                fill_color="rgba(255, 0, 0, 0.3)",  # Fixed fill color with some opacity
-                stroke_width=1,
-                stroke_color="#FF0000",
-                background_image=bg_img,
-                height=int(ny * canvas_scale_factor),
-                width=int(nx * canvas_scale_factor),
-                update_streamlit=False,
-                drawing_mode=drawing_mode,
-                initial_drawing=initial_drawing,
-                point_display_radius=point_display_radius if drawing_mode == 'point' else 0,
-                key="canvas",
-            )
+                st.info("Please click the first button from the left on the canvas tool bar to update your changes.")
+                do_straightening = st.checkbox(label="Straighten filament", value=False)
+                if do_straightening:
+                    xs = []
+                    ys = []
+                    for dot in sorted(canvas_result.json_data["objects"], key=lambda x: x['top']):
+                        xs.append((dot["left"] + point_display_radius) / canvas_scale_factor)
+                        ys.append((dot["top"] + point_display_radius) / canvas_scale_factor)
+                    #st.write(len(xs))
 
-            st.info("Please click the first button from the left on the canvas tool bar to update your changes.")
-            do_straightening = st.checkbox(label="Straighten filament", value=False)
-            if do_straightening:
-                xs = []
-                ys = []
-                for dot in sorted(canvas_result.json_data["objects"], key=lambda x: x['top']):
-                    xs.append((dot["left"] + point_display_radius) / canvas_scale_factor)
-                    ys.append((dot["top"] + point_display_radius) / canvas_scale_factor)
-                st.write(len(xs))
-
-                try:
+                    
                     test_canvas_json = canvas_json_template.copy()
                     for i in range(len(xs)):
                         tmp_dot = dot_json_template.copy()
                         tmp_dot["left"] = int(xs[i]) * canvas_scale_factor
                         tmp_dot["top"] = int(ys[i]) * canvas_scale_factor
                         test_canvas_json["objects"].append(tmp_dot)
-
-                    new_xs, tck = fit_spline(data, xs, ys, display=True)
-                    data = filament_straighten(data, tck, new_xs, ys, r_filament_pixel)
-                except TypeError:
-                    st.error(
-                        "Too few dots. There must be at least 4 dots to fit the spline. Please click the first button from the left on the canvas tool bar after you make changes to the canvas.")
+                    
+                    try:    
+                        new_xs, tck = fit_spline(straightening_disp_tab_2,data, xs, ys, display=True)
+                    except TypeError:
+                        st.error(
+                            "Too few dots. There must be at least 4 dots to fit the spline. Please click the first button from the left on the canvas tool bar after you make changes to the canvas.")
+                    data = filament_straighten(straightening_disp_tab_3,data, tck, new_xs, ys, r_filament_angst_display/apix,apix)
+                    
     with display_tab:
         col2, col3, col4 = st.columns((1.0, 0.55, 4.0), gap='small')
 
@@ -1039,6 +1079,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
             st.stop()
 
         ny, nx = data.shape
+        aspect_ratio = float(nx / ny)
         original_image = st.empty()
 
         image_parameters_expander = st.expander(label="Image parameters", expanded=False)
@@ -1086,10 +1127,16 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                 transpose = 0
             negate_auto = not guess_if_is_positive_contrast(data)
             negate = st.checkbox(label='Invert the image contrast', value=negate_auto, key=f'negate_{param_i}')
+            if input_type in ["image"]:
+                straightening = st.checkbox(label="Filament straightening", value=False)
+            else:
+                straightening = False
             if input_type in ["PS", "PD"] or is_3d:
                 angle_auto, dx_auto = 0., 0.
             else:
                 angle_auto, dx_auto = auto_vertical_center(data)
+            if straightening and aspect_ratio < 1:
+                angle_auto = 0.0
             angle = st.number_input('Rotate (°) ', value=-angle_auto, min_value=-180., max_value=180., step=1.0, format="%.4g", key=f'angle_{param_i}')
             dx = st.number_input('Shift along X-dim (Å) ', value=dx_auto*apix, min_value=-nx*apix, max_value=nx*apix, step=1.0, format="%.3g", key=f'dx_{param_i}')
             dy = st.number_input('Shift along Y-dim (Å) ', value=0.0, min_value=-ny*apix, max_value=ny*apix, step=1.0, format="%.3g", key=f'dy_{param_i}')
@@ -1101,9 +1148,15 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                 image_label = f"Original image ({nx}x{ny})"
             else:
                 image_label = f"Original image {image_index+1}/{nz} ({nx}x{ny})"
-            #st.image(normalize(data), use_column_width=True, caption=image_label)
-            fig = create_image_figure(data, apix, apix, title=image_label, title_location="below", plot_width=None, plot_height=None, x_axis_label=None, y_axis_label=None, tooltips=None, show_axis=False, show_toolbar=False, crosshair_color="white")
-            st.bokeh_chart(fig, use_container_width=True)
+            if aspect_ratio < 1:
+                with st.container(height=min(nx*2, ny), border=False):
+                    #st.image(normalize(data), use_column_width=True, caption=image_label)
+                    fig = create_image_figure(data, apix, apix, title=image_label, title_location="below", plot_width=None, plot_height=None, x_axis_label=None, y_axis_label=None, tooltips=None, show_axis=False, show_toolbar=False, crosshair_color="white")
+                    st.bokeh_chart(fig, use_container_width=True)
+            else:
+                #st.image(normalize(data), use_column_width=True, caption=image_label)
+                fig = create_image_figure(data, apix, apix, title=image_label, title_location="below", plot_width=None, plot_height=None, x_axis_label=None, y_axis_label=None, tooltips=None, show_axis=False, show_toolbar=False, crosshair_color="white")
+                st.bokeh_chart(fig, use_container_width=True)
 
         transformed_image = st.empty()
         transformed = transpose or negate or angle or dx
@@ -1120,6 +1173,8 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
             radius_auto, mask_radius_auto = estimate_radial_range(data, thresh_ratio=0.1)
             mask_radius = mask_empty.number_input('Mask radius (Å) ', value=min(mask_radius_auto*apix, nx/2*apix), min_value=1.0, max_value=nx/2*apix, step=1.0, format="%.1f", key=f'mask_radius_{param_i}')
             mask_len_percent_auto = 90.0
+            if straightening:
+                mask_len_percent_auto = 100.0
             mask_len_fraction = mask_empty.number_input('Mask length (%) ', value=mask_len_percent_auto, min_value=10.0, max_value=100.0, step=1.0, format="%.1f", key=f'mask_len_{param_i}') / 100.0
 
             x = np.arange(-nx//2, nx//2)*apix
@@ -1163,9 +1218,15 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                     image_label = f"Transformed image ({nx}x{ny})"
                 else:
                     image_label = f"Transformed image {image_index+1}/{nz} ({nx}x{ny})"
-                #st.image(normalize(data), use_column_width=True, caption=image_label)
-                fig = create_image_figure(data, apix, apix, title=image_label, title_location="below", plot_width=None, plot_height=None, x_axis_label=None, y_axis_label=None, tooltips=None, show_axis=False, show_toolbar=False, crosshair_color="white")
-                st.bokeh_chart(fig, use_container_width=True)
+                if aspect_ratio < 1:
+                    with st.container(height=min(nx*2, ny), border=False):
+                        #st.image(normalize(data), use_column_width=True, caption=image_label)
+                        fig = create_image_figure(data, apix, apix, title=image_label, title_location="below", plot_width=None, plot_height=None, x_axis_label=None, y_axis_label=None, tooltips=None, show_axis=False, show_toolbar=False, crosshair_color="white")
+                        st.bokeh_chart(fig, use_container_width=True)
+                else:
+                    #st.image(normalize(data), use_column_width=True, caption=image_label)
+                    fig = create_image_figure(data, apix, apix, title=image_label, title_location="below", plot_width=None, plot_height=None, x_axis_label=None, y_axis_label=None, tooltips=None, show_axis=False, show_toolbar=False, crosshair_color="white")
+                    st.bokeh_chart(fig, use_container_width=True)
 
         if input_type in ["image"]:
             acf = auto_correlation(data, sqrt=True, high_pass_fraction=0.1)
@@ -1213,7 +1274,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
         input_params = (input_mode, (None, image_url, None))
     else:
         input_params = (input_mode, (fileobj, None, None))
-    return data_all, image_index, data, apix, radius_auto, mask_radius, input_type, is_3d, input_params, (image_container, image_label)
+    return straightening, data_all, image_index, data, apix, radius_auto, mask_radius, input_type, is_3d, input_params, (image_container, image_label)
 
 @st.cache_data(show_spinner=False)
 def bessel_1st_peak_positions(n_max:int = 100):
@@ -2090,19 +2151,74 @@ def read_mrc_data(mrc):
     data=mrc_data.data
     return data, nx, ny
 
-@st.cache_data(persist='disk', show_spinner=False)
-def sample_axis_dots(data, nx, ny, filament_r, num_samples, lp_x, lp_y):
+#@st.cache_data(persist='disk', show_spinner=False)
+def gen_filament_template(length, diameter, angle=0, center_offset=(0, 0), image_size=(1024, 1024), apix=1.0, order=5):
+    ny, nx = image_size
+    y = (np.arange(0, ny) - ny//2)*apix
+    x = (np.arange(0, nx) - nx//2)*apix
+    Y, X = np.meshgrid(y, x, indexing='ij')
+    # flattop gaussian: order>2
+    d = np.exp( -np.log(2)*(np.abs(np.power((Y)/(length/2), order))+np.abs(np.power((X)/(diameter/2), order))) )
+    if angle!=0:
+        from skimage import transform
+        d = transform.rotate(image=d, angle=angle, center=(nx//2, ny//2))
+    if center_offset!=(0, 0):
+        from skimage import transform
+        xform = transform.EuclideanTransform(
+            translation = (center_offset[0]/apix, center_offset[1]/apix)
+        )
+        d = transform.warp(d, xform.inverse)
+    return d
+
+#@st.cache_data(persist='disk', show_spinner=False)
+def pad_to_size(array, ny, nx):
+    h, w = array.shape
+    a = (ny - h) // 2
+    aa = ny - a - h
+    b = (nx - w) // 2
+    bb = nx - b - w
+    return np.pad(array, pad_width=((a, aa), (b, bb)), mode='constant')
+
+#@st.cache_data(persist='disk', show_spinner=False)
+def filament_transform_fft(image, filament_template, angle_step):
+    import scipy.fft
+    import skimage.transform
+    ny, nx = image.shape
+    fny, fnx = filament_template.shape
+    if ny != fny or nx != fnx:
+        pad = True
+    else:
+        pad = False
+    angles = np.arange(0, 180, angle_step)
+    res_cc = np.zeros(shape=(len(angles), ny, nx), dtype=np.float32)
+    res_ang = np.zeros(shape=(len(angles), ny, nx), dtype=np.float32)
+    image_fft = scipy.fft.rfft2(image)
+    for ai, angle in enumerate(angles):
+        template = skimage.transform.rotate(image=filament_template, angle=angle, center=(fnx//2, fny//2))
+        if pad:
+            template = pad_to_size(template, ny, nx)
+        template_fft = np.conj(scipy.fft.rfft2(template))
+        res_cc[ai] = scipy.fft.fftshift(scipy.fft.irfft2(image_fft * template_fft))
+    fft1d = scipy.fft.fft(res_cc, axis=0)
+    fft1d_abs = np.abs(fft1d)
+    ret_amp2f = fft1d_abs[1, :, :]/np.sum(fft1d_abs, axis=0)
+    ret_ang = np.rad2deg(np.angle(fft1d)[1, :, :])
+    ret_ang[ret_ang<0] += 360
+    return (ret_amp2f, ret_ang)
+
+#@st.cache_data(persist='disk', show_spinner=False)
+def sample_axis_dots(data, apix, nx, ny, r_filament_pixel, num_samples, lp_x, lp_y):
     # fill in potential black backgrounds with helical boxer
-    data_slice_mean=np.median(data)
+    data_slice_median=np.median(data)
     for i in range(ny):
         for j in range(nx):
             if data[i,j]==0:
-                data[i,j]=data_slice_mean
+                data[i,j]=data_slice_median
             else:
                 break
         for j in range(nx):
             if data[i,-(j+1)]==0:
-                data[i,-(j+1)]=data_slice_mean
+                data[i,-(j+1)]=data_slice_median
             else:
                 break
 
@@ -2121,26 +2237,26 @@ def sample_axis_dots(data, nx, ny, filament_r, num_samples, lp_x, lp_y):
     data_filtered=fp.ifft2(fp.ifftshift(data_fft_filtered)).real
 
     # normalize
-    data_filtered=(data_filtered-np.mean(data_filtered))/np.std(data_filtered)
+    #data_filtered=(data_filtered-np.mean(data_filtered))/np.std(data_filtered)
+    vmin = data_filtered.min()
+    vmax = data_filtered.max()
+    data_filtered = (vmax-data_filtered)/(vmax-vmin)
+    
+    diameter = 2*r_filament_pixel*apix
+    length = diameter
+    
+    da = np.rad2deg(np.arctan2(length, diameter)/3) # degree
 
-    # first cc
-    template_rows=1
-    sample_row_temp=np.zeros((template_rows,nx))
-    sample_row_temp[:,int(nx/2)-filament_r:int(nx/2)+filament_r]=1
+    template_size = round(max(diameter, length)/apix*1.2)//2*2
 
-    cc=correlate(data_filtered,sample_row_temp,mode='same')
-
-    # second cc
-    # renormalize
-    cc=(cc-np.mean(cc))/np.std(cc)
-    cc_r=5
-    cc_template_rows=5
-
-    sample_row_temp=np.zeros((cc_template_rows,nx))
-    sample_row_temp[:,int(nx/2)-cc_r:int(nx/2)+cc_r]=1
-
-    cc=correlate(cc,sample_row_temp,mode='same')
-
+    filament_template = gen_filament_template(length=length, diameter=diameter, image_size=(np.min([template_size,ny]), np.min([template_size,nx])), apix=apix, order=2)
+    filament_transform_method = filament_transform_fft
+    cc, ang = filament_transform_method(image=data_filtered, filament_template=filament_template, angle_step=da)
+    cc_vmin = cc.min()
+    cc_vmax = cc.max()
+    cc = (cc_vmax-cc)/(cc_vmax-cc_vmin)
+    cc_template = np.repeat([np.mean(cc,axis=0)],repeats=length,axis=0)
+    cc, ang = filament_transform_method(image=cc, filament_template=cc_template, angle_step=da)
 
     ####################################################################
     # center point detection
@@ -2149,7 +2265,7 @@ def sample_axis_dots(data, nx, ny, filament_r, num_samples, lp_x, lp_y):
 
     xs=[]
     ys=[]
-    row_offset=10
+    row_offset=int(ny/num_samples/2)
     #num_samples=10
     for i in range(row_offset,ny,int(ny/num_samples)):
         xs.append(centers[i])
@@ -2163,8 +2279,8 @@ def sample_axis_dots(data, nx, ny, filament_r, num_samples, lp_x, lp_y):
 
     return xs, ys
 
-@st.cache_data(persist='disk', show_spinner=False)
-def fit_spline(data,xs,ys,display=False):
+#@st.cache_data(persist='disk', show_spinner=False)
+def fit_spline(_disp_col,data,xs,ys,display=False):
     # fit spline
     ny,nx=data.shape
     tck = splrep(ys,xs,s=20)
@@ -2172,24 +2288,27 @@ def fit_spline(data,xs,ys,display=False):
     new_xs=splev(ys,tck)
 
     if display:
-        fig,ax=plt.subplots()
-        ax.imshow(data,cmap='gray')
-        ax.plot(new_xs,ys,'r-')
-        ax.plot(xs,ys,'ro')
-        plt.xlim([0,nx])
-        plt.ylim([0,ny])
-        plt.gca().invert_yaxis()
-        plt.axis('off')
-        plt.title("Fitted Spline")
+        with _disp_col:
+            st.write("Fitted spline:")
+            fig,ax=plt.subplots()
+            plt.tight_layout()
+            ax.imshow(data,cmap='gray')
+            ax.plot(new_xs,ys,'r-')
+            ax.plot(xs,ys,'ro')
+            plt.xlim([0,nx])
+            plt.ylim([0,ny])
+            plt.gca().invert_yaxis()
+            plt.axis('off')
+            #plt.title("Fitted Spline")
 
-        input_resize = 1
-        resize = input_resize * 0.9
-        col1, _ = st.columns((resize / (1 - resize), 1), gap="small")
-        col1.pyplot(fig)
+            input_resize = 1
+            resize = input_resize * 0.99
+            _spline_col1, _ = st.columns((resize / (1 - resize), 1), gap="small")
+            _spline_col1.pyplot(fig)
     return new_xs,tck
 
-@st.cache_data(persist='disk', show_spinner=False)
-def filament_straighten(data,tck,new_xs,ys,r_filament_pixel):
+#@st.cache_data(persist='disk', show_spinner=False)
+def filament_straighten(_disp_col,data,tck,new_xs,ys,r_filament_pixel_display,apix):
     ny,nx=data.shape
     # resample pixels
     y0=0
@@ -2201,7 +2320,7 @@ def filament_straighten(data,tck,new_xs,ys,r_filament_pixel):
         normal_x0y0=lambda y: orthog_dxdy*y + (x0-orthog_dxdy*y0)
         rev_normal_x0y0=lambda x: (x+orthog_dxdy*y0-x0)/orthog_dxdy
         #new_row_xs=np.arange(-int(nx/2),int(nx/2),1).T*np.abs(orthog_dxdy)/np.sqrt(1+orthog_dxdy*orthog_dxdy)+x0
-        new_row_xs = np.arange(-int(1.5 * r_filament_pixel), int(1.5* r_filament_pixel), 1).T * np.abs(orthog_dxdy) / np.sqrt(
+        new_row_xs = np.arange(-int(r_filament_pixel_display), int(r_filament_pixel_display), 1).T * np.abs(orthog_dxdy) / np.sqrt(
             1 + orthog_dxdy * orthog_dxdy) + x0
         new_row_ys=rev_normal_x0y0(new_row_xs)
         y0=y0+np.sqrt((1-dxdy*dxdy))
@@ -2212,7 +2331,7 @@ def filament_straighten(data,tck,new_xs,ys,r_filament_pixel):
     y_coord=np.arange(0,ny,1)
     interpol=RegularGridInterpolator((x_coord,y_coord),np.transpose(data),bounds_error=False,fill_value=0)
 
-    nx = 2*int(1.5 * r_filament_pixel)
+    nx = 2*int(r_filament_pixel_display)
 
     new_im=np.zeros((ny,nx));
     y_init=0
@@ -2231,7 +2350,7 @@ def filament_straighten(data,tck,new_xs,ys,r_filament_pixel):
         normal_x0y0=lambda y: orthog_dxdy*y + (curr_x-orthog_dxdy*curr_y)
         rev_normal_x0y0=lambda x: (x+orthog_dxdy*curr_y-curr_x)/orthog_dxdy
         #new_row_xs=np.arange(-int(nx/2),int(nx/2),1).T*np.abs(orthog_dxdy)/np.sqrt(1+orthog_dxdy*orthog_dxdy)+curr_x
-        new_row_xs = np.arange(-int(1.5 * r_filament_pixel), int(1.5* r_filament_pixel), 1).T * np.abs(orthog_dxdy) / np.sqrt(
+        new_row_xs = np.arange(-int(r_filament_pixel_display), int(r_filament_pixel_display), 1).T * np.abs(orthog_dxdy) / np.sqrt(
             1 + orthog_dxdy * orthog_dxdy) + curr_x
         new_row_ys=rev_normal_x0y0(new_row_xs)
         new_row_coords=np.vstack([new_row_xs,new_row_ys]).T
@@ -2256,16 +2375,23 @@ def filament_straighten(data,tck,new_xs,ys,r_filament_pixel):
                 new_im[i,-(j+1)]=data_slice_mean
             else:
                 break
-    fig,ax=plt.subplots()
-    ax.imshow(new_im,cmap='gray')
-    plt.axis('off')
-    #plt.gca().invert_yaxis()
-    plt.title("Straightened")
+    
+    with _disp_col:
+        st.write("Straightened image:")
+        fig,ax=plt.subplots()
+        plt.tight_layout()
+        ax.imshow(new_im,cmap='gray')
+        plt.axis('off')
+        #plt.gca().invert_yaxis()
+        #plt.title("Straightened")
 
-    input_resize = 1
-    resize = input_resize * 0.9
-    col1, _ = st.columns((resize / (1 - resize), 1), gap="small")
-    col1.pyplot(fig)
+        input_resize = 1
+        resize = input_resize * 0.99
+        _res_col1, _ = st.columns((resize / (1 - resize), 1), gap="small")
+        #_res_col1.pyplot(fig)
+        with _res_col1:
+            fig = create_image_figure(new_im, apix, apix, title="Straightened image", title_location="below", plot_width=None, plot_height=None, x_axis_label=None, y_axis_label=None, tooltips=None, show_axis=False, show_toolbar=False, crosshair_color="white")
+            st.bokeh_chart(fig, use_container_width=True)
 
     return new_im
 
