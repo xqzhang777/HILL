@@ -38,29 +38,57 @@ def import_with_auto_install(packages, scope=locals()):
 required_packages = "streamlit numpy scipy numba bokeh skimage:scikit_image mrcfile finufft xmltodict st_clickable_images".split()
 import_with_auto_install(required_packages)
 
-import streamlit as st
-import numpy as np
-from numba import jit, set_num_threads, prange
+
+import argparse, base64, gc, io, os, pathlib, random, socket, stat, tempfile, urllib, warnings
+from getpass import getuser
+from itertools import product
+from math import fmod
+from os import getpid
+from urllib.parse import parse_qs
+
+from bokeh.events import MouseMove, MouseEnter, DoubleTap
+from bokeh.io import export_png
+from bokeh.layouts import gridplot, column, layout
+from bokeh.models import Button, ColumnDataSource, CustomJS, Label, LinearColorMapper, Slider, Span, Spinner
+from bokeh.models.tools import CrosshairTool, HoverTool
 from bokeh.plotting import figure
-from bokeh.models import CustomJS, Span, LinearColorMapper
-from bokeh.models import ColumnDataSource, HoverTool, CrosshairTool
-from bokeh.events import MouseMove, DoubleTap
-from bokeh.layouts import gridplot
-import math, random, gc
-from streamlit_drawable_canvas import st_canvas
-from PIL import Image
+
+from finufft import nufft2d2
 
 import matplotlib.pyplot as plt
-from scipy import ndimage as ndi
-from astropy.convolution import Gaussian2DKernel
-import scipy.fftpack as fp
 import mrcfile
+from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
+
+import numpy as np
+from numba import jit, set_num_threads, prange
+
+from PIL import Image
+from psutil import virtual_memory, Process
+
+import qrcode
+
+import scipy.fft
+import scipy.fftpack as fp
 from scipy.spatial.transform import Rotation as R
-from scipy.ndimage import affine_transform
-from scipy.signal import correlate, convolve, find_peaks
-from scipy.interpolate import splrep, splev, BSpline
+from scipy.ndimage import affine_transform, map_coordinates
+from scipy.signal import correlate
+from scipy.interpolate import splrep, splev
 from scipy.interpolate import RegularGridInterpolator
-from matplotlib import cm
+from scipy.special import jnp_zeros
+from scipy.optimize import minimize, fmin
+
+import streamlit as st
+from st_clickable_images import clickable_images
+from streamlit_drawable_canvas import st_canvas
+from streamlit_profiler import Profiler
+
+
+from skimage.io import imread
+from skimage import transform
+from skimage.transform import radon
+
+#from uptime import uptime
+
 
 gc.enable()
 
@@ -141,9 +169,12 @@ rect_json_template={
     "endAngle":6.283185307179586
 }
 
+p=Profiler()
+
 #from memory_profiler import profile
 #@profile(precision=4)
 def main(args):
+    p.start()
     title = "HILL: Helical Indexing using Layer Lines"
     st.set_page_config(page_title=title, layout="wide")
 
@@ -153,6 +184,10 @@ def main(args):
     st.elements.utils._shown_default_value_warning = True
 
     if len(st.session_state)<1:  # only run once at the start of the session
+        st.session_state['csym'] = 1
+        st.session_state['rise'] = 4.75
+        st.session_state['twist'] = 1.0
+        st.session_state['pitch'] = 1710.0
         set_initial_query_params(query_string=args.query_string) # only excuted on the first run
 
     if len(st.session_state)<1:  # only run once at the start of the session
@@ -161,9 +196,19 @@ def main(args):
     if "input_mode_0" not in st.session_state:
         set_session_state_from_data_example()
 
+    if "twist" in st.session_state:
+        twist = st.session_state['twist']        
+    if "pitch" in st.session_state:
+        pitch = st.session_state['pitch']
+    if "rise" in st.session_state:
+        rise = st.session_state['rise']
+
+    
     out_col1 = st.sidebar
 
     with out_col1:
+        with st.expander(label="session", expanded=False):
+            st.write(st.session_state)
         with st.expander(label="README", expanded=False):
             st.write("This Web app considers a biological helical structure as the product of a continous helix and a set of parallel planes. Based on the covolution theory, the Fourier Transform (FT) of a helical structure would be the convolution of the FT of the continous helix and the FT of the planes.  \nThe FT of a continous helix consists of equally spaced layer planes (3D) or layerlines (2D projection) that can be described by Bessel functions of increasing orders (0, ±1, ±2, ...) from the Fourier origin (i.e. equator). The spacing between the layer planes/lines is determined by the helical pitch (i.e. the shift along the helical axis for a 360° turn of the helix). If the structure has additional cyclic symmetry (for example, C6) around the helical axis, only the layer plane/line orders of integer multiplier of the symmetry (e.g. 0, ±6, ±12, ...) are visible. The primary peaks of the layer lines in the power spectra form a pattern similar to a X symbol.  \nThe FT of the parallel planes consists of equally spaced points along the helical axis (i.e. meridian) with the spacing being determined by the helical rise.  \nThe convolution of these two components (X-shaped pattern of layer lines and points along the meridian) generates the layer line patterns seen in the power spectra of the projection images of helical structures. The helical indexing task is thus to identify the helical rise, pitch (or twist), and cyclic symmetry that would predict a layer line pattern to explain the observed layer lines in the power spectra. This Web app allows you to interactively change the helical parameters and superimpose the predicted layer liines on the power spectra to complete the helical indexing task.  \n  \nPS: power spectra; PD: phase differences across the meridian; YP: Y-axis power spectra profile; LL: layer lines; m: indices of the X-patterns along the meridian; Jn: Bessel order")
 
@@ -216,21 +261,28 @@ def main(args):
                 ny, nx = data.shape
                 n_samples = st.number_input("Number of auto-sampled markers:", value=10, min_value=4, max_value=int(ny),
                                         help="Number of center points automatically sampled on the image. The markers are used to fit the spline as the curved helical axis.")
-                r_filament = st.number_input("Template radius (Å):", value=radius_auto * apix * 1.2, max_value=int(nx) * apix,
+                r_filament = st.number_input("Template radius (Å):", value=radius_auto * apix * 1, max_value=int(nx) * apix,
                                             help="Radius of filament template. Used to generate the row template for determining the center points of the filament at different rows with cross-correlation.")
                 r_filament_pixel = int(r_filament / apix)
+                
+                l_template = st.number_input("Template length (Å):", value=radius_auto * apix * 1, max_value=int(nx) * apix,
+                                            help="Length of filament template. Used to generate the row template for determining the center points of the filament at different rows with cross-correlation.")
+                l_template_pixel = int(l_template / apix)
+                
+                da = st.number_input("In-plane angular search step (°):", value=3, max_value=90,
+                                            help="In-plane angular search step for template matching to determine the center axis of the filament.")
 
                 aspect_ratio = float(nx / ny)
                 anisotropic_ratio = 10
-                lp_x = st.number_input("Low-pass filter Gaussian X Std:", value=2 * anisotropic_ratio * aspect_ratio,
+                lp_x = st.number_input("Low-pass filter Gaussian X Std:", value=10 * anisotropic_ratio * aspect_ratio,
                                     help="Standard deviation along the X axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for center point sampling")
-                lp_y = st.number_input("Low-pass filter Gaussian Y Std:", value=2,
+                lp_y = st.number_input("Low-pass filter Gaussian Y Std:", value=10,
                                     help="Standard deviation along the Y axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for center point sampling")
-                r_filament_angst_display = st.number_input("Display radius (Å):", value=radius_auto * apix * 1.5, max_value=int(nx) * apix,
-                                            help="Radius of filament template. Used to generate the row template for determining the center points of the filament at different rows with cross-correlation.")
+                r_filament_angst_display = st.number_input("Display radius (Å):", value=radius_auto * apix * 1, max_value=int(nx) * apix,
+                                            help="Radius of output straightened image.")
 
                 # when the image width is larger than the column length, the canvas cannot be shown as a whole
-                xs, ys = sample_axis_dots(data, apix, nx, ny, r_filament_pixel, n_samples, lp_x, lp_y)
+                xs, ys = sample_axis_dots(data, apix, nx, ny, r_filament_pixel,l_template_pixel, da, n_samples, lp_x, lp_y)
                 canvas_scale_factor = 1
                 point_display_radius = r_filament_pixel * canvas_scale_factor
                 init_canvas_json = canvas_json_template.copy()
@@ -256,10 +308,11 @@ def main(args):
                 min_data = np.min(data)
                 max_data = np.max(data)
 
-                import scipy.fftpack as fp
+                #import scipy.fftpack as fp
                 data_fft = fp.fftshift(fp.fft2(data))
 
-                kernel = Gaussian2DKernel(lp_x, lp_y, 0, x_size=nx, y_size=ny).array
+                #kernel = Gaussian2DKernel(lp_x, lp_y, 0, x_size=nx, y_size=ny).array
+                kernel = gen_filament_template(length=lp_y, diameter=lp_x, image_size=(ny, nx), apix=apix, order=2)
                 max_k = np.max(kernel)
                 min_k = np.min(kernel)
                 kernel = (kernel - min_k) / (max_k - min_k)
@@ -273,7 +326,6 @@ def main(args):
                 max_data = np.max(data_filtered)
 
                 bg_img = Image.fromarray(np.uint8((data_filtered - min_data) / (max_data - min_data) * 255), 'L')
-                st.image(bg_img)
 
                 # Create a canvas component
                 canvas_result = st_canvas(
@@ -328,35 +380,38 @@ def main(args):
                     st.query_params.pop('rise', None)
                     st.query_params.pop('twist', None)
 
-            pitch_or_twist_choices = ["pitch", "twist"]
-            pitch_or_twist = st.radio(label="Choose pitch or twist mode", options=pitch_or_twist_choices, index=0, label_visibility="collapsed", horizontal=True)
-            use_pitch = 1 if pitch_or_twist=="pitch" else 0
+            #pitch_or_twist_choices = ["pitch", "twist"]
+            #pitch_or_twist = st.radio(label="Choose pitch or twist mode", options=pitch_or_twist_choices, index=0, label_visibility="collapsed", horizontal=True)
+            #use_pitch = 1 if pitch_or_twist=="pitch" else 0
 
-            pitch_or_twist_number_input = st.empty()
-            pitch_or_twist_text = st.empty()
-            rise_empty = st.empty()
+            #pitch_or_twist_number_input = st.empty()
+            #pitch_or_twist_text = st.empty()
+            #rise_empty = st.empty()
 
             ny, nx = data.shape
             max_rise = round(max(2000., max(ny, nx)*apix * 2.0), 2)
             min_rise = round(apix/10.0, 2)
-            rise = rise_empty.number_input('Rise (Å)', value=st.session_state.get("rise", min_rise), min_value=min_rise, max_value=max_rise, step=1.0, format="%.3f", key="rise")
+            min_pitch = abs(rise)
+            
+            #rise = rise_empty.number_input('Rise (Å)', value=st.session_state.get("rise", min_rise), min_value=min_rise, max_value=max_rise, step=1.0, format="%.3f", key="rise")
 
-            if "twist" not in st.session_state: st.session_state.twist = 1.0
-            if use_pitch:
-                min_pitch = abs(rise)
-                pitch = pitch_or_twist_number_input.number_input('Pitch (Å)', value=max(min_pitch, st.session_state.get("pitch", min_pitch)), min_value=min_pitch, step=1.0, format="%.2f", help="twist = 360 / (pitch/rise)")
-                st.session_state.pitch = pitch
-                twist = pitch2twist(pitch, rise)
-                st.session_state.twist = twist
-                pitch_or_twist_text.markdown(f"*(twist = {st.session_state.twist:.2f} °)*")
-            else:
-                twist = pitch_or_twist_number_input.number_input('Twist (°)', value=st.session_state.twist, min_value=-180.0, max_value=180.0, step=1.0, format="%.2f", help="pitch = 360/twist * rise", key="twist")
-                pitch = abs(round(twist2pitch(twist, rise), 2))
-                st.session_state.pitch = pitch
-                pitch_or_twist_text.markdown(f"*(pitch = {pitch:.2f} Å)*")
+            #if "twist" not in st.session_state: st.session_state.twist = 1.0
+            #if use_pitch:
+            #    min_pitch = abs(rise)
+            #    pitch = pitch_or_twist_number_input.number_input('Pitch (Å)', value=max(min_pitch, st.session_state.get("pitch", min_pitch)), min_value=min_pitch, step=1.0, format="%.2f", help="twist = 360 / (pitch/rise)")
+            #    st.session_state.pitch = pitch
+            #    twist = pitch2twist(pitch, rise)
+            #    st.session_state.twist = twist
+            #    pitch_or_twist_text.markdown(f"*(twist = {st.session_state.twist:.2f} °)*")
+            #else:
+            #    twist = pitch_or_twist_number_input.number_input('Twist (°)', value=st.session_state.twist, min_value=-180.0, max_value=180.0, step=1.0, format="%.2f", help="pitch = 360/twist * rise")
+            #    pitch = abs(round(twist2pitch(twist, rise), 2))
+            #    st.session_state.twist = twist
+            #    st.session_state.pitch = pitch
+            #    pitch_or_twist_text.markdown(f"*(pitch = {pitch:.2f} Å)*")
 
             csym = st.number_input('Csym', min_value=1, step=1, help="Cyclic symmetry around the helical axis", key="csym")
-
+            
             if input_image2: value = max(radius_auto*apix, radius_auto2*apix2)
             else: value = radius_auto*apix
             value = max(min(500.0, value), 1.0)
@@ -515,6 +570,16 @@ def main(args):
                 st.image([normalize(data), normalize(proj)], use_column_width=True, caption=[image_label, "Simulated"])
 
         with col4:
+            def save_params_from_query_param():
+                st.session_state['twist'] = float(st.query_params['twist'])
+                st.session_state['rise'] = float(st.query_params['rise'])
+                st.session_state['pitch'] = twist2pitch(st.session_state['twist'], st.session_state['rise'])
+
+            button_col, helper_col = st.columns([0.3,1])
+            with button_col:
+                st.button("Save parameters from plots", on_click=save_params_from_query_param)
+            with helper_col:
+                st.info("<- Please use the button to save the changes of the helical parameters for later plot changes.")
             if not (show_pwr or show_phase_diff or show_pwr2 or show_phase_diff2 or show_pwr_simu or show_phase_diff_simu): return
 
             items = [ (show_pwr, pwr, "Power Spectra", show_phase, phase, show_phase_diff, phase_diff, "Phase Diff Across Meridian", show_yprofile), 
@@ -607,8 +672,8 @@ def main(args):
                 else:
                     st.warning(f"No off-equator layer lines to draw for Pitch={pitch:.2f} Csym={csym} combinations. Consider increasing Pitch or reducing Csym")
 
-            from bokeh.models import CustomJS
-            from bokeh.events import MouseEnter
+            #from bokeh.models import CustomJS
+            #from bokeh.events import MouseEnter
             title_js = CustomJS(args=dict(title=title), code="""
                 document.title=title
             """)
@@ -616,11 +681,53 @@ def main(args):
 
             if fig_ellipses:
                 slider_width = figs_with//3 if len(figs)>1 else figs_with
-                from bokeh.models import Slider, CustomJS
+                #from bokeh.models import Slider, CustomJS
+                spinner_twist = Spinner(title='Twist (°)', low=-180.0, high=180.0, step=1.0, value=twist, format="0.00", width=slider_width)
+                spinner_pitch = Spinner(title='Pitch (Å)', low=min_pitch, step=1.0, value=max(min_pitch, st.session_state.get("pitch", min_pitch)), format="0.00", width=slider_width)
+                spinner_rise = Spinner(title='Rise (Å)', low=min_rise, high=max_rise, step=1.0, value=rise, format="0.00", width=slider_width)
+
                 slider_twist = Slider(start=-180, end=180, value=twist, step=0.01, title="Twist (°)", width=slider_width)
                 slider_pitch = Slider(start=pitch/2, end=pitch*2.0, value=pitch, step=pitch*0.002, title="Pitch (Å)", width=slider_width)
                 slider_rise = Slider(start=rise/2, end=min(max_rise, rise*2.0), value=rise, step=min(max_rise, rise*2.0)*0.001, title="Rise (Å)", width=slider_width)
-                callback_code = """
+
+                callback_rise_code = """
+                    spinner_twist.value = 360/(spinner_pitch.value/spinner_rise.value)
+                    slider_rise.value = spinner_rise.value
+                    slider_twist.value = spinner_twist.value
+                """
+                callback_pitch_code = """
+                    spinner_twist.value = 360/(spinner_pitch.value/spinner_rise.value)
+                    slider_pitch.value = spinner_rise.value
+                    slider_twist.value = spinner_twist.value
+                """
+                callback_twist_code = """
+                    spinner_pitch.value = Math.abs(360/spinner_twist.value * spinner_rise.value)
+                """
+                callback_twist = CustomJS(args=dict(spinner_twist=spinner_twist, spinner_pitch=spinner_pitch, spinner_rise=spinner_rise,slider_twist=slider_twist,slider_pitch=slider_pitch, slider_rise=slider_rise), code=callback_twist_code)
+                callback_pitch = CustomJS(args=dict(spinner_twist=spinner_twist,spinner_pitch=spinner_pitch, spinner_rise=spinner_rise,slider_twist=slider_twist,slider_pitch=slider_pitch, slider_rise=slider_rise), code=callback_pitch_code)
+                callback_rise = CustomJS(args=dict(spinner_twist=spinner_twist,spinner_pitch=spinner_pitch, spinner_rise=spinner_rise,slider_twist=slider_twist,slider_pitch=slider_pitch, slider_rise=slider_rise), code=callback_rise_code)
+
+                spinner_twist.js_on_change('value', callback_twist)
+                spinner_pitch.js_on_change('value', callback_pitch)
+                spinner_rise.js_on_change('value', callback_rise)
+
+                callback_rise_code = """
+                    slider_twist.value = 360/(slider_pitch.value/slider_rise.value)
+                    var pitch_inv = 1./slider_pitch.value
+                    var rise_inv = 1./slider_rise.value
+                    for (var fi = 0; fi < fig_ellipses.length; fi++) {
+                        var ellipses = fig_ellipses[fi]
+                        const m = ellipses.tags[0]
+                        const ns = ellipses.tags[1]
+                        var y = ellipses.data_source.data.y
+                        for (var i = 0; i < ns.length; i++) {
+                            const n = ns[i]
+                            y[i] = m * rise_inv + n * pitch_inv
+                        }
+                        ellipses.data_source.change.emit()
+                    }
+                """
+                callback_pitch_code = """
                     slider_twist.value = 360/(slider_pitch.value/slider_rise.value)
                     var pitch_inv = 1./slider_pitch.value
                     var rise_inv = 1./slider_rise.value
@@ -639,11 +746,12 @@ def main(args):
                 callback_twist_code = """
                     slider_pitch.value = Math.abs(360/slider_twist.value * slider_rise.value)
                 """
-                callback = CustomJS(args=dict(fig_ellipses=fig_ellipses, slider_twist=slider_twist,slider_pitch=slider_pitch, slider_rise=slider_rise), code=callback_code)
-                callback_twist = CustomJS(args=dict(slider_twist=slider_twist, slider_pitch=slider_pitch, slider_rise=slider_rise), code=callback_twist_code)
+                callback_rise = CustomJS(args=dict(fig_ellipses=fig_ellipses, slider_twist=slider_twist,slider_pitch=slider_pitch, slider_rise=slider_rise, spinner_twist=spinner_twist,spinner_pitch=spinner_pitch, spinner_rise=spinner_rise), code=callback_rise_code)
+                callback_pitch = CustomJS(args=dict(fig_ellipses=fig_ellipses, slider_twist=slider_twist,slider_pitch=slider_pitch, slider_rise=slider_rise, spinner_twist=spinner_twist,spinner_pitch=spinner_pitch, spinner_rise=spinner_rise), code=callback_pitch_code)
+                callback_twist = CustomJS(args=dict(slider_twist=slider_twist, slider_pitch=slider_pitch, slider_rise=slider_rise, spinner_twist=spinner_twist,spinner_pitch=spinner_pitch, spinner_rise=spinner_rise), code=callback_twist_code)
                 slider_twist.js_on_change('value', callback_twist)
-                slider_pitch.js_on_change('value', callback)
-                slider_rise.js_on_change('value', callback)
+                slider_pitch.js_on_change('value', callback_pitch)
+                slider_rise.js_on_change('value', callback_rise)
 
                 callback_code = """
                     let url = new URL(document.location)
@@ -674,21 +782,60 @@ def main(args):
                 slider_pitch.js_on_change('value_throttled', callback)
                 slider_rise.js_on_change('value_throttled', callback)
 
+                callback_code = """
+                    let url = new URL(document.location)
+                    let params = url.searchParams
+                    params.set("twist", Math.round(spinner_twist.value*100.)/100.)
+                    params.set("rise", Math.round(spinner_rise.value*100.)/100.)
+                    //document.location = url.href
+                    history.replaceState({}, document.title, url.href)
+                    if (reload) {
+                        var class_names = ["css-1x8cf1d edgvbvh10"]
+                        // <button kind="secondary" class="css-1x8cf1d edgvbvh10">
+                        console.log(class_names)
+                        var i
+                        for (i=0; i<class_names.length; i++) {
+                            console.log(i, class_names[i])
+                            let reload_buttons = document.getElementsByClassName(class_names[i])
+                            console.log(reload_buttons)
+                            if (reload_buttons.length>0) {
+                                reload_buttons[reload_buttons.length-1].click()
+                                break
+                            }
+                        }
+                    }
+                """
+                callback = CustomJS(args=dict(spinner_twist=spinner_twist, spinner_pitch=spinner_pitch, spinner_rise=spinner_rise, reload=reload), code=callback_code)                
+                spinner_twist.js_on_change('value_throttled', callback)
+                spinner_pitch.js_on_change('value_throttled', callback)
+                spinner_rise.js_on_change('value_throttled', callback)
+                                
+                #spinner_rise.on_change('value_throttled', test_callback)
+                
+                #callback_code = """
+                #    document.dispatchEvent(
+                #        new CustomEvent("RiseUpdateEvent", {detail: {rise: spinner_rise.value}})
+                #    )
+                #"""
+                #button_update_param = Button(label="Save parameters", button_type="success")
+                #callback_button_update = CustomJS(args=dict(spinner_rise=spinner_rise), code=callback_code)
+                #button_update_param.js_on_event('button_click', callback_button_update)
+
                 if len(figs)==1:
-                    from bokeh.layouts import column
+                    #from bokeh.layouts import column
                     figs[0].toolbar_location="right"
-                    figs_grid = column(children=[slider_twist, slider_pitch, slider_rise, figs[0]])
+                    figs_grid = column(children=[[spinner_twist, spinner_pitch, spinner_rise],[slider_twist, slider_pitch, slider_rise], figs[0]])
                     override_height = pny+180
                 else:
-                    from bokeh.layouts import layout
+                    #from bokeh.layouts import layout
                     figs_row = gridplot(children=[figs], toolbar_location='right')
-                    figs_grid = layout(children=[[slider_twist, slider_pitch, slider_rise], figs_row])
+                    figs_grid = layout(children=[[spinner_twist, spinner_pitch, spinner_rise],[slider_twist, slider_pitch, slider_rise], figs_row])
                     override_height = pny+120
             else:
                 figs_grid = gridplot(children=[figs], toolbar_location='right')
                 override_height = pny+120
 
-            st.bokeh_chart(figs_grid, use_container_width=False)
+            st.bokeh_chart(figs_grid, use_container_width=False)                   
 
             if movie_frames>0:
                 with st.spinner(text="Generating movie of tilted power spectra/phases ..."):
@@ -702,7 +849,7 @@ def main(args):
                             ny, nx = data.shape
                             apix_simu = apix
                         params = (movie_mode, twist, rise, csym, noise, helical_radius, ball_radius, az, ny, nx, apix_simu)
-                    movie_filename = create_movie(movie_frames, tilt, params, pny, pnx, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudo_color, const_image_color, log_xform, lp_fraction, hp_fraction)
+                    movie_filename = create_movie(movie_frames, tilt, params, pny, pnx, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudo_color, const_image_color, log_xform, lp_fraction, hp_fraction, fft_top_only)
                     st.video(movie_filename) # it always show the video using the entire column width
 
             #del data_all, data, figs_grid
@@ -716,10 +863,13 @@ def main(args):
                 st.query_params.clear()
 
             st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to [HILL@GitHub](https://github.com/jianglab/hill/issues)*")
+            p.stop()
+
+
 
 
 @st.cache_data(persist='disk', max_entries=1, show_spinner=False)
-def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudo_color, const_image_color, log_xform, lp_fraction, hp_fraction):
+def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudo_color, const_image_color, log_xform, lp_fraction, hp_fraction, fft_top_only):
     if movie_mode_params[0] == 0:
         movie_mode, data_all, noise, apix = movie_mode_params
         nz, ny, nx = data_all.shape
@@ -730,7 +880,7 @@ def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radiu
     fraction_x = mask_radius/(nx//2*apix)
     tapering_image = generate_tapering_filter(image_size=(ny, nx), fraction_start=[0.8, fraction_x], fraction_slope=0.1)
     image_filenames = []
-    from bokeh.io import export_png
+    #from bokeh.io import export_png
     progress_bar = st.empty()
     progress_bar.progress(0.0)
     for i in range(movie_frames+1):
@@ -754,7 +904,7 @@ def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radiu
             output_size=(pny, pnx), log=log_xform, low_pass_fraction=lp_fraction, high_pass_fraction=hp_fraction)
         title = f"Power Spectra"
         fig_pwr = create_layerline_image_figure(proj_pwr, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=None, fft_top_only=fft_top_only, pseudo_color=show_pseudo_color, const_image_color=const_image_color, title=title, yaxis_visible=False, tooltips=None)
-        from bokeh.models import Label
+        #from bokeh.models import Label
         label = Label(x=0., y=0.9/cutoff_res_y, text=f"tilt = {tilt:.2f}°", text_align='center', text_color='white', text_font_size='30px', visible=True)
         fig_pwr.add_layout(label)
         figs.append(fig_pwr)
@@ -769,18 +919,19 @@ def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radiu
         image_filenames.append(filename)
         export_png(fig_all, filename=filename)
         progress_bar.progress((i+1)/(movie_frames+1)) 
-    from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
-    from moviepy.video.fx.all import resize
+    #from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
+    #from moviepy.video.fx.all import resize
     movie = ImageSequenceClip(image_filenames, fps=min(20, movie_frames/5))
     movie_filename = "movie.mp4"
     movie.write_videofile(movie_filename)
-    import os
+    #import os
     for f in image_filenames: os.remove(f)
     progress_bar.empty()
     return movie_filename
 
+@st.cache_resource
 def create_image_figure(image, dx, dy, title="", title_location="below", plot_width=None, plot_height=None, x_axis_label='x', y_axis_label='y', tooltips=None, show_axis=True, show_toolbar=True, crosshair_color="white", aspect_ratio=None):
-    from bokeh.plotting import figure
+    #from bokeh.plotting import figure
     h, w = image.shape
     if aspect_ratio is None:
         if plot_width and plot_height:
@@ -803,14 +954,14 @@ def create_image_figure(image, dx, dy, title="", title_location="below", plot_wi
     if not show_toolbar: fig.toolbar_location = None
 
     source_data = ColumnDataSource(data=dict(image=[image], x=[-w//2*dx], y=[-h//2*dy], dw=[w*dx], dh=[h*dy]))
-    from bokeh.models import LinearColorMapper
+    #from bokeh.models import LinearColorMapper
     color_mapper = LinearColorMapper(palette='Greys256')    # Greys256, Viridis256
     image = fig.image(source=source_data, image='image', color_mapper=color_mapper,
                 x='x', y='y', dw='dw', dh='dh'
             )
 
     # add hover tool only for the image
-    from bokeh.models.tools import HoverTool, CrosshairTool
+    #from bokeh.models.tools import HoverTool, CrosshairTool
     if not tooltips:
         tooltips = [("x", "$xÅ"), ('y', '$yÅ'), ('val', '@image')]
     image_hover = HoverTool(renderers=[image], tooltips=tooltips)
@@ -910,7 +1061,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
             if max_map_size>0: help += f". {warning_map_size}"
             button_clicked = st.button(label="Select a random EMDB ID", help=help, on_click=clear_twist_rise_csym_in_session_state)
             if button_clicked:
-                import random
+                #import random
                 st.session_state[key_emd_id] = 'emd-' + random.choice(emdb_ids_helical)
             help = None
             if max_map_size>0: help = warning_map_size
@@ -922,7 +1073,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                 st.stop()
             elif emd_id not in emdb_ids_helical:
                 msg = f'[EMD-{emd_id}](https://www.ebi.ac.uk/emdb/entry/EMD-{emd_id})'
-                import random
+                #import random
                 emd_id_random = random.choice(emdb_ids_helical)
                 st.warning(f"EMD-{emd_id} is annotated as a {methods[emdb_ids_all.index(emd_id)]}, not helical structure according to EMDB. Please input an emd-id of helica structure (for example, 'emd-{emd_id_random}')")
             resolution = resolutions[emdb_ids_all.index(emd_id)]
@@ -1056,7 +1207,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
             nz, ny, nx = data_all.shape
             if len(data_to_show)>1:
                 with st.expander(label="Choose an image", expanded=True):
-                    from st_clickable_images import clickable_images
+                    #from st_clickable_images import clickable_images
                     images = [encode_numpy(data_all[i], vflip=True) for i in data_to_show]
                     thumbnail_size = 128
                     n_per_row = 400//thumbnail_size
@@ -1279,17 +1430,18 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
 
 @st.cache_data(show_spinner=False)
 def bessel_1st_peak_positions(n_max:int = 100):
-    import numpy as np
+    #import numpy as np
     ret = np.zeros(n_max+1, dtype=np.float32)
-    from scipy.special import jnp_zeros
+    #from scipy.special import jnp_zeros
     for i in range(1, n_max+1):
         ret[i] = jnp_zeros(i, 1)[0]
     return ret
 
 @st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def bessel_n_image(ny, nx, nyquist_res_x, nyquist_res_y, radius, tilt):
-    import numpy as np
+    #import numpy as np
     table = bessel_1st_peak_positions()
+    
     if tilt:
         dsx = 1./(nyquist_res_x*nx//2)
         dsy = 1./(nyquist_res_x*ny//2)
@@ -1338,7 +1490,7 @@ def simulate_helix(twist, rise, csym, helical_radius, ball_radius, ny, nx, apix,
                 centers[i*csym+si, 1] = y
                 centers[i*csym+si, 2] = z
         if tilt:
-            from scipy.spatial.transform import Rotation as R
+            #from scipy.spatial.transform import Rotation as R
             rot = R.from_euler('x', tilt, degrees=True)
             centers = rot.apply(centers)
         centers = centers[:, [2, 0]]    # project along y
@@ -1397,7 +1549,7 @@ def compute_phase_difference_across_meridian(phase):
 
 @st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def resize_rescale_power_spectra(data, nyquist_res, cutoff_res=None, output_size=None, log=True, low_pass_fraction=0, high_pass_fraction=0, norm=1):
-    from scipy.ndimage import map_coordinates
+    #from scipy.ndimage import map_coordinates
     ny, nx = data.shape
     ony, onx = output_size
     res_y, res_x = cutoff_res
@@ -1441,7 +1593,7 @@ def fft_rescale(image, apix=1.0, cutoff_res=None, output_size=None):
     Y = (2*np.pi * Y).flatten(order='C')
     X = (2*np.pi * X).flatten(order='C')
 
-    from finufft import nufft2d2
+    #from finufft import nufft2d2
     fft = nufft2d2(x=Y, y=X, f=image.astype(np.complex128), eps=1e-6)
     fft = fft.reshape((ony, onx))
 
@@ -1455,7 +1607,7 @@ def fft_rescale(image, apix=1.0, cutoff_res=None, output_size=None):
 
 @st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def auto_correlation(data, sqrt=True, high_pass_fraction=0):
-    from scipy.signal import correlate2d
+    #from scipy.signal import correlate2d
     fft = np.fft.rfft2(data)
     product = fft*np.conj(fft)
     if sqrt: product = np.sqrt(product)
@@ -1550,8 +1702,8 @@ def estimate_radial_range(data, thresh_ratio=0.1):
         except:
             score = 1e10
         return score
-    from scipy.optimize import minimize
-    from itertools import product
+    #from scipy.optimize import minimize
+    #from itertools import product
     bounds = ((0, None), (None, None), (0, None), (0, mask_radius), (0, mask_radius))
     vals_a = (1, 2, 4, 8)
     vals_w = (0, 0.5)
@@ -1569,13 +1721,13 @@ def estimate_radial_range(data, thresh_ratio=0.1):
 
 @st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def auto_vertical_center(data, n_theta=180):
-  from skimage.transform import radon
-  from scipy.signal import correlate
+  #from skimage.transform import radon
+  #from scipy.signal import correlate
   
   data_work = np.clip(data, 0, None)
   
   theta = np.linspace(start=0., stop=180., num=n_theta, endpoint=False)
-  import warnings
+  #import warnings
   with warnings.catch_warnings(): # ignore outside of circle warnings
     warnings.simplefilter('ignore')
     sinogram = radon(data_work, theta=theta)
@@ -1599,7 +1751,7 @@ def auto_vertical_center(data, n_theta=180):
     xproj += xproj[::-1]
     score = -np.std(xproj)
     return score
-  from scipy.optimize import fmin
+  #from scipy.optimize import fmin
   res = fmin(score_rotation_shift, x0=(theta_best, shift_best), xtol=1e-2, disp=0)
   theta_best, shift_best = res
   return set_to_periodic_range(theta_best), shift_best
@@ -1620,14 +1772,14 @@ def rotate_shift_image(data, angle=0, pre_shift=(0, 0), post_shift=(0, 0), rotat
     offset += np.array(rotation_center, dtype=np.float32).T - np.dot(m, np.array(rotation_center, dtype=np.float32).T)  # rotation around the specified center
     offset += -np.array([pre_dy, pre_dx], dtype=np.float32).T     # pre-rotation shift
 
-    from scipy.ndimage import affine_transform
+    #from scipy.ndimage import affine_transform
     ret = affine_transform(data, matrix=m, offset=offset, order=order, mode='constant')
     return ret
 
 @st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def generate_projection(data, az=0, tilt=0, noise=0, output_size=None):
-    from scipy.spatial.transform import Rotation as R
-    from scipy.ndimage import affine_transform
+    #from scipy.spatial.transform import Rotation as R
+    #from scipy.ndimage import affine_transform
     # note the convention change
     # xyz in scipy is zyx in cryoEM maps
     if az or tilt:
@@ -1786,7 +1938,7 @@ def guess_if_3d(filename, data=None):
 
 @st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def get_2d_image_from_uploaded_file(fileobj):
-    import os, tempfile
+    #import os, tempfile
     original_filename = fileobj.name
     suffix = os.path.splitext(original_filename)[-1]
     with tempfile.NamedTemporaryFile(suffix=suffix) as temp:
@@ -1798,7 +1950,7 @@ def get_2d_image_from_uploaded_file(fileobj):
 def get_emdb_ids():
     try:
         import_with_auto_install(["pandas"])
-        import pandas as pd
+        #import pandas as pd
         entries_all = pd.read_csv('https://www.ebi.ac.uk/emdb/api/search/current_status:"REL"?wt=csv&download=true&fl=emdb_id,structure_determination_method,resolution,image_reconstruction_helical_delta_z_value,image_reconstruction_helical_delta_phi_value,image_reconstruction_helical_axial_symmetry_details')
         entries_all["emdb_id"] = entries_all["emdb_id"].str.split("-", expand=True).iloc[:, 1].astype(str)
         emdb_ids_all = list(entries_all["emdb_id"])
@@ -1837,7 +1989,7 @@ def get_emdb_map(emd_id: str):
     url = get_emdb_map_url(emd_id)
     ds = np.DataSource(None)
     fp = ds.open(url)
-    import mrcfile
+    #import mrcfile
     with mrcfile.open(fp.name) as mrc:
         vmin, vmax = np.min(mrc.data), np.max(mrc.data)
         data = ((mrc.data - vmin) / (vmax - vmin))
@@ -1858,12 +2010,12 @@ def get_2d_image_from_url(url):
 #@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def get_2d_image_from_file(filename):
     try:
-        import mrcfile
+        #import mrcfile
         with mrcfile.open(filename) as mrc:
             data = mrc.data.astype(np.float32)
             apix = mrc.voxel_size.x.item()
     except:
-        from skimage.io import imread
+        #from skimage.io import imread
         data = imread(filename, as_gray=1) * 1.0    # return: numpy array
         data = data[::-1, :]
         apix = 1.0
@@ -1901,8 +2053,8 @@ def encode_numpy(img, hflip=False, vflip=False):
         tmp = tmp[:, ::-1]
     if vflip:
         tmp = tmp[::-1, :]
-    import io, base64
-    from PIL import Image
+    #import io, base64
+    #from PIL import Image
     pil_img = Image.fromarray(tmp)
     buffer = io.BytesIO()
     pil_img.save(buffer, format="JPEG")
@@ -1930,9 +2082,10 @@ data_examples = [
 ]
 
 def clear_twist_rise_csym_in_session_state():
-    if "twist" in st.session_state: del st.session_state["twist"]
-    if "rise" in st.session_state: del st.session_state["rise"]
-    if "csym" in st.session_state: del st.session_state["csym"]
+    #if "twist" in st.session_state: del st.session_state["twist"]
+    #if "rise" in st.session_state: del st.session_state["rise"]
+    #if "csym" in st.session_state: del st.session_state["csym"]
+    return
 
 def set_session_state_from_data_example():
     data = np.random.choice(data_examples)
@@ -1958,7 +2111,7 @@ def set_session_state_from_data_example():
 @st.cache_data(persist=None, show_spinner=False)
 def set_initial_query_params(query_string):
     if len(query_string)<1: return
-    from urllib.parse import parse_qs
+    #from urllib.parse import parse_qs
     d = parse_qs(query_string)
     if len(d)<1: return
     st.session_state.update(d)
@@ -2004,7 +2157,7 @@ def set_session_state_from_query_params():
             st.session_state[attr] = st.query_params[attr][0]
 
 def get_direct_url(url):
-    import re
+    #import re
     if url.startswith("https://drive.google.com/file/d/"):
         hash = url.split("/")[5]
         return f"https://drive.google.com/uc?export=download&id={hash}"
@@ -2018,7 +2171,7 @@ def get_direct_url(url):
     elif url.find("sharepoint.com")!=-1 and url.find("guestaccess.aspx")!=-1:
         return url.replace("guestaccess.aspx", "download.aspx")
     elif url.startswith("https://1drv.ms"):
-        import base64
+        #import base64
         data_bytes64 = base64.b64encode(bytes(url, 'utf-8'))
         data_bytes64_String = data_bytes64.decode('utf-8').replace('/','_').replace('+','-').rstrip("=")
         return f"https://api.onedrive.com/v1.0/shares/u!{data_bytes64_String}/root/content"
@@ -2027,7 +2180,7 @@ def get_direct_url(url):
 
 def set_to_periodic_range(v, min=-180, max=180):
     if min <= v <= max: return v
-    from math import fmod
+    #from math import fmod
     tmp = fmod(v-min, max-min)
     if tmp>=0: tmp+=min
     else: tmp+=max
@@ -2049,7 +2202,7 @@ def dict_recursive_search(d, key, default=None):
 @st.cache_data(persist='disk', show_spinner=False)
 def setup_anonymous_usage_tracking():
     try:
-        import pathlib, stat
+        #import pathlib, stat
         index_file = pathlib.Path(st.__file__).parent / "static/index.html"
         index_file.chmod(stat.S_IRUSR|stat.S_IWUSR|stat.S_IRGRP|stat.S_IROTH)
         txt = index_file.read_text()
@@ -2061,7 +2214,7 @@ def setup_anonymous_usage_tracking():
 
 def mem_info():
     import_with_auto_install(["psutil"])
-    from psutil import virtual_memory
+    #from psutil import virtual_memory
     mem = virtual_memory()
     mb = pow(2, 20)
     return (mem.total/mb, mem.available/mb, mem.used/mb, mem.percent)
@@ -2078,8 +2231,8 @@ def mem_quota():
 
 def mem_used():
     import_with_auto_install(["psutil"])
-    from psutil import Process
-    from os import getpid
+    #from psutil import Process
+    #from os import getpid
     mem = Process(getpid()).memory_info().rss / 1024**2   # MB
     return mem
 
@@ -2091,11 +2244,11 @@ def host_uptime():
     return t
 
 def get_username():
-    from getpass import getuser
+    #from getpass import getuser
     return getuser()
 
 def get_hostname():
-    import socket
+    #import socket
     fqdn = socket.getfqdn()
     return fqdn
 
@@ -2119,7 +2272,7 @@ def is_hosted(return_host=False):
 
 def qr_code(url=None, size = 8):
     import_with_auto_install(["qrcode"])
-    import qrcode
+    #import qrcode
     if url is None: # ad hoc way before streamlit can return the url
         _, host = is_hosted(return_host=True)
         if len(host)<1: return None
@@ -2129,7 +2282,7 @@ def qr_code(url=None, size = 8):
             url = "https://helical-indexing-HILL.herokuapp.com/"
         else:
             url = f"http://{host}:8501/"
-        import urllib
+        #import urllib
         params = st.query_params
         d = {k:params[k][0] for k in params}
         url += "?" + urllib.parse.urlencode(d)
@@ -2161,10 +2314,10 @@ def gen_filament_template(length, diameter, angle=0, center_offset=(0, 0), image
     # flattop gaussian: order>2
     d = np.exp( -np.log(2)*(np.abs(np.power((Y)/(length/2), order))+np.abs(np.power((X)/(diameter/2), order))) )
     if angle!=0:
-        from skimage import transform
+        #from skimage import transform
         d = transform.rotate(image=d, angle=angle, center=(nx//2, ny//2))
     if center_offset!=(0, 0):
-        from skimage import transform
+        #from skimage import transform
         xform = transform.EuclideanTransform(
             translation = (center_offset[0]/apix, center_offset[1]/apix)
         )
@@ -2182,8 +2335,8 @@ def pad_to_size(array, ny, nx):
 
 #@st.cache_data(persist='disk', show_spinner=False)
 def filament_transform_fft(image, filament_template, angle_step):
-    import scipy.fft
-    import skimage.transform
+    #import scipy.fft
+    #import skimage.transform
     ny, nx = image.shape
     fny, fnx = filament_template.shape
     if ny != fny or nx != fnx:
@@ -2195,7 +2348,7 @@ def filament_transform_fft(image, filament_template, angle_step):
     res_ang = np.zeros(shape=(len(angles), ny, nx), dtype=np.float32)
     image_fft = scipy.fft.rfft2(image)
     for ai, angle in enumerate(angles):
-        template = skimage.transform.rotate(image=filament_template, angle=angle, center=(fnx//2, fny//2))
+        template = transform.rotate(image=filament_template, angle=angle, center=(fnx//2, fny//2))
         if pad:
             template = pad_to_size(template, ny, nx)
         template_fft = np.conj(scipy.fft.rfft2(template))
@@ -2208,7 +2361,7 @@ def filament_transform_fft(image, filament_template, angle_step):
     return (ret_amp2f, ret_ang)
 
 #@st.cache_data(persist='disk', show_spinner=False)
-def sample_axis_dots(data, apix, nx, ny, r_filament_pixel, num_samples, lp_x, lp_y):
+def sample_axis_dots(data, apix, nx, ny, r_filament_pixel, l_template_pixel, da, num_samples, lp_x, lp_y):
     # fill in potential black backgrounds with helical boxer
     data_slice_median=np.median(data)
     for i in range(ny):
@@ -2227,7 +2380,8 @@ def sample_axis_dots(data, apix, nx, ny, r_filament_pixel, num_samples, lp_x, lp
     # apply low pass filter
     data_fft=fp.fftshift(fp.fft2(data))
 
-    kernel = Gaussian2DKernel(lp_x,lp_y,0,x_size=nx,y_size=ny).array
+    #kernel = Gaussian2DKernel(lp_x,lp_y,0,x_size=nx,y_size=ny).array
+    kernel = gen_filament_template(length=lp_y, diameter=lp_x, image_size=(ny, nx), apix=apix, order=2)
     max_k=np.max(kernel)
     min_k=np.min(kernel)
     kernel=(kernel-min_k)/(max_k-min_k)
@@ -2244,15 +2398,13 @@ def sample_axis_dots(data, apix, nx, ny, r_filament_pixel, num_samples, lp_x, lp
     data_filtered = (vmax-data_filtered)/(vmax-vmin)
     
     diameter = 2*r_filament_pixel*apix
-    length = diameter
-    
-    da = np.rad2deg(np.arctan2(length, diameter)/3) # degree
+    length = l_template_pixel
 
     template_size = round(max(diameter, length)/apix*1.2)//2*2
 
     filament_template = gen_filament_template(length=length, diameter=diameter, image_size=(np.min([template_size,ny]), np.min([template_size,nx])), apix=apix, order=2)
     filament_transform_method = filament_transform_fft
-    cc, ang = filament_transform_method(image=data_filtered, filament_template=filament_template, angle_step=da)
+    cc, ang = filament_transform_method(image=data_filtered, filament_template=filament_template, angle_step=3)
     cc_vmin = cc.min()
     cc_vmax = cc.max()
     cc = (cc_vmax-cc)/(cc_vmax-cc_vmin)
@@ -2291,21 +2443,22 @@ def fit_spline(_disp_col,data,xs,ys,display=False):
     if display:
         with _disp_col:
             st.write("Fitted spline:")
-            fig,ax=plt.subplots()
-            plt.tight_layout()
-            ax.imshow(data,cmap='gray')
-            ax.plot(new_xs,ys,'r-')
-            ax.plot(xs,ys,'ro')
-            plt.xlim([0,nx])
-            plt.ylim([0,ny])
-            plt.gca().invert_yaxis()
-            plt.axis('off')
-            #plt.title("Fitted Spline")
+            with st.container(height=np.max(np.shape(data)), border=False):
+                fig,ax=plt.subplots()
+                ax.imshow(data,cmap='gray')
+                ax.plot(new_xs,ys,'r-')
+                ax.plot(xs,ys,'ro')
+                plt.xlim([0,nx])
+                plt.ylim([0,ny])
+                plt.gca().invert_yaxis()
+                plt.axis('off')
+                plt.tight_layout()
+                #plt.title("Fitted Spline")
 
-            input_resize = 1
-            resize = input_resize * 0.99
-            _spline_col1, _ = st.columns((resize / (1 - resize), 1), gap="small")
-            _spline_col1.pyplot(fig)
+                input_resize = 1
+                resize = input_resize * 0.99
+                _spline_col1, _ = st.columns((resize / (1 - resize), 1), gap="small")
+                _spline_col1.pyplot(fig)
     return new_xs,tck
 
 #@st.cache_data(persist='disk', show_spinner=False)
@@ -2388,17 +2541,18 @@ def filament_straighten(_disp_col,data,tck,new_xs,ys,r_filament_pixel_display,ap
 
         input_resize = 1
         resize = input_resize * 0.99
-        _res_col1, _ = st.columns((resize / (1 - resize), 1), gap="small")
-        #_res_col1.pyplot(fig)
-        with _res_col1:
-            fig = create_image_figure(new_im, apix, apix, title="Straightened image", title_location="below", plot_width=None, plot_height=None, x_axis_label=None, y_axis_label=None, tooltips=None, show_axis=False, show_toolbar=False, crosshair_color="white")
-            st.bokeh_chart(fig, use_container_width=True)
+        with st.container(height=np.max(np.shape(data)), border=False):
+            _res_col1, _ = st.columns((resize / (1 - resize), 1), gap="small")
+            #_res_col1.pyplot(fig)
+            with _res_col1:
+                fig = create_image_figure(new_im, apix, apix, title="Straightened image", title_location="below", plot_width=None, plot_height=None, x_axis_label=None, y_axis_label=None, tooltips=None, show_axis=False, show_toolbar=False, crosshair_color="white")
+                st.bokeh_chart(fig, use_container_width=True)
 
     return new_im
 
 if __name__ == "__main__":
     setup_anonymous_usage_tracking()
-    import argparse
+    #import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--query_string", metavar="<str>", type=str, help="set initial url query params from this string. default: %(default)s", default="")
     args = parser.parse_args()
