@@ -80,7 +80,6 @@ from scipy.optimize import minimize, fmin
 import streamlit as st
 from st_clickable_images import clickable_images
 from streamlit_drawable_canvas import st_canvas
-from streamlit_profiler import Profiler
 
 
 from skimage.io import imread
@@ -169,12 +168,9 @@ rect_json_template={
     "endAngle":6.283185307179586
 }
 
-p=Profiler()
-
 #from memory_profiler import profile
 #@profile(precision=4)
 def main(args):
-    p.start()
     title = "HILL: Helical Indexing using Layer Lines"
     st.set_page_config(page_title=title, layout="wide")
 
@@ -863,7 +859,6 @@ def main(args):
                 st.query_params.clear()
 
             st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to [HILL@GitHub](https://github.com/jianglab/hill/issues)*")
-            p.stop()
 
 
 
