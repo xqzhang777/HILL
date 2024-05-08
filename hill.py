@@ -688,12 +688,25 @@ def main(args):
                 slider_rise = Slider(start=rise/2, end=min(max_rise, rise*2.0), value=rise, step=min(max_rise, rise*2.0)*0.001, title="Rise (Å)", width=slider_width)
 
                 callback_rise_code = """
+                    var twist_sign = 1.
+                    if (spinner_twist.value < 0) {
+                        twist_sign = -1.
+                    }
+                    
+                    spinner_twist.value = twist_sign * 360/(spinner_pitch.value/spinner_rise.value)
                     slider_rise.value = spinner_rise.value
                 """
                 callback_pitch_code = """
+                    var twist_sign = 1.
+                    if (spinner_twist.value < 0) {
+                        twist_sign = -1.
+                    }
+                    
+                    spinner_twist.value = twist_sign * 360/(spinner_pitch.value/spinner_rise.value)
                     slider_pitch.value = spinner_rise.value
                 """
                 callback_twist_code = """
+                    spinner_pitch.value = Math.abs(360/spinner_twist.value * spinner_rise.value)
                     slider_twist.value = spinner_twist.value
                 """
                 callback_twist = CustomJS(args=dict(spinner_twist=spinner_twist, spinner_pitch=spinner_pitch, spinner_rise=spinner_rise,slider_twist=slider_twist,slider_pitch=slider_pitch, slider_rise=slider_rise), code=callback_twist_code)
