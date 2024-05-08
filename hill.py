@@ -567,9 +567,10 @@ def main(args):
 
         with col4:
             def save_params_from_query_param():
-                st.session_state['twist'] = float(st.query_params['twist'])
-                st.session_state['rise'] = float(st.query_params['rise'])
-                st.session_state['pitch'] = twist2pitch(st.session_state['twist'], st.session_state['rise'])
+                if 'twist' in st.query_params and 'rise' in st.query_params:
+                    st.session_state['twist'] = float(st.query_params['twist'])
+                    st.session_state['rise'] = float(st.query_params['rise'])
+                    st.session_state['pitch'] = twist2pitch(st.session_state['twist'], st.session_state['rise'])
 
             button_col, helper_col = st.columns([0.3,1])
             with button_col:
