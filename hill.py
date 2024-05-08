@@ -688,25 +688,12 @@ def main(args):
                 slider_rise = Slider(start=rise/2, end=min(max_rise, rise*2.0), value=rise, step=min(max_rise, rise*2.0)*0.001, title="Rise (Å)", width=slider_width)
 
                 callback_rise_code = """
-                    var twist_sign = 1.
-                    if (spinner_twist.value < 0) {
-                        twist_sign = -1.
-                    }
-                    
-                    spinner_twist.value = twist_sign * 360/(spinner_pitch.value/spinner_rise.value)
                     slider_rise.value = spinner_rise.value
                 """
                 callback_pitch_code = """
-                    var twist_sign = 1.
-                    if (spinner_twist.value < 0) {
-                        twist_sign = -1.
-                    }
-                    
-                    spinner_twist.value = twist_sign * 360/(spinner_pitch.value/spinner_rise.value)
                     slider_pitch.value = spinner_rise.value
                 """
                 callback_twist_code = """
-                    spinner_pitch.value = Math.abs(360/spinner_twist.value * spinner_rise.value)
                     slider_twist.value = spinner_twist.value
                 """
                 callback_twist = CustomJS(args=dict(spinner_twist=spinner_twist, spinner_pitch=spinner_pitch, spinner_rise=spinner_rise,slider_twist=slider_twist,slider_pitch=slider_pitch, slider_rise=slider_rise), code=callback_twist_code)
@@ -722,8 +709,13 @@ def main(args):
                     if (slider_twist.value < 0) {
                         twist_sign = -1.
                     }
-                    
-                    slider_twist.value = twist_sign * 360/(slider_pitch.value/slider_rise.value)
+                    var slider_twist_to_update = twist_sign * 360/(slider_pitch.value/slider_rise.value)
+                    if (slider_twist_to_update != slider_twist.value) {
+                        slider_twist.value = slider_twist_to_update
+                    }
+                    if (spinner_rise.value != slider_rise.value) {
+                        spinner_rise.value = slider_rise.value
+                    }                    
                     var pitch_inv = 1./slider_pitch.value
                     var rise_inv = 1./slider_rise.value
                     for (var fi = 0; fi < fig_ellipses.length; fi++) {
@@ -743,7 +735,13 @@ def main(args):
                     if (slider_twist.value < 0) {
                         twist_sign = -1.
                     }
-                    slider_twist.value = twist_sign * 360/(slider_pitch.value/slider_rise.value)
+                    var slider_twist_to_update = twist_sign * 360/(slider_pitch.value/slider_rise.value)
+                    if (slider_twist_to_update != slider_twist.value) {
+                        slider_twist.value = slider_twist_to_update
+                    }
+                    if (spinner_pitch.value != slider_pitch.value) {
+                        spinner_pitch.value = slider_pitch.value
+                    } 
                     var pitch_inv = 1./slider_pitch.value
                     var rise_inv = 1./slider_rise.value
                     for (var fi = 0; fi < fig_ellipses.length; fi++) {
@@ -759,7 +757,13 @@ def main(args):
                     }
                 """
                 callback_twist_code = """
-                    slider_pitch.value = Math.abs(360/slider_twist.value * slider_rise.value)
+                    var slider_pitch_to_update = Math.abs(360/slider_twist.value * slider_rise.value)                   
+                    if (slider_pitch_to_update != slider_pitch.value) {
+                        slider_pitch.value = slider_pitch_to_update
+                    }
+                    if (spinner_twist.value != slider_twist.value) {
+                        spinner_twist.value = slider_twist.value
+                    } 
                 """
                 callback_rise = CustomJS(args=dict(fig_ellipses=fig_ellipses, slider_twist=slider_twist,slider_pitch=slider_pitch, slider_rise=slider_rise, spinner_twist=spinner_twist,spinner_pitch=spinner_pitch, spinner_rise=spinner_rise), code=callback_rise_code)
                 callback_pitch = CustomJS(args=dict(fig_ellipses=fig_ellipses, slider_twist=slider_twist,slider_pitch=slider_pitch, slider_rise=slider_rise, spinner_twist=spinner_twist,spinner_pitch=spinner_pitch, spinner_rise=spinner_rise), code=callback_pitch_code)
