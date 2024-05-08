@@ -705,7 +705,12 @@ def main(args):
                 spinner_rise.js_on_change('value', callback_rise)
 
                 callback_rise_code = """
-                    slider_twist.value = 360/(slider_pitch.value/slider_rise.value)
+                    var twist_sign = 1.
+                    if (slider_twist.value < 0) {
+                        twist_sign = -1.
+                    }
+                    
+                    slider_twist.value = twist_sign * 360/(slider_pitch.value/slider_rise.value)
                     var pitch_inv = 1./slider_pitch.value
                     var rise_inv = 1./slider_rise.value
                     for (var fi = 0; fi < fig_ellipses.length; fi++) {
@@ -721,7 +726,11 @@ def main(args):
                     }
                 """
                 callback_pitch_code = """
-                    slider_twist.value = 360/(slider_pitch.value/slider_rise.value)
+                    var twist_sign = 1.
+                    if (slider_twist.value < 0) {
+                        twist_sign = -1.
+                    }
+                    slider_twist.value = twist_sign * 360/(slider_pitch.value/slider_rise.value)
                     var pitch_inv = 1./slider_pitch.value
                     var rise_inv = 1./slider_rise.value
                     for (var fi = 0; fi < fig_ellipses.length; fi++) {
