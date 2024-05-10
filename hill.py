@@ -62,6 +62,7 @@ from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 import numpy as np
 from numba import jit, set_num_threads, prange
 
+import pandas as pd
 from PIL import Image
 from psutil import virtual_memory, Process
 
