@@ -62,6 +62,7 @@ from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 import numpy as np
 from numba import jit, set_num_threads, prange
 
+import pandas as pd
 from PIL import Image
 from psutil import virtual_memory, Process
 
@@ -80,6 +81,7 @@ from scipy.optimize import minimize, fmin
 import streamlit as st
 from st_clickable_images import clickable_images
 from streamlit_drawable_canvas import st_canvas
+from streamlit_profiler import Profiler
 
 
 from skimage.io import imread
@@ -168,9 +170,12 @@ rect_json_template={
     "endAngle":6.283185307179586
 }
 
+p=Profiler()
+
 #from memory_profiler import profile
 #@profile(precision=4)
 def main(args):
+    p.start()
     title = "HILL: Helical Indexing using Layer Lines"
     st.set_page_config(page_title=title, layout="wide")
 
@@ -184,6 +189,7 @@ def main(args):
         st.session_state['rise'] = 4.75
         st.session_state['twist'] = 1.0
         st.session_state['pitch'] = 1710.0
+        st.session_state['prev_emdid'] = None
         set_initial_query_params(query_string=args.query_string) # only excuted on the first run
 
     if len(st.session_state)<1:  # only run once at the start of the session
@@ -203,13 +209,17 @@ def main(args):
     out_col1 = st.sidebar
 
     with out_col1:
-        with st.expander(label="session", expanded=False):
-            st.write(st.session_state)
         with st.expander(label="README", expanded=False):
             st.write("This Web app considers a biological helical structure as the product of a continous helix and a set of parallel planes. Based on the covolution theory, the Fourier Transform (FT) of a helical structure would be the convolution of the FT of the continous helix and the FT of the planes.  \nThe FT of a continous helix consists of equally spaced layer planes (3D) or layerlines (2D projection) that can be described by Bessel functions of increasing orders (0, ±1, ±2, ...) from the Fourier origin (i.e. equator). The spacing between the layer planes/lines is determined by the helical pitch (i.e. the shift along the helical axis for a 360° turn of the helix). If the structure has additional cyclic symmetry (for example, C6) around the helical axis, only the layer plane/line orders of integer multiplier of the symmetry (e.g. 0, ±6, ±12, ...) are visible. The primary peaks of the layer lines in the power spectra form a pattern similar to a X symbol.  \nThe FT of the parallel planes consists of equally spaced points along the helical axis (i.e. meridian) with the spacing being determined by the helical rise.  \nThe convolution of these two components (X-shaped pattern of layer lines and points along the meridian) generates the layer line patterns seen in the power spectra of the projection images of helical structures. The helical indexing task is thus to identify the helical rise, pitch (or twist), and cyclic symmetry that would predict a layer line pattern to explain the observed layer lines in the power spectra. This Web app allows you to interactively change the helical parameters and superimpose the predicted layer liines on the power spectra to complete the helical indexing task.  \n  \nPS: power spectra; PD: phase differences across the meridian; YP: Y-axis power spectra profile; LL: layer lines; m: indices of the X-patterns along the meridian; Jn: Bessel order")
 
         show_straightening_options, data_all, image_index, data, apix, radius_auto, mask_radius, input_type, is_3d, input_params, (image_container, image_label) = obtain_input_image(out_col1, param_i=0)
         input_mode, (uploaded_filename, url, emd_id) = input_params
+        st.write(emd_id)
+        if st.session_state['prev_emdid'] is None or emd_id != st.session_state['prev_emdid']:
+            twist = st.session_state['twist']        
+            pitch = st.session_state['pitch']
+            rise = st.session_state['rise']
+            
 
         if input_type in ["image"]:
             label = f"Replace amplitudes or phases with another image"
@@ -367,14 +377,12 @@ def main(args):
         col2, col3, col4 = st.columns((1.0, 0.55, 4.0), gap='small')
 
         with col2:
-            button = st.button("Copy twist/rise↶")
-            if button:
-                if "twist" in st.query_params and "rise" in st.query_params:
-                    st.session_state.rise = float(st.query_params["rise"])
-                    st.session_state.twist = float(st.query_params["twist"])
-                    st.session_state.pitch = twist2pitch(st.session_state.twist, st.session_state.rise)
-                    st.query_params.pop('rise', None)
-                    st.query_params.pop('twist', None)
+            def save_params_from_query_param():
+                if 'twist' in st.query_params and 'rise' in st.query_params:
+                    st.session_state['twist'] = float(st.query_params['twist'])
+                    st.session_state['rise'] = float(st.query_params['rise'])
+                    st.session_state['pitch'] = twist2pitch(st.session_state['twist'], st.session_state['rise'])
+            button = st.button("Copy twist/rise↶", on_click=save_params_from_query_param, help="Save helical parameters from plots")
 
             #pitch_or_twist_choices = ["pitch", "twist"]
             #pitch_or_twist = st.radio(label="Choose pitch or twist mode", options=pitch_or_twist_choices, index=0, label_visibility="collapsed", horizontal=True)
@@ -566,17 +574,6 @@ def main(args):
                 st.image([normalize(data), normalize(proj)], use_column_width=True, caption=[image_label, "Simulated"])
 
         with col4:
-            def save_params_from_query_param():
-                if 'twist' in st.query_params and 'rise' in st.query_params:
-                    st.session_state['twist'] = float(st.query_params['twist'])
-                    st.session_state['rise'] = float(st.query_params['rise'])
-                    st.session_state['pitch'] = twist2pitch(st.session_state['twist'], st.session_state['rise'])
-
-            button_col, helper_col = st.columns([0.3,1])
-            with button_col:
-                st.button("Save parameters from plots", on_click=save_params_from_query_param)
-            with helper_col:
-                st.info("<- Please use the button to save the changes of the helical parameters for later plot changes.")
             if not (show_pwr or show_phase_diff or show_pwr2 or show_phase_diff2 or show_pwr_simu or show_phase_diff_simu): return
 
             items = [ (show_pwr, pwr, "Power Spectra", show_phase, phase, show_phase_diff, phase_diff, "Phase Diff Across Meridian", show_yprofile), 
@@ -854,7 +851,7 @@ def main(args):
                 figs_grid = gridplot(children=[figs], toolbar_location='right')
                 override_height = pny+120
 
-            st.bokeh_chart(figs_grid, use_container_width=False)                   
+            st.bokeh_chart(figs_grid, use_container_width=False)                     
 
             if movie_frames>0:
                 with st.spinner(text="Generating movie of tilted power spectra/phases ..."):
@@ -882,6 +879,7 @@ def main(args):
                 st.query_params.clear()
 
             st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to [HILL@GitHub](https://github.com/jianglab/hill/issues)*")
+            p.stop()
 
 
 
@@ -1097,14 +1095,15 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
             resolution = resolutions[emdb_ids_all.index(emd_id)]
             msg = f'[EMD-{emd_id}](https://www.ebi.ac.uk/emdb/entry/EMD-{emd_id}) | resolution={resolution}Å'
             params = get_emdb_helical_parameters(emd_id)
+            st.session_state['prev_emdid'] = emd_id
             if params and ("twist" in params and "rise" in params and "csym" in params):                
                 msg += f"  \ntwist={params['twist']}° | rise={params['rise']}Å | c{params['csym']}"
                 st.session_state[f"input_type_{param_i}"] = "image"
-                if "twist" not in st.session_state and "rise" not in st.session_state:
-                    st.session_state.rise = params['rise']
-                    st.session_state.twist = params['twist']
-                    st.session_state.pitch = twist2pitch(twist=st.session_state.twist, rise=st.session_state.rise)
-                    st.session_state.csym = params['csym']
+                #if "twist" not in st.session_state and "rise" not in st.session_state:
+                st.session_state.rise = params['rise']
+                st.session_state.twist = params['twist']
+                st.session_state.pitch = twist2pitch(twist=st.session_state.twist, rise=st.session_state.rise)
+                st.session_state.csym = params['csym']
             else:
                 msg +=  "  \n*helical params not available*"
             st.markdown(msg)
@@ -1129,6 +1128,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
             is_pwr_auto = False
             is_pd_auto = False
         else:
+            st.session_state['prev_emdid'] = None
             is_3d_auto = False
             if input_mode == 0:  # "upload a mrc/mrcs file":
                 help = None
@@ -2096,7 +2096,7 @@ class Data:
 
 data_examples = [
     Data(twist=29.40, rise=21.92, csym=6, diameter=138, url="https://tinyurl.com/y5tq9fqa"),
-    Data(twist=36.0, rise=3.4, csym=1, diameter=20, dx=5, input_type="PS", apix_or_nqyuist=2.5, url="https://upload.wikimedia.org/wikipedia/en/b/b2/Photo_51_x-ray_diffraction_image.jpg")
+    #Data(twist=36.0, rise=3.4, csym=1, diameter=20, dx=5, input_type="PS", apix_or_nqyuist=2.5, url="https://upload.wikimedia.org/wikipedia/en/b/b2/Photo_51_x-ray_diffraction_image.jpg")
 ]
 
 def clear_twist_rise_csym_in_session_state():
