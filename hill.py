@@ -81,7 +81,6 @@ from scipy.optimize import minimize, fmin
 import streamlit as st
 from st_clickable_images import clickable_images
 from streamlit_drawable_canvas import st_canvas
-from streamlit_profiler import Profiler
 
 
 from skimage.io import imread
@@ -170,12 +169,9 @@ rect_json_template={
     "endAngle":6.283185307179586
 }
 
-p=Profiler()
-
 #from memory_profiler import profile
 #@profile(precision=4)
 def main(args):
-    p.start()
     title = "HILL: Helical Indexing using Layer Lines"
     st.set_page_config(page_title=title, layout="wide")
 
@@ -198,13 +194,6 @@ def main(args):
     if "input_mode_0" not in st.session_state:
         set_session_state_from_data_example()
 
-    if "twist" in st.session_state:
-        twist = st.session_state['twist']        
-    if "pitch" in st.session_state:
-        pitch = st.session_state['pitch']
-    if "rise" in st.session_state:
-        rise = st.session_state['rise']
-
     
     out_col1 = st.sidebar
 
@@ -214,12 +203,12 @@ def main(args):
 
         show_straightening_options, data_all, image_index, data, apix, radius_auto, mask_radius, input_type, is_3d, input_params, (image_container, image_label) = obtain_input_image(out_col1, param_i=0)
         input_mode, (uploaded_filename, url, emd_id) = input_params
-        st.write(emd_id)
-        if st.session_state['prev_emdid'] is None or emd_id != st.session_state['prev_emdid']:
+        if "twist" in st.session_state:
             twist = st.session_state['twist']        
+        if "pitch" in st.session_state:
             pitch = st.session_state['pitch']
-            rise = st.session_state['rise']
-            
+        if "rise" in st.session_state:
+            rise = st.session_state['rise']            
 
         if input_type in ["image"]:
             label = f"Replace amplitudes or phases with another image"
@@ -271,7 +260,7 @@ def main(args):
                                             help="Radius of filament template. Used to generate the row template for determining the center points of the filament at different rows with cross-correlation.")
                 r_filament_pixel = int(r_filament / apix)
                 
-                l_template = st.number_input("Template length (Å):", value=radius_auto * apix * 1, max_value=int(nx) * apix,
+                l_template = st.number_input("Template length (Å):", value=radius_auto * apix * 2, max_value=int(nx) * apix,
                                             help="Length of filament template. Used to generate the row template for determining the center points of the filament at different rows with cross-correlation.")
                 l_template_pixel = int(l_template / apix)
                 
@@ -347,6 +336,9 @@ def main(args):
                     point_display_radius=point_display_radius if drawing_mode == 'point' else 0,
                     key="canvas",
                 )
+                if is_hosted():
+                    # To be figured out: when deployed, streamlit-drawable-canvas is not showing the background image.
+                    st.image(bg_img)
 
                 st.info("Please click the first button from the left on the canvas tool bar to update your changes.")
                 do_straightening = st.checkbox(label="Straighten filament", value=False)
@@ -382,7 +374,7 @@ def main(args):
                     st.session_state['twist'] = float(st.query_params['twist'])
                     st.session_state['rise'] = float(st.query_params['rise'])
                     st.session_state['pitch'] = twist2pitch(st.session_state['twist'], st.session_state['rise'])
-            button = st.button("Copy twist/rise↶", on_click=save_params_from_query_param, help="Save helical parameters from plots")
+            button = st.button("Save twist/rise↶", on_click=save_params_from_query_param, help="Save helical parameters from plots")
 
             #pitch_or_twist_choices = ["pitch", "twist"]
             #pitch_or_twist = st.radio(label="Choose pitch or twist mode", options=pitch_or_twist_choices, index=0, label_visibility="collapsed", horizontal=True)
@@ -879,7 +871,6 @@ def main(args):
                 st.query_params.clear()
 
             st.markdown("*Developed by the [Jiang Lab@Purdue University](https://jiang.bio.purdue.edu). Report problems to [HILL@GitHub](https://github.com/jianglab/hill/issues)*")
-            p.stop()
 
 
 
@@ -1095,15 +1086,17 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
             resolution = resolutions[emdb_ids_all.index(emd_id)]
             msg = f'[EMD-{emd_id}](https://www.ebi.ac.uk/emdb/entry/EMD-{emd_id}) | resolution={resolution}Å'
             params = get_emdb_helical_parameters(emd_id)
-            st.session_state['prev_emdid'] = emd_id
             if params and ("twist" in params and "rise" in params and "csym" in params):                
                 msg += f"  \ntwist={params['twist']}° | rise={params['rise']}Å | c{params['csym']}"
                 st.session_state[f"input_type_{param_i}"] = "image"
                 #if "twist" not in st.session_state and "rise" not in st.session_state:
-                st.session_state.rise = params['rise']
-                st.session_state.twist = params['twist']
-                st.session_state.pitch = twist2pitch(twist=st.session_state.twist, rise=st.session_state.rise)
-                st.session_state.csym = params['csym']
+                if emd_id != st.session_state['prev_emdid']:
+                    st.session_state['prev_emdid'] = emd_id
+                    st.session_state['rise'] = params['rise']
+                    st.session_state['twist'] = params['twist']
+                    st.session_state['pitch'] = twist2pitch(twist=st.session_state.twist, rise=st.session_state.rise)
+                    st.session_state['csym'] = params['csym']
+                    
             else:
                 msg +=  "  \n*helical params not available*"
             st.markdown(msg)
