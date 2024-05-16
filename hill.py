@@ -269,9 +269,9 @@ def main(args):
 
                 aspect_ratio = float(nx / ny)
                 anisotropic_ratio = 10
-                lp_x = st.number_input("Low-pass filter Gaussian X Std:", value=10 * anisotropic_ratio * aspect_ratio,
+                lp_x = st.number_input("Low-pass filter Gaussian X Std (Å):", value=10 * anisotropic_ratio * aspect_ratio,
                                     help="Standard deviation along the X axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for center point sampling")
-                lp_y = st.number_input("Low-pass filter Gaussian Y Std:", value=10,
+                lp_y = st.number_input("Low-pass filter Gaussian Y Std (Å):", value=10,
                                     help="Standard deviation along the Y axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for center point sampling")
                 r_filament_angst_display = st.number_input("Display radius (Å):", value=radius_auto * apix * 1, max_value=int(nx) * apix,
                                             help="Radius of output straightened image.")
@@ -1291,7 +1291,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
             negate_auto = not guess_if_is_positive_contrast(data)
             negate = st.checkbox(label='Invert the image contrast', value=negate_auto, key=f'negate_{param_i}')
             if input_type in ["image"]:
-                straightening = st.checkbox(label="Filament straightening", value=False)
+                straightening = st.checkbox(label="Straighten the filament", value=False)
             else:
                 straightening = False
             if input_type in ["PS", "PD"] or is_3d:
@@ -2454,22 +2454,17 @@ def fit_spline(_disp_col,data,xs,ys,display=False):
     if display:
         with _disp_col:
             st.write("Fitted spline:")
-            with st.container(height=np.max(np.shape(data)), border=False):
-                fig,ax=plt.subplots()
-                ax.imshow(data,cmap='gray')
-                ax.plot(new_xs,ys,'r-')
-                ax.plot(xs,ys,'ro')
-                plt.xlim([0,nx])
-                plt.ylim([0,ny])
-                plt.gca().invert_yaxis()
-                plt.axis('off')
-                plt.tight_layout()
-                #plt.title("Fitted Spline")
+            fig,ax=plt.subplots()
+            ax.imshow(data,cmap='gray')
+            ax.plot(new_xs,ys,'r-')
+            ax.plot(xs,ys,'ro')
+            plt.xlim([0,nx])
+            plt.ylim([0,ny])
+            plt.gca().invert_yaxis()
+            plt.axis('off')
+            plt.tight_layout()
 
-                input_resize = 1
-                resize = input_resize * 0.99
-                _spline_col1, _ = st.columns((resize / (1 - resize), 1), gap="small")
-                _spline_col1.pyplot(fig)
+            st.pyplot(fig)
     return new_xs,tck
 
 #@st.cache_data(persist='disk', show_spinner=False)
@@ -2498,21 +2493,17 @@ def filament_straighten(_disp_col,data,tck,new_xs,ys,r_filament_pixel_display,ap
 
     nx = 2*int(r_filament_pixel_display)
 
-    new_im=np.zeros((ny,nx));
+    new_im=np.zeros((ny,nx))
     y_init=0
     x_init=splev(y_init,tck)
     curr_y=y_init
     curr_x=x_init
-    curr_y_plus=curr_y
-    curr_x_plus=curr_x
-    curr_y_minus=curr_y
-    curr_x_minus=curr_x
 
     for row in range(0,ny):
         dxdy=splev(curr_y,tck,der=1)
         orthog_dxdy=-(1.0/dxdy)
-        tangent_x0y0=lambda y: dxdy*y + (curr_x-dxdy*curr_y)
-        normal_x0y0=lambda y: orthog_dxdy*y + (curr_x-orthog_dxdy*curr_y)
+        #tangent_x0y0=lambda y: dxdy*y + (curr_x-dxdy*curr_y)
+        #normal_x0y0=lambda y: orthog_dxdy*y + (curr_x-orthog_dxdy*curr_y)
         rev_normal_x0y0=lambda x: (x+orthog_dxdy*curr_y-curr_x)/orthog_dxdy
         #new_row_xs=np.arange(-int(nx/2),int(nx/2),1).T*np.abs(orthog_dxdy)/np.sqrt(1+orthog_dxdy*orthog_dxdy)+curr_x
         new_row_xs = np.arange(-int(r_filament_pixel_display), int(r_filament_pixel_display), 1).T * np.abs(orthog_dxdy) / np.sqrt(
@@ -2543,21 +2534,8 @@ def filament_straighten(_disp_col,data,tck,new_xs,ys,r_filament_pixel_display,ap
     
     with _disp_col:
         st.write("Straightened image:")
-        fig,ax=plt.subplots()
-        plt.tight_layout()
-        ax.imshow(new_im,cmap='gray')
-        plt.axis('off')
-        #plt.gca().invert_yaxis()
-        #plt.title("Straightened")
-
-        input_resize = 1
-        resize = input_resize * 0.99
-        with st.container(height=np.max(np.shape(data)), border=False):
-            _res_col1, _ = st.columns((resize / (1 - resize), 1), gap="small")
-            #_res_col1.pyplot(fig)
-            with _res_col1:
-                fig = create_image_figure(new_im, apix, apix, title="Straightened image", title_location="below", plot_width=None, plot_height=None, x_axis_label=None, y_axis_label=None, tooltips=None, show_axis=False, show_toolbar=False, crosshair_color="white")
-                st.bokeh_chart(fig, use_container_width=True)
+        fig = create_image_figure(new_im, apix, apix, title="Straightened image", title_location="below", plot_width=None, plot_height=None, x_axis_label=None, y_axis_label=None, tooltips=None, show_axis=False, show_toolbar=False, crosshair_color="white")
+        st.bokeh_chart(fig, use_container_width=True)
 
     return new_im
 
