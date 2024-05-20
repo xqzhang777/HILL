@@ -358,11 +358,11 @@ def main(args):
                         tmp_dot["top"] = int(ys[i]) * canvas_scale_factor
                         test_canvas_json["objects"].append(tmp_dot)
                     
-                    try:    
-                        new_xs, tck = fit_spline(straightening_disp_tab_2,data, xs, ys, display=True)
-                    except TypeError:
-                        st.error(
-                            "Too few dots. There must be at least 4 dots to fit the spline. Please click the first button from the left on the canvas tool bar after you make changes to the canvas.")
+                    #try:    
+                    new_xs, tck = fit_spline(straightening_disp_tab_2,data, xs, ys, apix, display=True)
+                    #except TypeError:
+                    #    st.error(
+                    #        "Too few dots. There must be at least 4 dots to fit the spline. Please click the first button from the left on the canvas tool bar after you make changes to the canvas.")
                     data = filament_straighten(straightening_disp_tab_3,data, tck, new_xs, ys, r_filament_angst_display/apix,apix)
                     
     with display_tab:
@@ -936,7 +936,7 @@ def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radiu
     progress_bar.empty()
     return movie_filename
 
-@st.cache_resource
+#@st.cache_resource
 def create_image_figure(image, dx, dy, title="", title_location="below", plot_width=None, plot_height=None, x_axis_label='x', y_axis_label='y', tooltips=None, show_axis=True, show_toolbar=True, crosshair_color="white", aspect_ratio=None):
     #from bokeh.plotting import figure
     h, w = image.shape
@@ -2443,8 +2443,43 @@ def sample_axis_dots(data, apix, nx, ny, r_filament_pixel, l_template_pixel, da,
 
     return xs, ys
 
+def create_fit_spline_figure(data,xs,ys,new_xs,apix):
+    h, w = data.shape
+    xs = (np.array(xs)-w//2)*apix
+    new_xs = (np.array(new_xs)-w//2)*apix
+    ys = (np.array(ys)-h//2)*apix
+
+    aspect_ratio = w/h
+    tools = 'box_zoom,crosshair,pan,reset,save,wheel_zoom'
+    fig = figure(x_range=(-w//2*apix, (w//2-1)*apix), y_range=(-h//2*apix, (h//2-1)*apix), 
+        tools=tools, aspect_ratio=aspect_ratio)
+    fig.grid.visible = False
+    fig.axis.visible = False
+    fig.toolbar_location = None
+
+    source_data = ColumnDataSource(data=dict(image=[data], x=[-w//2*apix], y=[-h//2*apix], dw=[w*apix], dh=[h*apix]))
+    color_mapper = LinearColorMapper(palette='Greys256')    # Greys256, Viridis256
+    data = fig.image(source=source_data, image='image', color_mapper=color_mapper,
+                x='x', y='y', dw='dw', dh='dh'
+            )
+
+    # add hover tool only for the image
+    #from bokeh.models.tools import HoverTool, CrosshairTool
+    tooltips = [("x", "$xÅ"), ('y', '$yÅ'), ('val', '@image')]
+    image_hover = HoverTool(renderers=[data], tooltips=tooltips)
+    fig.add_tools(image_hover)
+    fig.hover[0].attachment="vertical"
+       
+    # Plot the line and points
+    source_points = ColumnDataSource(data=dict(xs=xs, ys=ys))
+    source_line = ColumnDataSource(data=dict(new_xs=new_xs, ys=ys))
+    fig.line('new_xs', 'ys', source=source_line, line_color="red")
+    fig.circle('xs', 'ys', source=source_points, color="red", size=5)
+    
+    return fig
+
 #@st.cache_data(persist='disk', show_spinner=False)
-def fit_spline(_disp_col,data,xs,ys,display=False):
+def fit_spline(_disp_col,data,xs,ys,apix,display=False):
     # fit spline
     ny,nx=data.shape
     tck = splrep(ys,xs,s=20)
@@ -2454,17 +2489,8 @@ def fit_spline(_disp_col,data,xs,ys,display=False):
     if display:
         with _disp_col:
             st.write("Fitted spline:")
-            fig,ax=plt.subplots()
-            ax.imshow(data,cmap='gray')
-            ax.plot(new_xs,ys,'r-')
-            ax.plot(xs,ys,'ro')
-            plt.xlim([0,nx])
-            plt.ylim([0,ny])
-            plt.gca().invert_yaxis()
-            plt.axis('off')
-            plt.tight_layout()
-
-            st.pyplot(fig)
+            p = create_fit_spline_figure(data,xs,ys,new_xs,apix)
+            st.bokeh_chart(p, use_container_width=True)
     return new_xs,tck
 
 #@st.cache_data(persist='disk', show_spinner=False)
@@ -2534,7 +2560,7 @@ def filament_straighten(_disp_col,data,tck,new_xs,ys,r_filament_pixel_display,ap
     
     with _disp_col:
         st.write("Straightened image:")
-        fig = create_image_figure(new_im, apix, apix, title="Straightened image", title_location="below", plot_width=None, plot_height=None, x_axis_label=None, y_axis_label=None, tooltips=None, show_axis=False, show_toolbar=False, crosshair_color="white")
+        fig = create_image_figure(new_im, apix, apix, plot_width=nx, plot_height=ny, x_axis_label=None, y_axis_label=None, tooltips=None, show_axis=False, show_toolbar=False, crosshair_color="white")
         st.bokeh_chart(fig, use_container_width=True)
 
     return new_im
