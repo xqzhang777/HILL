@@ -55,7 +55,6 @@ from bokeh.plotting import figure
 
 from finufft import nufft2d2
 
-import matplotlib.pyplot as plt
 import mrcfile
 from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 
@@ -336,9 +335,6 @@ def main(args):
                     #point_display_radius=point_display_radius if drawing_mode == 'point' else 0,
                     key="canvas",
                 )
-                if is_hosted():
-                    # To be figured out: when deployed, streamlit-drawable-canvas is not showing the background image.
-                    st.image(bg_img)
 
                 st.info("Please click the first button from the left on the canvas tool bar to update your changes.")
                 do_straightening = st.checkbox(label="Straighten filament", value=False)
