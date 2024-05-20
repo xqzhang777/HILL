@@ -333,7 +333,7 @@ def main(args):
                     update_streamlit=False,
                     drawing_mode=drawing_mode,
                     initial_drawing=initial_drawing,
-                    point_display_radius=point_display_radius if drawing_mode == 'point' else 0,
+                    #point_display_radius=point_display_radius if drawing_mode == 'point' else 0,
                     key="canvas",
                 )
                 if is_hosted():
