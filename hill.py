@@ -55,7 +55,6 @@ from bokeh.plotting import figure
 
 from finufft import nufft2d2
 
-import matplotlib.pyplot as plt
 import mrcfile
 from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 
@@ -269,9 +268,9 @@ def main(args):
 
                 aspect_ratio = float(nx / ny)
                 anisotropic_ratio = 10
-                lp_x = st.number_input("Low-pass filter Gaussian X Std:", value=10 * anisotropic_ratio * aspect_ratio,
+                lp_x = st.number_input("Low-pass filter Gaussian X Std (Å):", value=10 * anisotropic_ratio * aspect_ratio,
                                     help="Standard deviation along the X axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for center point sampling")
-                lp_y = st.number_input("Low-pass filter Gaussian Y Std:", value=10,
+                lp_y = st.number_input("Low-pass filter Gaussian Y Std (Å):", value=10,
                                     help="Standard deviation along the Y axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for center point sampling")
                 r_filament_angst_display = st.number_input("Display radius (Å):", value=radius_auto * apix * 1, max_value=int(nx) * apix,
                                             help="Radius of output straightened image.")
@@ -333,12 +332,9 @@ def main(args):
                     update_streamlit=False,
                     drawing_mode=drawing_mode,
                     initial_drawing=initial_drawing,
-                    point_display_radius=point_display_radius if drawing_mode == 'point' else 0,
+                    #point_display_radius=point_display_radius if drawing_mode == 'point' else 0,
                     key="canvas",
                 )
-                if is_hosted():
-                    # To be figured out: when deployed, streamlit-drawable-canvas is not showing the background image.
-                    st.image(bg_img)
 
                 st.info("Please click the first button from the left on the canvas tool bar to update your changes.")
                 do_straightening = st.checkbox(label="Straighten filament", value=False)
@@ -358,11 +354,11 @@ def main(args):
                         tmp_dot["top"] = int(ys[i]) * canvas_scale_factor
                         test_canvas_json["objects"].append(tmp_dot)
                     
-                    try:    
-                        new_xs, tck = fit_spline(straightening_disp_tab_2,data, xs, ys, display=True)
-                    except TypeError:
-                        st.error(
-                            "Too few dots. There must be at least 4 dots to fit the spline. Please click the first button from the left on the canvas tool bar after you make changes to the canvas.")
+                    #try:    
+                    new_xs, tck = fit_spline(straightening_disp_tab_2,data, xs, ys, apix, display=True)
+                    #except TypeError:
+                    #    st.error(
+                    #        "Too few dots. There must be at least 4 dots to fit the spline. Please click the first button from the left on the canvas tool bar after you make changes to the canvas.")
                     data = filament_straighten(straightening_disp_tab_3,data, tck, new_xs, ys, r_filament_angst_display/apix,apix)
                     
     with display_tab:
@@ -936,7 +932,7 @@ def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radiu
     progress_bar.empty()
     return movie_filename
 
-@st.cache_resource
+#@st.cache_resource
 def create_image_figure(image, dx, dy, title="", title_location="below", plot_width=None, plot_height=None, x_axis_label='x', y_axis_label='y', tooltips=None, show_axis=True, show_toolbar=True, crosshair_color="white", aspect_ratio=None):
     #from bokeh.plotting import figure
     h, w = image.shape
@@ -1291,7 +1287,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
             negate_auto = not guess_if_is_positive_contrast(data)
             negate = st.checkbox(label='Invert the image contrast', value=negate_auto, key=f'negate_{param_i}')
             if input_type in ["image"]:
-                straightening = st.checkbox(label="Filament straightening", value=False)
+                straightening = st.checkbox(label="Straighten the filament", value=False)
             else:
                 straightening = False
             if input_type in ["PS", "PD"] or is_3d:
@@ -2443,8 +2439,43 @@ def sample_axis_dots(data, apix, nx, ny, r_filament_pixel, l_template_pixel, da,
 
     return xs, ys
 
+def create_fit_spline_figure(data,xs,ys,new_xs,apix):
+    h, w = data.shape
+    xs = (np.array(xs)-w//2)*apix
+    new_xs = (np.array(new_xs)-w//2)*apix
+    ys = (np.array(ys)-h//2)*apix
+
+    aspect_ratio = w/h
+    tools = 'box_zoom,crosshair,pan,reset,save,wheel_zoom'
+    fig = figure(x_range=(-w//2*apix, (w//2-1)*apix), y_range=(-h//2*apix, (h//2-1)*apix), 
+        tools=tools, aspect_ratio=aspect_ratio)
+    fig.grid.visible = False
+    fig.axis.visible = False
+    fig.toolbar_location = None
+
+    source_data = ColumnDataSource(data=dict(image=[data], x=[-w//2*apix], y=[-h//2*apix], dw=[w*apix], dh=[h*apix]))
+    color_mapper = LinearColorMapper(palette='Greys256')    # Greys256, Viridis256
+    data = fig.image(source=source_data, image='image', color_mapper=color_mapper,
+                x='x', y='y', dw='dw', dh='dh'
+            )
+
+    # add hover tool only for the image
+    #from bokeh.models.tools import HoverTool, CrosshairTool
+    tooltips = [("x", "$xÅ"), ('y', '$yÅ'), ('val', '@image')]
+    image_hover = HoverTool(renderers=[data], tooltips=tooltips)
+    fig.add_tools(image_hover)
+    fig.hover[0].attachment="vertical"
+       
+    # Plot the line and points
+    source_points = ColumnDataSource(data=dict(xs=xs, ys=ys))
+    source_line = ColumnDataSource(data=dict(new_xs=new_xs, ys=ys))
+    fig.line('new_xs', 'ys', source=source_line, line_color="red")
+    fig.circle('xs', 'ys', source=source_points, color="red", size=5)
+    
+    return fig
+
 #@st.cache_data(persist='disk', show_spinner=False)
-def fit_spline(_disp_col,data,xs,ys,display=False):
+def fit_spline(_disp_col,data,xs,ys,apix,display=False):
     # fit spline
     ny,nx=data.shape
     tck = splrep(ys,xs,s=20)
@@ -2454,22 +2485,8 @@ def fit_spline(_disp_col,data,xs,ys,display=False):
     if display:
         with _disp_col:
             st.write("Fitted spline:")
-            with st.container(height=np.max(np.shape(data)), border=False):
-                fig,ax=plt.subplots()
-                ax.imshow(data,cmap='gray')
-                ax.plot(new_xs,ys,'r-')
-                ax.plot(xs,ys,'ro')
-                plt.xlim([0,nx])
-                plt.ylim([0,ny])
-                plt.gca().invert_yaxis()
-                plt.axis('off')
-                plt.tight_layout()
-                #plt.title("Fitted Spline")
-
-                input_resize = 1
-                resize = input_resize * 0.99
-                _spline_col1, _ = st.columns((resize / (1 - resize), 1), gap="small")
-                _spline_col1.pyplot(fig)
+            p = create_fit_spline_figure(data,xs,ys,new_xs,apix)
+            st.bokeh_chart(p, use_container_width=True)
     return new_xs,tck
 
 #@st.cache_data(persist='disk', show_spinner=False)
@@ -2498,21 +2515,17 @@ def filament_straighten(_disp_col,data,tck,new_xs,ys,r_filament_pixel_display,ap
 
     nx = 2*int(r_filament_pixel_display)
 
-    new_im=np.zeros((ny,nx));
+    new_im=np.zeros((ny,nx))
     y_init=0
     x_init=splev(y_init,tck)
     curr_y=y_init
     curr_x=x_init
-    curr_y_plus=curr_y
-    curr_x_plus=curr_x
-    curr_y_minus=curr_y
-    curr_x_minus=curr_x
 
     for row in range(0,ny):
         dxdy=splev(curr_y,tck,der=1)
         orthog_dxdy=-(1.0/dxdy)
-        tangent_x0y0=lambda y: dxdy*y + (curr_x-dxdy*curr_y)
-        normal_x0y0=lambda y: orthog_dxdy*y + (curr_x-orthog_dxdy*curr_y)
+        #tangent_x0y0=lambda y: dxdy*y + (curr_x-dxdy*curr_y)
+        #normal_x0y0=lambda y: orthog_dxdy*y + (curr_x-orthog_dxdy*curr_y)
         rev_normal_x0y0=lambda x: (x+orthog_dxdy*curr_y-curr_x)/orthog_dxdy
         #new_row_xs=np.arange(-int(nx/2),int(nx/2),1).T*np.abs(orthog_dxdy)/np.sqrt(1+orthog_dxdy*orthog_dxdy)+curr_x
         new_row_xs = np.arange(-int(r_filament_pixel_display), int(r_filament_pixel_display), 1).T * np.abs(orthog_dxdy) / np.sqrt(
@@ -2543,21 +2556,8 @@ def filament_straighten(_disp_col,data,tck,new_xs,ys,r_filament_pixel_display,ap
     
     with _disp_col:
         st.write("Straightened image:")
-        fig,ax=plt.subplots()
-        plt.tight_layout()
-        ax.imshow(new_im,cmap='gray')
-        plt.axis('off')
-        #plt.gca().invert_yaxis()
-        #plt.title("Straightened")
-
-        input_resize = 1
-        resize = input_resize * 0.99
-        with st.container(height=np.max(np.shape(data)), border=False):
-            _res_col1, _ = st.columns((resize / (1 - resize), 1), gap="small")
-            #_res_col1.pyplot(fig)
-            with _res_col1:
-                fig = create_image_figure(new_im, apix, apix, title="Straightened image", title_location="below", plot_width=None, plot_height=None, x_axis_label=None, y_axis_label=None, tooltips=None, show_axis=False, show_toolbar=False, crosshair_color="white")
-                st.bokeh_chart(fig, use_container_width=True)
+        fig = create_image_figure(new_im, apix, apix, plot_width=nx, plot_height=ny, x_axis_label=None, y_axis_label=None, tooltips=None, show_axis=False, show_toolbar=False, crosshair_color="white")
+        st.bokeh_chart(fig, use_container_width=True)
 
     return new_im
 
