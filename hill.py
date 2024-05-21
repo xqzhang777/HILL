@@ -253,13 +253,13 @@ def main(args):
             with straightening_setting_tab:
                 data[np.isnan(data)] = 0
                 ny, nx = data.shape
-                n_samples = st.number_input("Number of auto-sampled markers:", value=10, min_value=4, max_value=int(ny),
+                n_samples = st.number_input("Number of auto-sampled markers:", value=max(4,int(np.round(ny/(2*radius_auto*2)))), min_value=4, max_value=int(ny),
                                         help="Number of center points automatically sampled on the image. The markers are used to fit the spline as the curved helical axis.")
-                r_filament = st.number_input("Template radius (Å):", value=radius_auto * apix * 1, max_value=int(nx) * apix,
+                r_filament = st.number_input("Template radius (Å):", value=radius_auto * apix * 1.5, max_value=int(nx) * apix,
                                             help="Radius of filament template. Used to generate the row template for determining the center points of the filament at different rows with cross-correlation.")
                 r_filament_pixel = int(r_filament / apix)
                 
-                l_template = st.number_input("Template length (Å):", value=radius_auto * apix * 2, max_value=int(nx) * apix,
+                l_template = st.number_input("Template length (Å):", value=min(radius_auto * 2 * apix * 1.5 * 2, int(nx) * apix), max_value=int(nx) * apix,
                                             help="Length of filament template. Used to generate the row template for determining the center points of the filament at different rows with cross-correlation.")
                 l_template_pixel = int(l_template / apix)
                 
@@ -272,7 +272,7 @@ def main(args):
                                     help="Standard deviation along the X axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for center point sampling")
                 lp_y = st.number_input("Low-pass filter Gaussian Y Std (Å):", value=10,
                                     help="Standard deviation along the Y axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for center point sampling")
-                r_filament_angst_display = st.number_input("Display radius (Å):", value=radius_auto * apix * 1, max_value=int(nx) * apix,
+                r_filament_angst_display = st.number_input("Display radius (Å):", value=radius_auto * apix * 1.5, max_value=int(nx) * apix,
                                             help="Radius of output straightened image.")
 
                 # when the image width is larger than the column length, the canvas cannot be shown as a whole
@@ -336,7 +336,7 @@ def main(args):
                     key="canvas",
                 )
 
-                st.info("Please click the first button from the left on the canvas tool bar to update your changes.")
+                st.info("Please click the down arrow to update the fitting of the filament")
                 do_straightening = st.checkbox(label="Straighten filament", value=False)
                 if do_straightening:
                     xs = []
