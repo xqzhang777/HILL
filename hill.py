@@ -272,10 +272,10 @@ def main(args):
                                     help="Standard deviation along the X axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for center point sampling")
                 lp_y = st.number_input("Low-pass filter Gaussian Y Std (Å):", value=10,
                                     help="Standard deviation along the Y axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for center point sampling")
-                r_filament_angst_display = st.number_input("Display radius (Å):", value=radius_auto * apix * 1.5, max_value=int(nx) * apix,
+                r_filament_angst_display = st.number_input("Display radius (Å):", value=min(radius_auto * apix * 1.5 * 2, nx), max_value=int(nx) * apix,
                                             help="Radius of output straightened image.")
 
-                # when the image width is larger than the column length, the canvas cannot be shown as a whole
+                # TODO: add padding so the margin (width - filament diameter (= template diameter)) is larger than one template diameter
                 xs, ys = sample_axis_dots(data, apix, nx, ny, r_filament_pixel,l_template_pixel, da, n_samples, lp_x, lp_y)
                 canvas_scale_factor = 1
                 point_display_radius = r_filament_pixel * canvas_scale_factor
@@ -2489,6 +2489,7 @@ def fit_spline(_disp_col,data,xs,ys,apix,display=False):
             st.bokeh_chart(p, use_container_width=True)
     return new_xs,tck
 
+# TODO: test the straightening part by forcing using the center of a straight filament
 #@st.cache_data(persist='disk', show_spinner=False)
 def filament_straighten(_disp_col,data,tck,new_xs,ys,r_filament_pixel_display,apix):
     ny,nx=data.shape
