@@ -321,6 +321,7 @@ def main(args):
 
                 bg_img = Image.fromarray(np.uint8((data_filtered - min_data) / (max_data - min_data) * 255), 'L')
 
+                # TODO: canvas component error in place new dot mode. potentially 0.8.0 doesn't have dot mode
                 # Create a canvas component
                 canvas_result = st_canvas(
                     fill_color="rgba(255, 0, 0, 0.3)",  # Fixed fill color with some opacity
@@ -531,9 +532,10 @@ def main(args):
                     show_phase_simu = st.checkbox(label="PhaseSimu", value=show_phase or show_phase2)
                 show_phase_diff_simu = st.checkbox(label="PDSimu", value=show_phase_diff or show_phase_diff2)
 
+            # TODO: color layer lines according to their bessel orders
             show_LL_text = False
             if show_pwr or show_phase_diff or show_pwr2 or show_phase_diff2 or show_pwr_simu or show_phase_diff_simu:
-                show_pseudo_color = st.checkbox(label="Color", value=True, help="Show the power spectra in pseudo color instead of grey scale")
+                show_pseudo_color = st.checkbox(label="Color", value=False, help="Show the power spectra in pseudo color instead of grey scale")
                 show_LL = st.checkbox(label="LL", value=True, help="Show the layer lines at positions computed from the current values of pitch/twist, rise, csym, radius, and tilt", key="show_LL")
                 if show_LL:
                     show_LL_text = st.checkbox(label="LLText", value=True, help="Show the layer lines using integer numbers for the Bessel orders instead of ellipses", key="show_LL_text")
@@ -618,7 +620,7 @@ def main(args):
 
                 if show_phase_diff_work:
                     tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Phase Diff', '@image °')]
-                    fig = create_layerline_image_figure(phase_diff_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, fft_top_only=fft_top_only, pseudo_color=show_pseudo_color, const_image_color=const_image_color, title=title_phase_work, yaxis_visible=False, tooltips=tooltips)
+                    fig = create_layerline_image_figure(phase_diff_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, fft_top_only=fft_top_only, pseudo_color=True, const_image_color=const_image_color, title=title_phase_work, yaxis_visible=False, tooltips=tooltips)
                     figs.append(fig)
                     figs_image.append(fig)
                     figs_with += phase_diff_work.shape[-1]
@@ -2370,18 +2372,22 @@ def filament_transform_fft(image, filament_template, angle_step):
 #@st.cache_data(persist='disk', show_spinner=False)
 def sample_axis_dots(data, apix, nx, ny, r_filament_pixel, l_template_pixel, da, num_samples, lp_x, lp_y):
     # fill in potential black backgrounds with helical boxer
-    data_slice_median=np.median(data)
-    for i in range(ny):
-        for j in range(nx):
-            if data[i,j]==0:
-                data[i,j]=data_slice_median
-            else:
-                break
-        for j in range(nx):
-            if data[i,-(j+1)]==0:
-                data[i,-(j+1)]=data_slice_median
-            else:
-                break
+    #data_slice_median=np.median(data)
+    #for i in range(ny):
+    #    for j in range(nx):
+    #        if data[i,j]==0:
+    #            data[i,j]=data_slice_median
+    #        else:
+    #            break
+    #    for j in range(nx):
+    #        if data[i,-(j+1)]==0:
+    #            data[i,-(j+1)]=data_slice_median
+    #        else:
+    #            break
+    
+    if nx < 2 * 2 * r_filament_pixel:
+        data = pad_to_size(data, 2 * 2 * r_filament_pixel,ny)
+        nx = 2 * 2 * r_filament_pixel
 
 
     # apply low pass filter
@@ -2490,6 +2496,7 @@ def fit_spline(_disp_col,data,xs,ys,apix,display=False):
     return new_xs,tck
 
 # TODO: test the straightening part by forcing using the center of a straight filament
+# TODO: check the nans in the output images
 #@st.cache_data(persist='disk', show_spinner=False)
 def filament_straighten(_disp_col,data,tck,new_xs,ys,r_filament_pixel_display,apix):
     ny,nx=data.shape
@@ -2527,6 +2534,8 @@ def filament_straighten(_disp_col,data,tck,new_xs,ys,r_filament_pixel_display,ap
         orthog_dxdy=-(1.0/dxdy)
         #tangent_x0y0=lambda y: dxdy*y + (curr_x-dxdy*curr_y)
         #normal_x0y0=lambda y: orthog_dxdy*y + (curr_x-orthog_dxdy*curr_y)
+        
+        # TODO: check 2536: RuntimeWarning: invalid value encountered in multiply (also 1671,1672 lines). Potentially related to the nans in the output
         rev_normal_x0y0=lambda x: (x+orthog_dxdy*curr_y-curr_x)/orthog_dxdy
         #new_row_xs=np.arange(-int(nx/2),int(nx/2),1).T*np.abs(orthog_dxdy)/np.sqrt(1+orthog_dxdy*orthog_dxdy)+curr_x
         new_row_xs = np.arange(-int(r_filament_pixel_display), int(r_filament_pixel_display), 1).T * np.abs(orthog_dxdy) / np.sqrt(
