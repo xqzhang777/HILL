@@ -2012,7 +2012,8 @@ def get_emdb_map(emd_id: str):
         st.error(f"ERROR: EMD-{emd_id} map ({url}) could not be downloaded")
         st.stop()
     #import mrcfile
-    with mrcfile.open(fileobj.name) as mrc:
+    with mrcfile.open(fileobj.name, mode='r+') as mrc:
+        change_mrc_axes_order(mrc, new_axes=["x", "y", "z"])
         vmin, vmax = np.min(mrc.data), np.max(mrc.data)
         data = ((mrc.data - vmin) / (vmax - vmin))
         apix = mrc.voxel_size.x.item()
@@ -2033,6 +2034,7 @@ def get_2d_image_from_file(filename):
     try:
         #import mrcfile
         with mrcfile.open(filename) as mrc:
+            change_mrc_axes_order(mrc, new_axes=["x", "y", "z"])
             data = mrc.data.astype(np.float32)
             apix = mrc.voxel_size.x.item()
     except:
@@ -2080,6 +2082,19 @@ def get_file_size(url):
         return file_size
     else:
         return None
+
+def change_mrc_axes_order(mrc, new_axes=["x", "y", "z"]):
+    map_axes = {"x":0, "y":1, "z":2}
+    map_axes_reverse = {0:"x", 1:"y", 2:"z"}
+    current_axes_int = [ mrc.header.mapc-1, mrc.header.mapr-1, mrc.header.maps-1 ]
+    new_axes_int = [ map_axes[a] for a in new_axes ]
+    if current_axes_int == new_axes_int: return
+    st.warning(f"The map axes order was {','.join([map_axes_reverse[a] for a in current_axes_int])}. It has now been changed to x,y,z")
+    mrc.set_data( np.moveaxis(mrc.data, current_axes_int, new_axes_int) )
+    mrc.header.mapc = map_axes[new_axes[0]]
+    mrc.header.mapr = map_axes[new_axes[1]]
+    mrc.header.maps = map_axes[new_axes[2]]
+    return
 
 def twist2pitch(twist, rise):
     if twist:
@@ -2331,6 +2346,7 @@ def qr_code(url=None, size = 8):
 def read_mrc_data(mrc):
     # read mrc data
     mrc_data = mrcfile.open(mrc, 'r+')
+    change_mrc_axes_order(mrc_data, new_axes=["x", "y", "z"])
     mrc_data.set_image_stack
 
     v_size=mrc_data.voxel_size
