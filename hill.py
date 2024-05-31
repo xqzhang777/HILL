@@ -264,13 +264,14 @@ def main(args):
             with straightening_setting_tab:
                 data[np.isnan(data)] = 0
                 ny, nx = data.shape
-                n_samples = st.number_input("Number of auto-sampled markers:", value=10, min_value=4, max_value=int(ny),
+                n_samples = st.number_input("Number of auto-sampled markers:", value=max(4,int(np.round(ny/(2*radius_auto*2)))), min_value=4, max_value=int(ny),
                                         help="Number of center points automatically sampled on the image. The markers are used to fit the spline as the curved helical axis.")
-                r_filament = st.number_input("Template radius (Å):", value=radius_auto * apix * 1, max_value=int(nx) * apix,
+                
+                r_filament = st.number_input("Template radius (Å):", value=radius_auto * apix * 1.5, max_value=int(nx) * apix,
                                             help="Radius of filament template. Used to generate the row template for determining the center points of the filament at different rows with cross-correlation.")
                 r_filament_pixel = int(r_filament / apix)
                 
-                l_template = st.number_input("Template length (Å):", value=radius_auto * apix * 2, max_value=int(nx) * apix,
+                l_template = st.number_input("Template length (Å):", value=min(radius_auto * 2 * apix * 1.5 * 2, int(nx) * apix), max_value=int(nx) * apix,
                                             help="Length of filament template. Used to generate the row template for determining the center points of the filament at different rows with cross-correlation.")
                 l_template_pixel = int(l_template / apix)
                 
@@ -279,14 +280,14 @@ def main(args):
 
                 aspect_ratio = float(nx / ny)
                 anisotropic_ratio = 10
-                lp_x = st.number_input("Low-pass filter Gaussian X Std (Å):", value=10 * anisotropic_ratio * aspect_ratio,
-                                    help="Standard deviation along the X axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for center point sampling")
-                lp_y = st.number_input("Low-pass filter Gaussian Y Std (Å):", value=10,
-                                    help="Standard deviation along the Y axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for center point sampling")
-                r_filament_angst_display = st.number_input("Display radius (Å):", value=radius_auto * apix * 1, max_value=int(nx) * apix,
-                                            help="Radius of output straightened image.")
 
-                # when the image width is larger than the column length, the canvas cannot be shown as a whole
+                lp_x = st.number_input("Low-pass filter Gaussian X(Å):", value=10 * anisotropic_ratio * aspect_ratio,
+                                    help="Width along the X axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for auto-sampling markers")
+                lp_y = st.number_input("Low-pass filter Gaussian Y(Å):", value=10,
+                                    help="Height along the Y axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for auto-sampling markers")
+                r_filament_angst_display = st.number_input("Display radius (Å):", value=min(radius_auto * apix * 1.5 * 2, nx), max_value=int(nx) * apix,
+                                            help="Radius of output straightened image.")
+                
                 xs, ys = sample_axis_dots(data, apix, nx, ny, r_filament_pixel,l_template_pixel, da, n_samples, lp_x, lp_y)
                 canvas_scale_factor = 1
                 point_display_radius = r_filament_pixel * canvas_scale_factor
@@ -332,6 +333,7 @@ def main(args):
 
                 bg_img = Image.fromarray(np.uint8((data_filtered - min_data) / (max_data - min_data) * 255), 'L')
 
+                # TODO: canvas component error in place new dot mode. potentially 0.8.0 doesn't have dot mode
                 # Create a canvas component
                 canvas_result = st_canvas(
                     fill_color="rgba(255, 0, 0, 0.3)",  # Fixed fill color with some opacity
@@ -347,7 +349,7 @@ def main(args):
                     key="canvas",
                 )
 
-                st.info("Please click the first button from the left on the canvas tool bar to update your changes.")
+                st.info("Please click the down arrow to update the fitting of the filament")
                 do_straightening = st.checkbox(label="Straighten filament", value=False)
                 if do_straightening:
                     xs = []
@@ -376,6 +378,13 @@ def main(args):
         col2, col3, col4 = st.columns((1.0, 0.55, 4.0), gap='small')
 
         with col2:
+            def save_params_from_query_param():
+                if 'twist' in st.query_params and 'rise' in st.query_params:
+                    st.session_state['twist'] = float(st.query_params['twist'])
+                    st.session_state['rise'] = float(st.query_params['rise'])
+                    st.session_state['pitch'] = twist2pitch(st.session_state['twist'], st.session_state['rise'])
+            button = st.button("Save twist/rise↶", on_click=save_params_from_query_param, help="Save helical parameters from plots")
+
             #pitch_or_twist_choices = ["pitch", "twist"]
             #pitch_or_twist = st.radio(label="Choose pitch or twist mode", options=pitch_or_twist_choices, index=0, label_visibility="collapsed", horizontal=True)
             #use_pitch = 1 if pitch_or_twist=="pitch" else 0
@@ -542,9 +551,10 @@ def main(args):
                     show_phase_simu = st.checkbox(label="PhaseSimu", value=show_phase or show_phase2)
                 show_phase_diff_simu = st.checkbox(label="PDSimu", value=show_phase_diff or show_phase_diff2)
 
+            # TODO: color layer lines according to their bessel orders
             show_LL_text = False
             if show_pwr or show_phase_diff or show_pwr2 or show_phase_diff2 or show_pwr_simu or show_phase_diff_simu:
-                show_pseudo_color = st.checkbox(label="Color", value=True, help="Show the power spectra in pseudo color instead of grey scale")
+                show_pseudo_color = st.checkbox(label="Color", value=False, help="Show the power spectra in pseudo color instead of grey scale")
                 show_LL = st.checkbox(label="LL", value=True, help="Show the layer lines at positions computed from the current values of pitch/twist, rise, csym, radius, and tilt", key="show_LL")
                 if show_LL:
                     show_LL_text = st.checkbox(label="LLText", value=True, help="Show the layer lines using integer numbers for the Bessel orders instead of ellipses", key="show_LL_text")
@@ -629,7 +639,7 @@ def main(args):
 
                 if show_phase_diff_work:
                     tooltips = [("Res r", "Å"), ('Res y', 'Å'), ('Res x', 'Å'), ('Jn', '@bessel'), ('Phase Diff', '@image °')]
-                    fig = create_layerline_image_figure(phase_diff_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, fft_top_only=fft_top_only, pseudo_color=show_pseudo_color, const_image_color=const_image_color, title=title_phase_work, yaxis_visible=False, tooltips=tooltips)
+                    fig = create_layerline_image_figure(phase_diff_work, cutoff_res_x, cutoff_res_y, helical_radius, tilt, phase=phase_work if show_phase_work else None, fft_top_only=fft_top_only, pseudo_color=True, const_image_color=const_image_color, title=title_phase_work, yaxis_visible=False, tooltips=tooltips)
                     figs.append(fig)
                     figs_image.append(fig)
                     figs_with += phase_diff_work.shape[-1]
@@ -652,7 +662,9 @@ def main(args):
                         if show_LL_text:
                             texts = [str(int(n)) for n in bessel_order]
                         tags = [m, bessel_order]
-                        color = ll_colors[abs(m)%len(ll_colors)]
+                        #color = ll_colors[abs(m)%len(ll_colors)]
+                        bessel_colors = ["darkblue","greenyellow"]
+                        color = [bessel_colors[n%2] for n in bessel_order]
                         for f in figs_image:
                             if show_LL_text: 
                                 text_labels = f.text(x, y, y_offset=2, text=texts, text_color=color, text_baseline="middle", text_align="center")
@@ -2416,18 +2428,22 @@ def filament_transform_fft(image, filament_template, angle_step):
 #@st.cache_data(persist='disk', show_spinner=False)
 def sample_axis_dots(data, apix, nx, ny, r_filament_pixel, l_template_pixel, da, num_samples, lp_x, lp_y):
     # fill in potential black backgrounds with helical boxer
-    data_slice_median=np.median(data)
-    for i in range(ny):
-        for j in range(nx):
-            if data[i,j]==0:
-                data[i,j]=data_slice_median
-            else:
-                break
-        for j in range(nx):
-            if data[i,-(j+1)]==0:
-                data[i,-(j+1)]=data_slice_median
-            else:
-                break
+    #data_slice_median=np.median(data)
+    #for i in range(ny):
+    #    for j in range(nx):
+    #        if data[i,j]==0:
+    #            data[i,j]=data_slice_median
+    #        else:
+    #            break
+    #    for j in range(nx):
+    #        if data[i,-(j+1)]==0:
+    #            data[i,-(j+1)]=data_slice_median
+    #        else:
+    #            break
+    
+    if nx < 2 * 2 * r_filament_pixel:
+        data = pad_to_size(data, 2 * 2 * r_filament_pixel,ny)
+        nx = 2 * 2 * r_filament_pixel
 
 
     # apply low pass filter
@@ -2524,10 +2540,15 @@ def create_fit_spline_figure(data,xs,ys,new_xs,apix):
 def fit_spline(_disp_col,data,xs,ys,apix,display=False):
     # fit spline
     ny,nx=data.shape
+    
+    # for debugging interpolation
+    # st.write(xs)
+    # xs = np.array(xs) * 0 + nx//2
+    
     tck = splrep(ys,xs,s=20)
 
-    new_xs=splev(ys,tck)
-
+    new_xs = splev(ys,tck)
+    
     if display:
         with _disp_col:
             st.write("Fitted spline:")
@@ -2535,10 +2556,13 @@ def fit_spline(_disp_col,data,xs,ys,apix,display=False):
             st.bokeh_chart(p, use_container_width=True)
     return new_xs,tck
 
+# test the straightening part by forcing using the center of a straight filament: works
+# TODO: check the nans in the output images
 #@st.cache_data(persist='disk', show_spinner=False)
 def filament_straighten(_disp_col,data,tck,new_xs,ys,r_filament_pixel_display,apix):
     ny,nx=data.shape
     # resample pixels
+    st.info(tck)
     y0=0
     x0=splev(y0,tck)
     for i in range(ny):
@@ -2552,6 +2576,7 @@ def filament_straighten(_disp_col,data,tck,new_xs,ys,r_filament_pixel_display,ap
             1 + orthog_dxdy * orthog_dxdy) + x0
         new_row_ys=rev_normal_x0y0(new_row_xs)
         y0=y0+np.sqrt((1-dxdy*dxdy))
+        st.info(dxdy)
         x0=splev(y0,tck)
 
     # interpolate resampled pixles
@@ -2572,6 +2597,8 @@ def filament_straighten(_disp_col,data,tck,new_xs,ys,r_filament_pixel_display,ap
         orthog_dxdy=-(1.0/dxdy)
         #tangent_x0y0=lambda y: dxdy*y + (curr_x-dxdy*curr_y)
         #normal_x0y0=lambda y: orthog_dxdy*y + (curr_x-orthog_dxdy*curr_y)
+        
+        # TODO: check 2536: RuntimeWarning: invalid value encountered in multiply (also 1671,1672 lines). Potentially related to the nans in the output
         rev_normal_x0y0=lambda x: (x+orthog_dxdy*curr_y-curr_x)/orthog_dxdy
         #new_row_xs=np.arange(-int(nx/2),int(nx/2),1).T*np.abs(orthog_dxdy)/np.sqrt(1+orthog_dxdy*orthog_dxdy)+curr_x
         new_row_xs = np.arange(-int(r_filament_pixel_display), int(r_filament_pixel_display), 1).T * np.abs(orthog_dxdy) / np.sqrt(
@@ -2584,21 +2611,19 @@ def filament_straighten(_disp_col,data,tck,new_xs,ys,r_filament_pixel_display,ap
         curr_y=curr_y+np.sqrt((1-dxdy*dxdy))
         curr_x=splev(curr_y,tck)
 
-
-
-    # fill the zeros on the edge again
-    data_slice_mean=np.median(data)
-    for i in range(ny):
-        for j in range(nx):
-            if new_im[i,j]==0:
-                new_im[i,j]=data_slice_mean
-            else:
-                break
-        for j in range(nx):
-            if new_im[i,-(j+1)]==0:
-                new_im[i,-(j+1)]=data_slice_mean
-            else:
-                break
+    ## fill the zeros on the edge again
+    #data_slice_mean=np.median(data)
+    #for i in range(ny):
+    #    for j in range(nx):
+    #        if new_im[i,j]==0:
+    #            new_im[i,j]=data_slice_mean
+    #        else:
+    #            break
+    #    for j in range(nx):
+    #        if new_im[i,-(j+1)]==0:
+    #            new_im[i,-(j+1)]=data_slice_mean
+    #        else:
+    #            break
     
     with _disp_col:
         st.write("Straightened image:")
