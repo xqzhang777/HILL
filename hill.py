@@ -23,19 +23,21 @@ SOFTWARE.
 """
 
 def import_with_auto_install(packages, scope=locals()):
-    if isinstance(packages, str): packages=[packages]
+    import importlib, site, subprocess, sys
+    if isinstance(packages, str):
+        packages = [packages]
     for package in packages:
-        if package.find(":")!=-1:
+        if ":" in package:
             package_import_name, package_pip_name = package.split(":")
         else:
             package_import_name, package_pip_name = package, package
         try:
-            scope[package_import_name] = __import__(package_import_name)
+            scope[package_import_name] = importlib.import_module(package_import_name)
         except ImportError:
-            import subprocess
-            subprocess.call(f'pip install {package_pip_name}', shell=True)
-            scope[package_import_name] =  __import__(package_import_name)
-required_packages = "streamlit numpy scipy numba bokeh skimage:scikit_image mrcfile finufft xmltodict st_clickable_images".split()
+            subprocess.check_call([sys.executable, '-m', 'pip', 'install', package_pip_name])
+            importlib.reload(site)
+            scope[package_import_name] = importlib.import_module(package_import_name)
+required_packages = "streamlit numpy scipy numba bokeh skimage:scikit_image mrcfile finufft psutil qrcode xmltodict st_clickable_images streamlit_drawable_canvas:streamlit-drawable-canvas".split()
 import_with_auto_install(required_packages)
 
 
@@ -56,7 +58,6 @@ from bokeh.plotting import figure
 from finufft import nufft2d2
 
 import mrcfile
-from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 
 import numpy as np
 from numba import jit, set_num_threads, prange
@@ -193,14 +194,24 @@ def main(args):
     if "input_mode_0" not in st.session_state:
         set_session_state_from_data_example()
 
-    
-    out_col1 = st.sidebar
+    st.markdown("""
+    <style>
+        .block-container {
+            padding-top: 1rem;
+            padding-bottom: 1rem;
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
+    </style>
+    """, unsafe_allow_html=True)
 
-    with out_col1:
+    col1 = st.sidebar
+
+    with col1:
         with st.expander(label="README", expanded=False):
             st.write("This Web app considers a biological helical structure as the product of a continous helix and a set of parallel planes. Based on the covolution theory, the Fourier Transform (FT) of a helical structure would be the convolution of the FT of the continous helix and the FT of the planes.  \nThe FT of a continous helix consists of equally spaced layer planes (3D) or layerlines (2D projection) that can be described by Bessel functions of increasing orders (0, ±1, ±2, ...) from the Fourier origin (i.e. equator). The spacing between the layer planes/lines is determined by the helical pitch (i.e. the shift along the helical axis for a 360° turn of the helix). If the structure has additional cyclic symmetry (for example, C6) around the helical axis, only the layer plane/line orders of integer multiplier of the symmetry (e.g. 0, ±6, ±12, ...) are visible. The primary peaks of the layer lines in the power spectra form a pattern similar to a X symbol.  \nThe FT of the parallel planes consists of equally spaced points along the helical axis (i.e. meridian) with the spacing being determined by the helical rise.  \nThe convolution of these two components (X-shaped pattern of layer lines and points along the meridian) generates the layer line patterns seen in the power spectra of the projection images of helical structures. The helical indexing task is thus to identify the helical rise, pitch (or twist), and cyclic symmetry that would predict a layer line pattern to explain the observed layer lines in the power spectra. This Web app allows you to interactively change the helical parameters and superimpose the predicted layer liines on the power spectra to complete the helical indexing task.  \n  \nPS: power spectra; PD: phase differences across the meridian; YP: Y-axis power spectra profile; LL: layer lines; m: indices of the X-patterns along the meridian; Jn: Bessel order")
 
-        show_straightening_options, data_all, image_index, data, apix, radius_auto, mask_radius, input_type, is_3d, input_params, (image_container, image_label) = obtain_input_image(out_col1, param_i=0)
+        show_straightening_options, data_all, image_index, data, apix, radius_auto, mask_radius, input_type, is_3d, input_params, (image_container, image_label) = obtain_input_image(col1, param_i=0)
         input_mode, (uploaded_filename, url, emd_id) = input_params
         if "twist" in st.session_state:
             twist = st.session_state['twist']        
@@ -217,7 +228,7 @@ def main(args):
             label = f"Load amplitudes from another image"
         input_image2 = st.checkbox(label=label, value=False)        
         if input_image2:
-            show_straightening_options, _, image_index2, data2, apix2, radius_auto2, mask_radius2, input_type2, is_3d2, input_params2, _ = obtain_input_image(out_col1, param_i=1, image_index_sync=image_index + 1)
+            show_straightening_options, _, image_index2, data2, apix2, radius_auto2, mask_radius2, input_type2, is_3d2, input_params2, _ = obtain_input_image(col1, param_i=1, image_index_sync=image_index + 1)
             input_mode2, (uploaded_filename2, url2, emd_id2) = input_params2
         else:
             image_index2, data2, apix2, radius_auto2, mask_radius2, input_type2, is_3d2 = [None] * 7
@@ -255,6 +266,7 @@ def main(args):
                 ny, nx = data.shape
                 n_samples = st.number_input("Number of auto-sampled markers:", value=max(4,int(np.round(ny/(2*radius_auto*2)))), min_value=4, max_value=int(ny),
                                         help="Number of center points automatically sampled on the image. The markers are used to fit the spline as the curved helical axis.")
+                
                 r_filament = st.number_input("Template radius (Å):", value=radius_auto * apix * 1.5, max_value=int(nx) * apix,
                                             help="Radius of filament template. Used to generate the row template for determining the center points of the filament at different rows with cross-correlation.")
                 r_filament_pixel = int(r_filament / apix)
@@ -268,14 +280,14 @@ def main(args):
 
                 aspect_ratio = float(nx / ny)
                 anisotropic_ratio = 10
+
                 lp_x = st.number_input("Low-pass filter Gaussian X(Å):", value=10 * anisotropic_ratio * aspect_ratio,
                                     help="Width along the X axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for auto-sampling markers")
                 lp_y = st.number_input("Low-pass filter Gaussian Y(Å):", value=10,
                                     help="Height along the Y axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for auto-sampling markers")
                 r_filament_angst_display = st.number_input("Display radius (Å):", value=min(radius_auto * apix * 1.5 * 2, nx), max_value=int(nx) * apix,
                                             help="Radius of output straightened image.")
-
-                # TODO: add padding so the margin (width - filament diameter (= template diameter)) is larger than one template diameter
+                
                 xs, ys = sample_axis_dots(data, apix, nx, ny, r_filament_pixel,l_template_pixel, da, n_samples, lp_x, lp_y)
                 canvas_scale_factor = 1
                 point_display_radius = r_filament_pixel * canvas_scale_factor
@@ -433,7 +445,7 @@ def main(args):
                     use_plot_size = st.checkbox('Use plot size', value=False, help="If checked, the simulated helix image will use the image size of the displayed power spectra instead of the size of the input image", key="useplotsize")
             
             movie_frames = 0
-            if is_3d or show_simu:
+            if not is_hosted() and (is_3d or show_simu):
                 with st.expander(label="Tilt movie", expanded=False):
                     movie_frames = st.number_input('Movie frame #', value=0, min_value=0, max_value=1000, step=1, help="Set the number of movies frames that will be generated to show the morphing of the power spectra and phase differences across meridian images of the simulated helix at different tilt angles in the range from 0 to the value specified in the *Out-of-plane tilt (°)* input box. A value <=0 will not generate a movie")
                     if movie_frames>0:
@@ -489,6 +501,13 @@ def main(args):
             phase_diff2 = None
 
         with col3:
+            def save_params_from_query_param():
+                if 'twist' in st.query_params and 'rise' in st.query_params:
+                    st.session_state['twist'] = float(st.query_params['twist'])
+                    st.session_state['rise'] = float(st.query_params['rise'])
+                    st.session_state['pitch'] = twist2pitch(st.session_state['twist'], st.session_state['rise'])
+            button = st.button("Save twist/rise◀", on_click=save_params_from_query_param, help="Save helical parameters from plots")
+
             st.subheader("Display:")
             show_pwr = False
             show_phase = False
@@ -877,6 +896,7 @@ def main(args):
 
 @st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radius, cutoff_res_x, cutoff_res_y, show_pseudo_color, const_image_color, log_xform, lp_fraction, hp_fraction, fft_top_only):
+    import_with_auto_install("moviepy selenium".split())
     if movie_mode_params[0] == 0:
         movie_mode, data_all, noise, apix = movie_mode_params
         nz, ny, nx = data_all.shape
@@ -928,6 +948,7 @@ def create_movie(movie_frames, tilt_max, movie_mode_params, pny, pnx, mask_radiu
         progress_bar.progress((i+1)/(movie_frames+1)) 
     #from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
     #from moviepy.video.fx.all import resize
+    from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
     movie = ImageSequenceClip(image_filenames, fps=min(20, movie_frames/5))
     movie_filename = "movie.mp4"
     movie.write_videofile(movie_filename)
@@ -1057,7 +1078,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
         is_pwr_auto = None
         is_pd_auto = None
         if input_mode == 2:            
-            emdb_ids_all, methods, resolutions, emdb_helical, emdb_ids_helical = get_emdb_ids()
+            emdb_ids_all, methods, resolutions, _, emdb_ids_helical = get_emdb_ids()
             if not emdb_ids_all:
                 st.warning("failed to obtained a list of helical structures in EMDB")
                 st.stop()
@@ -1083,8 +1104,9 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                 #import random
                 emd_id_random = random.choice(emdb_ids_helical)
                 st.warning(f"EMD-{emd_id} is annotated as a {methods[emdb_ids_all.index(emd_id)]}, not helical structure according to EMDB. Please input an emd-id of helica structure (for example, 'emd-{emd_id_random}')")
+            msg = f'[EMD-{emd_id}](https://www.ebi.ac.uk/emdb/entry/EMD-{emd_id})'
             resolution = resolutions[emdb_ids_all.index(emd_id)]
-            msg = f'[EMD-{emd_id}](https://www.ebi.ac.uk/emdb/entry/EMD-{emd_id}) | resolution={resolution}Å'
+            msg += f' | resolution={resolution}Å'
             params = get_emdb_helical_parameters(emd_id)
             if params and ("twist" in params and "rise" in params and "csym" in params):                
                 msg += f"  \ntwist={params['twist']}° | rise={params['rise']}Å | c{params['csym']}"
@@ -1109,8 +1131,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                     msg_map_too_large = f"As the map size ({map_size:.1f} MB, {nx}x{ny}x{nz} voxels) is too large for the resource limit ({mem_quota():.1f} MB memory cap) of the hosting service, HILL will stop analyzing it to avoid crashing the server. Please bin/crop your map so that it is {max_map_size} MB ({max_map_dim}x{max_map_dim}x{max_map_dim} voxels) or less, and then try again. Please check the [HILL web site](https://jiang.bio.purdue.edu/hill) to learn how to run HILL on your local computer with larger memory to support large maps"
                     st.warning(msg_map_too_large)
                     st.stop()
-            with st.spinner(f'Downloading EMD-{emd_id} from {get_emdb_map_url(emd_id)}'):
-                data_all, apix_auto = get_emdb_map(emd_id)
+            data_all, apix_auto = get_emdb_map(emd_id)
             if data_all is None:
                 st.warning(f"Failed to download [EMD-{emd_id}](https://www.ebi.ac.uk/emdb/entry/EMD-{emd_id})")
                 return
@@ -1144,8 +1165,7 @@ def obtain_input_image(column, param_i=0, image_index_sync=0):
                     image_url = st.text_input(label=label, help=help, key=key_image_url).strip()
                     is_pwr_auto = image_url.find("ps.mrcs")!=-1
                     is_pd_auto = image_url.find("pd.mrcs")!=-1
-                    with st.spinner(f'Downloading {image_url.strip()}'):
-                        data_all, apix_auto = get_2d_image_from_url(image_url)
+                    data_all, apix_auto = get_2d_image_from_url(image_url)
                     is_3d_auto = guess_if_3d(filename=image_url, data=data_all)
             nz, ny, nx = data_all.shape
             if nz > 1:
@@ -1962,7 +1982,7 @@ def get_emdb_ids():
     try:
         import_with_auto_install(["pandas"])
         #import pandas as pd
-        entries_all = pd.read_csv('https://www.ebi.ac.uk/emdb/api/search/current_status:"REL"?wt=csv&download=true&fl=emdb_id,structure_determination_method,resolution,image_reconstruction_helical_delta_z_value,image_reconstruction_helical_delta_phi_value,image_reconstruction_helical_axial_symmetry_details')
+        entries_all = pd.read_csv('https://www.ebi.ac.uk/emdb/api/search/current_status:"REL"?rows=1000000&wt=csv&download=true&fl=emdb_id,structure_determination_method,resolution,image_reconstruction_helical_delta_z_value,image_reconstruction_helical_delta_phi_value,image_reconstruction_helical_axial_symmetry_details')
         entries_all["emdb_id"] = entries_all["emdb_id"].str.split("-", expand=True).iloc[:, 1].astype(str)
         emdb_ids_all = list(entries_all["emdb_id"])
         methods = list(entries_all["structure_determination_method"])
@@ -1975,6 +1995,7 @@ def get_emdb_ids():
         resolutions = []
         emdb_helical = None
         emdb_ids_helical = []
+        st.warning("WARNING: failed to obtain the list of EMDB entries")
     return emdb_ids_all, methods, resolutions, emdb_helical, emdb_ids_helical
 
 @st.cache_data(persist='disk', max_entries=1, show_spinner=False)
@@ -1998,10 +2019,13 @@ def get_emdb_map_url(emd_id: str):
 @st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def get_emdb_map(emd_id: str):
     url = get_emdb_map_url(emd_id)
-    ds = np.DataSource(None)
-    fp = ds.open(url)
+    fileobj = download_file_from_url(url)
+    if fileobj is None:
+        st.error(f"ERROR: EMD-{emd_id} map ({url}) could not be downloaded")
+        st.stop()
     #import mrcfile
-    with mrcfile.open(fp.name) as mrc:
+    with mrcfile.open(fileobj.name, mode='r+') as mrc:
+        change_mrc_axes_order(mrc, new_axes=["x", "y", "z"])
         vmin, vmax = np.min(mrc.data), np.max(mrc.data)
         data = ((mrc.data - vmin) / (vmax - vmin))
         apix = mrc.voxel_size.x.item()
@@ -2010,12 +2034,11 @@ def get_emdb_map(emd_id: str):
 @st.cache_data(persist='disk', max_entries=1, show_spinner=False)
 def get_2d_image_from_url(url):
     url_final = get_direct_url(url)    # convert cloud drive indirect url to direct url
-    ds = np.DataSource(None)
-    if not ds.exists(url_final):
+    fileobj = download_file_from_url(url_final)
+    if fileobj is None:
         st.error(f"ERROR: {url} could not be downloaded. If this url points to a cloud drive file, make sure the link is a direct download link instead of a link for preview")
         st.stop()
-    with ds.open(url) as fp:
-        data = get_2d_image_from_file(fp.name)
+    data = get_2d_image_from_file(fileobj.name)
     return data
 
 #@st.cache_data(persist='disk', max_entries=1, show_spinner=False)
@@ -2023,6 +2046,7 @@ def get_2d_image_from_file(filename):
     try:
         #import mrcfile
         with mrcfile.open(filename) as mrc:
+            change_mrc_axes_order(mrc, new_axes=["x", "y", "z"])
             data = mrc.data.astype(np.float32)
             apix = mrc.voxel_size.x.item()
     except:
@@ -2041,6 +2065,48 @@ def get_2d_image_from_file(filename):
     if len(data.shape)==2:
         data = np.expand_dims(data, axis=0)
     return data.astype(np.float32), apix
+
+def download_file_from_url(url):
+    import tempfile
+    import requests
+    try:
+        filesize = get_file_size(url)
+        local_filename = url.split('/')[-1]
+        suffix = '.' + local_filename
+        fileobj = tempfile.NamedTemporaryFile(suffix=suffix)
+        msg = f'Downloading {url}'
+        if filesize is not None:
+            msg += f" ({filesize/2**20:.1f} MB)"
+        with st.spinner(msg):
+            with requests.get(url) as r:
+                r.raise_for_status()  # Check for request success
+                fileobj.write(r.content)
+        return fileobj
+    except Exception as e:
+        return None
+
+@st.cache_data(show_spinner=False)
+def get_file_size(url):
+    import requests
+    response = requests.head(url)
+    if 'Content-Length' in response.headers:
+        file_size = int(response.headers['Content-Length'])
+        return file_size
+    else:
+        return None
+
+def change_mrc_axes_order(mrc, new_axes=["x", "y", "z"]):
+    map_axes = {"x":0, "y":1, "z":2}
+    map_axes_reverse = {0:"x", 1:"y", 2:"z"}
+    current_axes_int = [ mrc.header.mapc-1, mrc.header.mapr-1, mrc.header.maps-1 ]
+    new_axes_int = [ map_axes[a] for a in new_axes ]
+    if current_axes_int == new_axes_int: return
+    st.warning(f"The map axes order was {','.join([map_axes_reverse[a] for a in current_axes_int])}. It has now been changed to x,y,z")
+    mrc.set_data( np.moveaxis(mrc.data, current_axes_int, new_axes_int) )
+    mrc.header.mapc = map_axes[new_axes[0]]
+    mrc.header.mapr = map_axes[new_axes[1]]
+    mrc.header.maps = map_axes[new_axes[2]]
+    return
 
 def twist2pitch(twist, rise):
     if twist:
@@ -2159,13 +2225,13 @@ def set_query_params_from_session_state():
 def set_session_state_from_query_params():
     for attr in sorted(st.query_params.keys()):
         if attr in int_types:
-            st.session_state[attr] = int(st.query_params[attr][0])
+            st.session_state[attr] = int(st.query_params[attr])
         elif attr[:2]=="m_" and attr[2:].lstrip("-").isdigit():
-            st.session_state[attr] = int(st.query_params[attr][0])
+            st.session_state[attr] = int(st.query_params[attr])
         elif attr in float_types:
-            st.session_state[attr] = float(st.query_params[attr][0])
+            st.session_state[attr] = float(st.query_params[attr])
         elif attr in other_types:
-            st.session_state[attr] = st.query_params[attr][0]
+            st.session_state[attr] = st.query_params[attr]
 
 def get_direct_url(url):
     #import re
@@ -2196,19 +2262,6 @@ def set_to_periodic_range(v, min=-180, max=180):
     if tmp>=0: tmp+=min
     else: tmp+=max
     return tmp
-
-def dict_recursive_search(d, key, default=None):
-    stack = [iter(d.items())]
-    while stack:
-        for k, v in stack[-1]:
-            if k == key:          
-                return v
-            elif isinstance(v, dict):
-                stack.append(iter(v.items()))
-                break
-        else:
-            stack.pop()
-    return default
 
 @st.cache_data(persist='disk', show_spinner=False)
 def setup_anonymous_usage_tracking():
@@ -2305,6 +2358,7 @@ def qr_code(url=None, size = 8):
 def read_mrc_data(mrc):
     # read mrc data
     mrc_data = mrcfile.open(mrc, 'r+')
+    change_mrc_axes_order(mrc_data, new_axes=["x", "y", "z"])
     mrc_data.set_image_stack
 
     v_size=mrc_data.voxel_size
