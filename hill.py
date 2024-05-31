@@ -268,10 +268,10 @@ def main(args):
 
                 aspect_ratio = float(nx / ny)
                 anisotropic_ratio = 10
-                lp_x = st.number_input("Low-pass filter Gaussian X Std (Å):", value=10 * anisotropic_ratio * aspect_ratio,
-                                    help="Standard deviation along the X axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for center point sampling")
-                lp_y = st.number_input("Low-pass filter Gaussian Y Std (Å):", value=10,
-                                    help="Standard deviation along the Y axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for center point sampling")
+                lp_x = st.number_input("Low-pass filter Gaussian X(Å):", value=10 * anisotropic_ratio * aspect_ratio,
+                                    help="Width along the X axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for auto-sampling markers")
+                lp_y = st.number_input("Low-pass filter Gaussian Y(Å):", value=10,
+                                    help="Height along the Y axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for auto-sampling markers")
                 r_filament_angst_display = st.number_input("Display radius (Å):", value=min(radius_auto * apix * 1.5 * 2, nx), max_value=int(nx) * apix,
                                             help="Radius of output straightened image.")
 
@@ -643,7 +643,9 @@ def main(args):
                         if show_LL_text:
                             texts = [str(int(n)) for n in bessel_order]
                         tags = [m, bessel_order]
-                        color = ll_colors[abs(m)%len(ll_colors)]
+                        #color = ll_colors[abs(m)%len(ll_colors)]
+                        bessel_colors = ["darkblue","greenyellow"]
+                        color = [bessel_colors[n%2] for n in bessel_order]
                         for f in figs_image:
                             if show_LL_text: 
                                 text_labels = f.text(x, y, y_offset=2, text=texts, text_color=color, text_baseline="middle", text_align="center")
@@ -2484,10 +2486,15 @@ def create_fit_spline_figure(data,xs,ys,new_xs,apix):
 def fit_spline(_disp_col,data,xs,ys,apix,display=False):
     # fit spline
     ny,nx=data.shape
+    
+    # for debugging interpolation
+    # st.write(xs)
+    # xs = np.array(xs) * 0 + nx//2
+    
     tck = splrep(ys,xs,s=20)
 
-    new_xs=splev(ys,tck)
-
+    new_xs = splev(ys,tck)
+    
     if display:
         with _disp_col:
             st.write("Fitted spline:")
@@ -2495,12 +2502,13 @@ def fit_spline(_disp_col,data,xs,ys,apix,display=False):
             st.bokeh_chart(p, use_container_width=True)
     return new_xs,tck
 
-# TODO: test the straightening part by forcing using the center of a straight filament
+# test the straightening part by forcing using the center of a straight filament: works
 # TODO: check the nans in the output images
 #@st.cache_data(persist='disk', show_spinner=False)
 def filament_straighten(_disp_col,data,tck,new_xs,ys,r_filament_pixel_display,apix):
     ny,nx=data.shape
     # resample pixels
+    st.info(tck)
     y0=0
     x0=splev(y0,tck)
     for i in range(ny):
@@ -2514,6 +2522,7 @@ def filament_straighten(_disp_col,data,tck,new_xs,ys,r_filament_pixel_display,ap
             1 + orthog_dxdy * orthog_dxdy) + x0
         new_row_ys=rev_normal_x0y0(new_row_xs)
         y0=y0+np.sqrt((1-dxdy*dxdy))
+        st.info(dxdy)
         x0=splev(y0,tck)
 
     # interpolate resampled pixles
@@ -2548,21 +2557,19 @@ def filament_straighten(_disp_col,data,tck,new_xs,ys,r_filament_pixel_display,ap
         curr_y=curr_y+np.sqrt((1-dxdy*dxdy))
         curr_x=splev(curr_y,tck)
 
-
-
-    # fill the zeros on the edge again
-    data_slice_mean=np.median(data)
-    for i in range(ny):
-        for j in range(nx):
-            if new_im[i,j]==0:
-                new_im[i,j]=data_slice_mean
-            else:
-                break
-        for j in range(nx):
-            if new_im[i,-(j+1)]==0:
-                new_im[i,-(j+1)]=data_slice_mean
-            else:
-                break
+    ## fill the zeros on the edge again
+    #data_slice_mean=np.median(data)
+    #for i in range(ny):
+    #    for j in range(nx):
+    #        if new_im[i,j]==0:
+    #            new_im[i,j]=data_slice_mean
+    #        else:
+    #            break
+    #    for j in range(nx):
+    #        if new_im[i,-(j+1)]==0:
+    #            new_im[i,-(j+1)]=data_slice_mean
+    #        else:
+    #            break
     
     with _disp_col:
         st.write("Straightened image:")
