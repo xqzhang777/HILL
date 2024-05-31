@@ -415,7 +415,7 @@ def main(args):
             #    st.session_state.pitch = pitch
             #    pitch_or_twist_text.markdown(f"*(pitch = {pitch:.2f} Å)*")
 
-            csym = st.number_input('Csym', min_value=1, step=1, help="Cyclic symmetry around the helical axis", key="csym")
+            csym = st.number_input('Csym', min_value=1, value=st.session_state["csym"], step=1, help="Cyclic symmetry around the helical axis", key="csym")
             
             if input_image2: value = max(radius_auto*apix, radius_auto2*apix2)
             else: value = radius_auto*apix
