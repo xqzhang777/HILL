@@ -262,20 +262,21 @@ def main(args):
         with tab1:
             straightening_setting_tab, straightening_disp_tab_1,straightening_disp_tab_2,straightening_disp_tab_3 = st.columns((0.5,1.35,1.35,1.35),gap='small')
             with straightening_setting_tab:
+                # TODO: use data before masking 
                 data[np.isnan(data)] = 0
                 ny, nx = data.shape
                 n_samples = st.number_input("Number of auto-sampled markers:", value=max(4,int(np.round(ny/(2*radius_auto*2)))), min_value=4, max_value=int(ny),
                                         help="Number of center points automatically sampled on the image. The markers are used to fit the spline as the curved helical axis.")
                 
-                r_filament = st.number_input("Template radius (Å):", value=radius_auto * apix * 1.5, max_value=int(nx) * apix,
+                r_filament = st.number_input("Template radius (Å):", value= nx / 4 * apix, max_value=int(nx) * apix,
                                             help="Radius of filament template. Used to generate the row template for determining the center points of the filament at different rows with cross-correlation.")
                 r_filament_pixel = int(r_filament / apix)
                 
-                l_template = st.number_input("Template length (Å):", value=min(radius_auto * 2 * apix * 1.5 * 2, int(nx) * apix), max_value=int(nx) * apix,
+                l_template = st.number_input("Template length (Å):", value=min(nx / 4 * apix * 2 * 2, int(nx) * apix), max_value=int(nx) * apix,
                                             help="Length of filament template. Used to generate the row template for determining the center points of the filament at different rows with cross-correlation.")
                 l_template_pixel = int(l_template / apix)
                 
-                da = st.number_input("In-plane angular search step (°):", value=3, max_value=90,
+                da = st.number_input("In-plane angular search step (°):", value=3.0, max_value=90.0,
                                             help="In-plane angular search step for template matching to determine the center axis of the filament.")
 
                 aspect_ratio = float(nx / ny)
@@ -285,7 +286,7 @@ def main(args):
                                     help="Width along the X axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for auto-sampling markers")
                 lp_y = st.number_input("Low-pass filter Gaussian Y(Å):", value=10,
                                     help="Height along the Y axis in Fourier space of the 2D Gaussian low-pass filter. The low-pass filter is only for auto-sampling markers")
-                r_filament_angst_display = st.number_input("Display radius (Å):", value=min(radius_auto * apix * 1.5 * 2, nx), max_value=int(nx) * apix,
+                r_filament_angst_display = st.number_input("Display radius (Å):", value=float(min(radius_auto * apix * 1.5 * 2, nx)), max_value=int(nx) * apix,
                                             help="Radius of output straightened image.")
                 
                 xs, ys = sample_axis_dots(data, apix, nx, ny, r_filament_pixel,l_template_pixel, da, n_samples, lp_x, lp_y)
@@ -310,9 +311,11 @@ def main(args):
                 if drawing_mode == "Move current markers":
                     drawing_mode = "transform"
                     initial_drawing = init_canvas_json
-
-                min_data = np.min(data)
-                max_data = np.max(data)
+                    
+                data_slice_median=np.median(np.array(data)[:,[0,-1]])
+                if nx < 2 * 2 * r_filament_pixel:
+                    data = pad_to_size(data, ny, 2 * 2 * r_filament_pixel, 'constant')
+                    nx = 2 * 2 * r_filament_pixel
 
                 #import scipy.fftpack as fp
                 data_fft = fp.fftshift(fp.fft2(data))
@@ -322,7 +325,7 @@ def main(args):
                 max_k = np.max(kernel)
                 min_k = np.min(kernel)
                 kernel = (kernel - min_k) / (max_k - min_k)
-                kernel_shape = np.shape(kernel)
+                #kernel_shape = np.shape(kernel)
 
                 data_fft_filtered = np.multiply(data_fft, kernel)
                 data_filtered = fp.ifft2(fp.ifftshift(data_fft_filtered)).real
@@ -378,12 +381,12 @@ def main(args):
         col2, col3, col4 = st.columns((1.0, 0.55, 4.0), gap='small')
 
         with col2:
-            def save_params_from_query_param():
-                if 'twist' in st.query_params and 'rise' in st.query_params:
-                    st.session_state['twist'] = float(st.query_params['twist'])
-                    st.session_state['rise'] = float(st.query_params['rise'])
-                    st.session_state['pitch'] = twist2pitch(st.session_state['twist'], st.session_state['rise'])
-            button = st.button("Save twist/rise↶", on_click=save_params_from_query_param, help="Save helical parameters from plots")
+            #def save_params_from_query_param():
+            #    if 'twist' in st.query_params and 'rise' in st.query_params:
+            #        st.session_state['twist'] = float(st.query_params['twist'])
+            #        st.session_state['rise'] = float(st.query_params['rise'])
+            #        st.session_state['pitch'] = twist2pitch(st.session_state['twist'], st.session_state['rise'])
+            #button = st.button("Save twist/rise↶", on_click=save_params_from_query_param, help="Save helical parameters from plots")
 
             #pitch_or_twist_choices = ["pitch", "twist"]
             #pitch_or_twist = st.radio(label="Choose pitch or twist mode", options=pitch_or_twist_choices, index=0, label_visibility="collapsed", horizontal=True)
@@ -563,7 +566,7 @@ def main(args):
                     m_max_auto = int(np.floor(np.abs(rise/cutoff_res_y)))+3
                     m_max = int(st.number_input(label=f"Max=", min_value=1, value=m_max_auto, step=1, help="Maximal number of layer line groups to show", key="m_max"))
                     m_groups = compute_layer_line_positions(twist=twist, rise=rise, csym=csym, radius=helical_radius, tilt=tilt, cutoff_res=cutoff_res_y, m_max=m_max)
-                    ng = len(m_groups)
+                    #ng = len(m_groups)
                     show_choices = {}
                     lgs = sorted(m_groups.keys())[::-1]
                     for lgi, lg in enumerate(lgs):
@@ -852,15 +855,15 @@ def main(args):
                     #from bokeh.layouts import column
                     figs[0].toolbar_location="right"
                     figs_grid = column(children=[[spinner_twist, spinner_pitch, spinner_rise],[slider_twist, slider_pitch, slider_rise], figs[0]])
-                    override_height = pny+180
+                    #override_height = pny+180
                 else:
                     #from bokeh.layouts import layout
                     figs_row = gridplot(children=[figs], toolbar_location='right')
                     figs_grid = layout(children=[[spinner_twist, spinner_pitch, spinner_rise],[slider_twist, slider_pitch, slider_rise], figs_row])
-                    override_height = pny+120
+                    #override_height = pny+120
             else:
                 figs_grid = gridplot(children=[figs], toolbar_location='right')
-                override_height = pny+120
+                #override_height = pny+120
 
             st.bokeh_chart(figs_grid, use_container_width=False)                     
 
@@ -1979,6 +1982,7 @@ def get_2d_image_from_uploaded_file(fileobj):
 
 @st.cache_data(show_spinner=False, ttl=24*60*60.) # refresh every day
 def get_emdb_ids():
+    return
     try:
         import_with_auto_install(["pandas"])
         #import pandas as pd
@@ -2390,13 +2394,13 @@ def gen_filament_template(length, diameter, angle=0, center_offset=(0, 0), image
     return d
 
 #@st.cache_data(persist='disk', show_spinner=False)
-def pad_to_size(array, ny, nx):
+def pad_to_size(array, ny, nx, mode='constant'):
     h, w = array.shape
     a = (ny - h) // 2
     aa = ny - a - h
     b = (nx - w) // 2
     bb = nx - b - w
-    return np.pad(array, pad_width=((a, aa), (b, bb)), mode='constant')
+    return np.pad(array, pad_width=((a, aa), (b, bb)), mode=mode)
 
 #@st.cache_data(persist='disk', show_spinner=False)
 def filament_transform_fft(image, filament_template, angle_step):
@@ -2428,7 +2432,7 @@ def filament_transform_fft(image, filament_template, angle_step):
 #@st.cache_data(persist='disk', show_spinner=False)
 def sample_axis_dots(data, apix, nx, ny, r_filament_pixel, l_template_pixel, da, num_samples, lp_x, lp_y):
     # fill in potential black backgrounds with helical boxer
-    #data_slice_median=np.median(data)
+    data_slice_median=np.median(np.array(data)[:,[0,-1]])
     #for i in range(ny):
     #    for j in range(nx):
     #        if data[i,j]==0:
@@ -2442,7 +2446,7 @@ def sample_axis_dots(data, apix, nx, ny, r_filament_pixel, l_template_pixel, da,
     #            break
     
     if nx < 2 * 2 * r_filament_pixel:
-        data = pad_to_size(data, 2 * 2 * r_filament_pixel,ny)
+        data = pad_to_size(data, ny, 2 * 2 * r_filament_pixel, 'constant')
         nx = 2 * 2 * r_filament_pixel
 
 
@@ -2454,7 +2458,7 @@ def sample_axis_dots(data, apix, nx, ny, r_filament_pixel, l_template_pixel, da,
     max_k=np.max(kernel)
     min_k=np.min(kernel)
     kernel=(kernel-min_k)/(max_k-min_k)
-    kernel_shape=np.shape(kernel)
+    #kernel_shape=np.shape(kernel)
 
     data_fft_filtered=np.multiply(data_fft,kernel)
 
@@ -2473,23 +2477,23 @@ def sample_axis_dots(data, apix, nx, ny, r_filament_pixel, l_template_pixel, da,
 
     filament_template = gen_filament_template(length=length, diameter=diameter, image_size=(np.min([template_size,ny]), np.min([template_size,nx])), apix=apix, order=2)
     filament_transform_method = filament_transform_fft
-    cc, ang = filament_transform_method(image=data_filtered, filament_template=filament_template, angle_step=3)
-    cc_vmin = cc.min()
-    cc_vmax = cc.max()
-    cc = (cc_vmax-cc)/(cc_vmax-cc_vmin)
-    cc_template = np.repeat([np.mean(cc,axis=0)],repeats=length,axis=0)
-    cc, ang = filament_transform_method(image=cc, filament_template=cc_template, angle_step=da)
+    cc, ang = filament_transform_method(image=data_filtered, filament_template=filament_template, angle_step=da)
+    #cc_vmin = cc.min()
+    #cc_vmax = cc.max()
+    #cc = (cc_vmax-cc)/(cc_vmax-cc_vmin)
+    #cc_template = np.repeat([np.mean(cc,axis=0)],repeats=length,axis=0)
+    #cc, ang = filament_transform_method(image=cc, filament_template=cc_template, angle_step=da)
 
     ####################################################################
     # center point detection
-    dots=np.zeros(np.shape(data))
+    #dots=np.zeros(np.shape(data))
     centers=cc.argmax(axis=1)
 
     xs=[]
     ys=[]
     row_offset=int(ny/num_samples/2)
     #num_samples=10
-    for i in range(row_offset,ny,int(ny/num_samples)):
+    for i in range(0,ny,int(ny/(num_samples-1))):
         xs.append(centers[i])
         ys.append(i)
     #xs.append(centers[-1])
@@ -2509,7 +2513,7 @@ def create_fit_spline_figure(data,xs,ys,new_xs,apix):
 
     aspect_ratio = w/h
     tools = 'box_zoom,crosshair,pan,reset,save,wheel_zoom'
-    fig = figure(x_range=(-w//2*apix, (w//2-1)*apix), y_range=(-h//2*apix, (h//2-1)*apix), 
+    fig = figure(x_range=(-w//2*apix, (w//2-1)*apix), y_range=(-h//2*apix,(h//2-1)*apix), 
         tools=tools, aspect_ratio=aspect_ratio)
     fig.grid.visible = False
     fig.axis.visible = False
@@ -2539,7 +2543,7 @@ def create_fit_spline_figure(data,xs,ys,new_xs,apix):
 #@st.cache_data(persist='disk', show_spinner=False)
 def fit_spline(_disp_col,data,xs,ys,apix,display=False):
     # fit spline
-    ny,nx=data.shape
+    #ny,nx=data.shape
     
     # for debugging interpolation
     # st.write(xs)
@@ -2568,8 +2572,8 @@ def filament_straighten(_disp_col,data,tck,new_xs,ys,r_filament_pixel_display,ap
     for i in range(ny):
         dxdy=splev(y0,tck,der=1)
         orthog_dxdy=-(1.0/dxdy)
-        tangent_x0y0=lambda y: dxdy*y + (x0-dxdy*y0)
-        normal_x0y0=lambda y: orthog_dxdy*y + (x0-orthog_dxdy*y0)
+        #tangent_x0y0=lambda y: dxdy*y + (x0-dxdy*y0)
+        #normal_x0y0=lambda y: orthog_dxdy*y + (x0-orthog_dxdy*y0)
         rev_normal_x0y0=lambda x: (x+orthog_dxdy*y0-x0)/orthog_dxdy
         #new_row_xs=np.arange(-int(nx/2),int(nx/2),1).T*np.abs(orthog_dxdy)/np.sqrt(1+orthog_dxdy*orthog_dxdy)+x0
         new_row_xs = np.arange(-int(r_filament_pixel_display), int(r_filament_pixel_display), 1).T * np.abs(orthog_dxdy) / np.sqrt(
